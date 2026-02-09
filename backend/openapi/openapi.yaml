@@ -1,0 +1,224 @@
+openapi: 3.1.0
+info:
+  title: Chat API
+  version: 0.1.0
+  description: |
+    MVP API for auth, model discovery, chat persistence, and SSE streaming responses.
+servers:
+  - url: https://api.chat.sanetomore.com
+    description: Production
+  - url: http://localhost:8080
+    description: Local
+paths:
+  /healthz:
+    get:
+      summary: Health check
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
+  /v1/auth/google:
+    post:
+      summary: Exchange Google ID token for a session cookie
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [idToken]
+              properties:
+                idToken:
+                  type: string
+      responses:
+        '200':
+          description: Authenticated
+          headers:
+            Set-Cookie:
+              schema:
+                type: string
+              description: HTTP-only session cookie
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        '403':
+          $ref: '#/components/responses/Error'
+  /v1/auth/me:
+    get:
+      summary: Current authenticated user
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AuthResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/auth/logout:
+    post:
+      summary: Revoke current session cookie
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Session revoked
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [success]
+                properties:
+                  success:
+                    type: boolean
+                    example: true
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/models:
+    get:
+      summary: List model options
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Available models
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [models]
+                properties:
+                  models:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/Model'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/chat/messages:
+    post:
+      summary: Send a chat message and stream assistant tokens (SSE)
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ChatMessageRequest'
+      responses:
+        '200':
+          description: SSE stream of assistant output events
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE events with `event: message` and JSON payload in `data:`
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+components:
+  securitySchemes:
+    SessionCookie:
+      type: apiKey
+      in: cookie
+      name: chat_session
+  responses:
+    Error:
+      description: Error envelope
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorEnvelope'
+  schemas:
+    User:
+      type: object
+      required: [id, email, googleSub, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        email:
+          type: string
+          format: email
+        name:
+          type: string
+        avatarUrl:
+          type: string
+        googleSub:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    AuthResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: '#/components/schemas/User'
+    Model:
+      type: object
+      required:
+        [id, name, provider, contextWindow, promptPriceMicrosUsd, outputPriceMicrosUsd, curated]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        provider:
+          type: string
+        contextWindow:
+          type: integer
+        promptPriceMicrosUsd:
+          type: integer
+        outputPriceMicrosUsd:
+          type: integer
+        curated:
+          type: boolean
+    ChatMessageRequest:
+      type: object
+      required: [message]
+      properties:
+        conversationId:
+          type: string
+        message:
+          type: string
+        modelId:
+          type: string
+        grounding:
+          type: boolean
+          default: true
+        deepResearch:
+          type: boolean
+          default: false
+        fileIds:
+          type: array
+          items:
+            type: string
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string

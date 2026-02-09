@@ -1,0 +1,11 @@
+# Env
+backend/.env
+frontend/.env
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+
+# OS
+.DS_Store

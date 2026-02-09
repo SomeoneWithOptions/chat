@@ -2,7 +2,4 @@
 
 Long-lived project documentation.
 
-Planned contents:
-- architecture notes
-- operational runbooks
-- ADRs
+- `local-development.md`: local setup and runbook.
