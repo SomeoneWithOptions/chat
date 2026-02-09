@@ -30,7 +30,11 @@ Set at minimum:
 
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (required for `libsql://` URL)
-- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
+
+For temporary auth bypass while testing app flows:
+
+- `AUTH_REQUIRED=false`
 
 For local dev-only login flow:
 

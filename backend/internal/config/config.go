@@ -24,6 +24,7 @@ type Config struct {
 	Environment                string
 	FrontendOrigin             string
 	AllowedOrigins             []string
+	AuthRequired               bool
 	CookieSecure               bool
 	SessionCookieName          string
 	SessionTTL                 time.Duration
@@ -46,6 +47,7 @@ func Load() (Config, error) {
 		Port:                       envOrDefault("PORT", defaultPort),
 		Environment:                envOrDefault("APP_ENV", "development"),
 		FrontendOrigin:             envOrDefault("FRONTEND_ORIGIN", defaultFrontendOrigin),
+		AuthRequired:               boolOrDefault("AUTH_REQUIRED", true),
 		CookieSecure:               boolOrDefault("COOKIE_SECURE", false),
 		SessionCookieName:          envOrDefault("SESSION_COOKIE_NAME", defaultSessionCookieName),
 		GoogleClientID:             strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
@@ -82,7 +84,7 @@ func Load() (Config, error) {
 	if strings.HasPrefix(cfg.TursoDatabaseURL, "libsql://") && cfg.TursoAuthToken == "" {
 		return Config{}, errors.New("TURSO_AUTH_TOKEN is required for libsql:// URLs")
 	}
-	if !cfg.InsecureSkipGoogleVerify && cfg.GoogleClientID == "" {
+	if cfg.AuthRequired && !cfg.InsecureSkipGoogleVerify && cfg.GoogleClientID == "" {
 		return Config{}, errors.New("GOOGLE_CLIENT_ID is required unless AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true")
 	}
 

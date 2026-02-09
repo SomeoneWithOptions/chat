@@ -53,6 +53,17 @@ func TestLoadAllowsMissingGoogleClientIDInInsecureMode(t *testing.T) {
 	}
 }
 
+func TestLoadAllowsMissingGoogleClientIDWhenAuthDisabled(t *testing.T) {
+	t.Setenv("TURSO_DATABASE_URL", "file:local.db")
+	t.Setenv("GOOGLE_CLIENT_ID", "")
+	t.Setenv("AUTH_REQUIRED", "false")
+	t.Setenv("AUTH_INSECURE_SKIP_GOOGLE_VERIFY", "false")
+
+	if _, err := Load(); err != nil {
+		t.Fatalf("expected auth-disabled mode to load without GOOGLE_CLIENT_ID: %v", err)
+	}
+}
+
 func unsetIfSet(t *testing.T, key string) {
 	t.Helper()
 	if _, ok := os.LookupEnv(key); ok {

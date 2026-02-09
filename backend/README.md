@@ -25,11 +25,15 @@ cp backend/.env.example backend/.env
 
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (if using `libsql://...` URL)
-- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
 
 For local auth testing without Google verification, set:
 
 - `AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true`
+
+For temporary anonymous testing, set:
+
+- `AUTH_REQUIRED=false`
 
 3. Start server:
 

@@ -39,6 +39,11 @@ type authGoogleRequest struct {
 }
 
 func (h Handler) AuthGoogle(w http.ResponseWriter, r *http.Request) {
+	if !h.cfg.AuthRequired {
+		writeJSON(w, http.StatusOK, map[string]any{"user": anonymousUser()})
+		return
+	}
+
 	var req authGoogleRequest
 	if err := decodeJSON(r, &req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
@@ -74,6 +79,10 @@ func (h Handler) AuthGoogle(w http.ResponseWriter, r *http.Request) {
 func (h Handler) AuthMe(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUserFromContext(r.Context())
 	if !ok {
+		if !h.cfg.AuthRequired {
+			writeJSON(w, http.StatusOK, map[string]any{"user": anonymousUser()})
+			return
+		}
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
 		return
 	}
@@ -194,6 +203,11 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 func (h Handler) RequireSession(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !h.cfg.AuthRequired {
+			next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), sessionUserContextKey, anonymousUser())))
+			return
+		}
+
 		rawToken, err := readSessionCookie(r, h.cfg.SessionCookieName)
 		if err != nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid session")
@@ -277,4 +291,15 @@ func fallback(value, other string) string {
 		return other
 	}
 	return strings.TrimSpace(value)
+}
+
+func anonymousUser() session.User {
+	return session.User{
+		ID:        "anonymous-user",
+		Email:     "anonymous@chat.local",
+		Name:      "Anonymous",
+		GoogleSub: "anonymous",
+		CreatedAt: "1970-01-01T00:00:00Z",
+		UpdatedAt: "1970-01-01T00:00:00Z",
+	}
 }
