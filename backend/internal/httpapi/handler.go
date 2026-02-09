@@ -26,19 +26,50 @@ type Handler struct {
 	sessions   session.Store
 	verifier   auth.Verifier
 	openrouter chatStreamer
+	models     modelCataloger
 }
 
 type chatStreamer interface {
 	StreamChatCompletion(ctx context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error
 }
 
+type modelCataloger interface {
+	ListModels(ctx context.Context) ([]openrouter.Model, error)
+}
+
 func NewHandler(cfg config.Config, db *sql.DB, sessions session.Store, verifier auth.Verifier, streamer chatStreamer) Handler {
-	return Handler{cfg: cfg, db: db, sessions: sessions, verifier: verifier, openrouter: streamer}
+	var catalog modelCataloger
+	if source, ok := streamer.(modelCataloger); ok {
+		catalog = source
+	}
+	return Handler{cfg: cfg, db: db, sessions: sessions, verifier: verifier, openrouter: streamer, models: catalog}
 }
 
 type contextKey string
 
 const sessionUserContextKey contextKey = "session_user"
+
+type modelResponse struct {
+	ID              string `json:"id"`
+	Name            string `json:"name"`
+	Provider        string `json:"provider"`
+	ContextWindow   int    `json:"contextWindow"`
+	PromptPriceMUSD int    `json:"promptPriceMicrosUsd"`
+	OutputPriceMUSD int    `json:"outputPriceMicrosUsd"`
+	Curated         bool   `json:"curated"`
+}
+
+type modelPreferencesResponse struct {
+	LastUsedModelID             string `json:"lastUsedModelId"`
+	LastUsedDeepResearchModelID string `json:"lastUsedDeepResearchModelId"`
+}
+
+type listModelsResponse struct {
+	Models      []modelResponse          `json:"models"`
+	Curated     []modelResponse          `json:"curatedModels"`
+	Favorites   []string                 `json:"favorites"`
+	Preferences modelPreferencesResponse `json:"preferences"`
+}
 
 func (h Handler) Healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
@@ -109,38 +140,24 @@ func (h Handler) AuthLogout(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
-	type modelResponse struct {
-		ID              string `json:"id"`
-		Name            string `json:"name"`
-		Provider        string `json:"provider"`
-		ContextWindow   int    `json:"contextWindow"`
-		PromptPriceMUSD int    `json:"promptPriceMicrosUsd"`
-		OutputPriceMUSD int    `json:"outputPriceMicrosUsd"`
-		Curated         bool   `json:"curated"`
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
 	}
 
-	rows, err := h.db.QueryContext(r.Context(), `
-SELECT id, display_name, provider, context_window, prompt_price_microusd, completion_price_microusd, curated
-FROM models
-ORDER BY curated DESC, updated_at DESC
-LIMIT 200;
-`)
+	_ = h.syncModelsFromProvider(r.Context())
+
+	models, err := h.listActiveModels(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to read models")
 		return
 	}
-	defer rows.Close()
-
-	models := make([]modelResponse, 0, 16)
-	for rows.Next() {
-		var m modelResponse
-		if err := rows.Scan(&m.ID, &m.Name, &m.Provider, &m.ContextWindow, &m.PromptPriceMUSD, &m.OutputPriceMUSD, &m.Curated); err != nil {
-			writeError(w, http.StatusInternalServerError, "db_error", "failed to parse models")
-			return
-		}
-		models = append(models, m)
-	}
-
 	if len(models) == 0 {
 		models = append(models, modelResponse{
 			ID:              h.cfg.OpenRouterDefaultModel,
@@ -153,7 +170,196 @@ LIMIT 200;
 		})
 	}
 
-	writeJSON(w, http.StatusOK, map[string]any{"models": models})
+	favorites, err := h.listUserModelFavorites(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to read favorites")
+		return
+	}
+
+	preferences, err := h.readUserModelPreferences(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to read preferences")
+		return
+	}
+
+	allowed := make(map[string]struct{}, len(models))
+	curated := make([]modelResponse, 0, len(models))
+	for _, model := range models {
+		allowed[model.ID] = struct{}{}
+		if model.Curated {
+			curated = append(curated, model)
+		}
+	}
+
+	preferences = normalizeModelPreferences(preferences, allowed, h.cfg.OpenRouterDefaultModel)
+	filteredFavorites := filterKnownModelIDs(favorites, allowed)
+
+	writeJSON(w, http.StatusOK, listModelsResponse{
+		Models:      models,
+		Curated:     curated,
+		Favorites:   filteredFavorites,
+		Preferences: preferences,
+	})
+}
+
+func (h Handler) listActiveModels(ctx context.Context) ([]modelResponse, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT id, display_name, provider, context_window, prompt_price_microusd, completion_price_microusd, curated
+FROM models
+WHERE is_active = 1
+ORDER BY curated DESC, updated_at DESC
+LIMIT 500;
+`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	models := make([]modelResponse, 0, 16)
+	for rows.Next() {
+		var m modelResponse
+		if err := rows.Scan(&m.ID, &m.Name, &m.Provider, &m.ContextWindow, &m.PromptPriceMUSD, &m.OutputPriceMUSD, &m.Curated); err != nil {
+			return nil, err
+		}
+		models = append(models, m)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return models, nil
+}
+
+func (h Handler) syncModelsFromProvider(ctx context.Context) error {
+	if h.models == nil {
+		return nil
+	}
+
+	models, err := h.models.ListModels(ctx)
+	if err != nil {
+		return err
+	}
+	if len(models) == 0 {
+		return nil
+	}
+
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, model := range models {
+		if strings.TrimSpace(model.ID) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO models (
+  id,
+  provider,
+  display_name,
+  context_window,
+  prompt_price_microusd,
+  completion_price_microusd,
+  curated,
+  is_active
+)
+VALUES (?, 'openrouter', ?, ?, ?, ?, 0, 1)
+ON CONFLICT(id) DO UPDATE SET
+  provider = excluded.provider,
+  display_name = excluded.display_name,
+  context_window = excluded.context_window,
+  prompt_price_microusd = excluded.prompt_price_microusd,
+  completion_price_microusd = excluded.completion_price_microusd,
+  is_active = 1,
+  updated_at = CURRENT_TIMESTAMP;
+`, model.ID, model.Name, model.ContextWindow, model.PromptPriceMicrosUSD, model.CompletionPriceMicrosUSD); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+type updateModelPreferencesRequest struct {
+	Mode    string `json:"mode"`
+	ModelID string `json:"modelId"`
+}
+
+func (h Handler) UpdateModelPreferences(w http.ResponseWriter, r *http.Request) {
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
+
+	var req updateModelPreferencesRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	mode := strings.TrimSpace(req.Mode)
+	if mode != "chat" && mode != "deep_research" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research")
+		return
+	}
+
+	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
+	preferences, err := h.persistModelSelection(r.Context(), user.ID, mode, modelID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to persist preferences")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"preferences": preferences})
+}
+
+type updateModelFavoriteRequest struct {
+	ModelID  string `json:"modelId"`
+	Favorite bool   `json:"favorite"`
+}
+
+func (h Handler) UpdateModelFavorite(w http.ResponseWriter, r *http.Request) {
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
+
+	var req updateModelFavoriteRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	modelID := strings.TrimSpace(req.ModelID)
+	if modelID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "modelId is required")
+		return
+	}
+
+	if err := h.setModelFavorite(r.Context(), user.ID, modelID, req.Favorite); err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to update favorite")
+		return
+	}
+
+	favorites, err := h.listUserModelFavorites(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to read favorites")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"favorites": favorites})
 }
 
 type createConversationRequest struct {
@@ -435,6 +641,15 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
+	mode := "chat"
+	if deepResearch {
+		mode = "deep_research"
+	}
+	if _, err := h.persistModelSelection(r.Context(), user.ID, mode, modelID); err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to persist model preferences")
+		return
+	}
+
 	conversationID, err := h.resolveConversationID(r.Context(), user.ID, req.ConversationID, req.Message)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -704,6 +919,204 @@ WHERE id = ? AND user_id = ?;
 	return tx.Commit()
 }
 
+func (h Handler) persistModelSelection(ctx context.Context, userID, mode, modelID string) (modelPreferencesResponse, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return modelPreferencesResponse{}, err
+	}
+	defer tx.Rollback()
+
+	resolvedModelID, err := ensureModelExists(ctx, tx, modelID)
+	if err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	var lastUsedModelID sql.NullString
+	var lastUsedDeepResearchModelID sql.NullString
+	err = tx.QueryRowContext(ctx, `
+SELECT last_used_model_id, last_used_deep_research_model_id
+FROM user_model_preferences
+WHERE user_id = ?
+LIMIT 1;
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return modelPreferencesResponse{}, err
+	}
+
+	preferences := modelPreferencesResponse{
+		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
+		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
+	}
+
+	switch mode {
+	case "chat":
+		preferences.LastUsedModelID = resolvedModelID
+		if preferences.LastUsedDeepResearchModelID == "" {
+			preferences.LastUsedDeepResearchModelID = resolvedModelID
+		}
+	case "deep_research":
+		preferences.LastUsedDeepResearchModelID = resolvedModelID
+		if preferences.LastUsedModelID == "" {
+			preferences.LastUsedModelID = resolvedModelID
+		}
+	}
+
+	if err := upsertUserModelPreferences(ctx, tx, userID, preferences); err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	return preferences, nil
+}
+
+func (h Handler) setModelFavorite(ctx context.Context, userID, modelID string, favorite bool) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	resolvedModelID, err := ensureModelExists(ctx, tx, modelID)
+	if err != nil {
+		return err
+	}
+
+	if favorite {
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO user_model_favorites (user_id, model_id)
+VALUES (?, ?)
+ON CONFLICT(user_id, model_id) DO NOTHING;
+`, userID, resolvedModelID); err != nil {
+			return err
+		}
+	} else {
+		if _, err := tx.ExecContext(ctx, `
+DELETE FROM user_model_favorites
+WHERE user_id = ? AND model_id = ?;
+`, userID, resolvedModelID); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func (h Handler) listUserModelFavorites(ctx context.Context, userID string) ([]string, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT f.model_id
+FROM user_model_favorites f
+JOIN models m ON m.id = f.model_id
+WHERE f.user_id = ?
+  AND m.is_active = 1
+ORDER BY f.created_at DESC, f.model_id ASC;
+`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	favorites := make([]string, 0, 16)
+	for rows.Next() {
+		var modelID string
+		if err := rows.Scan(&modelID); err != nil {
+			return nil, err
+		}
+		favorites = append(favorites, modelID)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return favorites, nil
+}
+
+func (h Handler) readUserModelPreferences(ctx context.Context, userID string) (modelPreferencesResponse, error) {
+	var lastUsedModelID sql.NullString
+	var lastUsedDeepResearchModelID sql.NullString
+	err := h.db.QueryRowContext(ctx, `
+SELECT last_used_model_id, last_used_deep_research_model_id
+FROM user_model_preferences
+WHERE user_id = ?
+LIMIT 1;
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return modelPreferencesResponse{}, nil
+	}
+	if err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	return modelPreferencesResponse{
+		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
+		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
+	}, nil
+}
+
+func upsertUserModelPreferences(ctx context.Context, tx *sql.Tx, userID string, preferences modelPreferencesResponse) error {
+	normalModelID := nullableString(preferences.LastUsedModelID)
+	deepModelID := nullableString(preferences.LastUsedDeepResearchModelID)
+
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO user_model_preferences (
+  user_id,
+  last_used_model_id,
+  last_used_deep_research_model_id,
+  updated_at
+)
+VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+ON CONFLICT(user_id) DO UPDATE SET
+  last_used_model_id = excluded.last_used_model_id,
+  last_used_deep_research_model_id = excluded.last_used_deep_research_model_id,
+  updated_at = CURRENT_TIMESTAMP;
+`, userID, normalModelID, deepModelID)
+	return err
+}
+
+func ensureModelExists(ctx context.Context, tx *sql.Tx, rawModelID string) (string, error) {
+	modelID := strings.TrimSpace(rawModelID)
+	if modelID == "" {
+		return "", nil
+	}
+
+	var existingID string
+	err := tx.QueryRowContext(ctx, `
+SELECT id
+FROM models
+WHERE id = ?
+LIMIT 1;
+`, modelID).Scan(&existingID)
+	if err == nil {
+		return existingID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+
+	if _, err := tx.ExecContext(ctx, `
+INSERT INTO models (
+  id,
+  provider,
+  display_name,
+  context_window,
+  prompt_price_microusd,
+  completion_price_microusd,
+  curated,
+  is_active
+)
+VALUES (?, 'openrouter', ?, 0, 0, 0, 0, 1)
+ON CONFLICT(id) DO UPDATE SET
+  is_active = 1,
+  updated_at = CURRENT_TIMESTAMP;
+`, modelID, modelID); err != nil {
+		return "", err
+	}
+
+	return modelID, nil
+}
+
 func readSessionCookie(r *http.Request, name string) (string, error) {
 	cookie, err := r.Cookie(name)
 	if err != nil {
@@ -751,6 +1164,51 @@ LIMIT 1;
 		return sql.NullString{}, err
 	}
 	return sql.NullString{String: existingID, Valid: true}, nil
+}
+
+func normalizeModelPreferences(preferences modelPreferencesResponse, available map[string]struct{}, defaultModelID string) modelPreferencesResponse {
+	normalizedDefault := strings.TrimSpace(defaultModelID)
+
+	if _, ok := available[preferences.LastUsedModelID]; !ok {
+		preferences.LastUsedModelID = normalizedDefault
+	}
+	if preferences.LastUsedModelID == "" {
+		preferences.LastUsedModelID = normalizedDefault
+	}
+
+	if _, ok := available[preferences.LastUsedDeepResearchModelID]; !ok {
+		preferences.LastUsedDeepResearchModelID = preferences.LastUsedModelID
+	}
+	if preferences.LastUsedDeepResearchModelID == "" {
+		preferences.LastUsedDeepResearchModelID = preferences.LastUsedModelID
+	}
+
+	return preferences
+}
+
+func filterKnownModelIDs(modelIDs []string, available map[string]struct{}) []string {
+	if len(modelIDs) == 0 {
+		return make([]string, 0)
+	}
+
+	filtered := make([]string, 0, len(modelIDs))
+	for _, modelID := range modelIDs {
+		if _, ok := available[modelID]; ok {
+			filtered = append(filtered, modelID)
+		}
+	}
+	return filtered
+}
+
+func nullableString(raw string) sql.NullString {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return sql.NullString{}
+	}
+	return sql.NullString{
+		String: trimmed,
+		Valid:  true,
+	}
 }
 
 func boolToInt(value bool) int {

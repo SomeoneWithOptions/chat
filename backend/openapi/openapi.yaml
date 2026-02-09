@@ -113,13 +113,51 @@ paths:
           content:
             application/json:
               schema:
-                type: object
-                required: [models]
-                properties:
-                  models:
-                    type: array
-                    items:
-                      $ref: '#/components/schemas/Model'
+                $ref: '#/components/schemas/ListModelsResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/models/preferences:
+    put:
+      summary: Update model preference for chat or deep research mode
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateModelPreferencesRequest'
+      responses:
+        '200':
+          description: Updated model preferences
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateModelPreferencesResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/models/favorites:
+    put:
+      summary: Add or remove a model favorite for the current user
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateModelFavoriteRequest'
+      responses:
+        '200':
+          description: Updated favorite model ids
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateModelFavoriteResponse'
+        '400':
+          $ref: '#/components/responses/Error'
         '401':
           $ref: '#/components/responses/Error'
   /v1/conversations:
@@ -299,6 +337,63 @@ components:
           type: integer
         curated:
           type: boolean
+    ModelPreferences:
+      type: object
+      required: [lastUsedModelId, lastUsedDeepResearchModelId]
+      properties:
+        lastUsedModelId:
+          type: string
+        lastUsedDeepResearchModelId:
+          type: string
+    ListModelsResponse:
+      type: object
+      required: [models, curatedModels, favorites, preferences]
+      properties:
+        models:
+          type: array
+          items:
+            $ref: '#/components/schemas/Model'
+        curatedModels:
+          type: array
+          items:
+            $ref: '#/components/schemas/Model'
+        favorites:
+          type: array
+          items:
+            type: string
+        preferences:
+          $ref: '#/components/schemas/ModelPreferences'
+    UpdateModelPreferencesRequest:
+      type: object
+      required: [mode, modelId]
+      properties:
+        mode:
+          type: string
+          enum: [chat, deep_research]
+        modelId:
+          type: string
+    UpdateModelPreferencesResponse:
+      type: object
+      required: [preferences]
+      properties:
+        preferences:
+          $ref: '#/components/schemas/ModelPreferences'
+    UpdateModelFavoriteRequest:
+      type: object
+      required: [modelId, favorite]
+      properties:
+        modelId:
+          type: string
+        favorite:
+          type: boolean
+    UpdateModelFavoriteResponse:
+      type: object
+      required: [favorites]
+      properties:
+        favorites:
+          type: array
+          items:
+            type: string
     Conversation:
       type: object
       required: [id, title, createdAt, updatedAt]

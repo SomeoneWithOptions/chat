@@ -343,6 +343,209 @@ func TestListConversationMessagesScopedByUser(t *testing.T) {
 	}
 }
 
+func TestListModelsIncludesCatalogFavoritesAndPreferences(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		catalog: []openrouter.Model{
+			{
+				ID:                       "openai/gpt-4o-mini",
+				Name:                     "GPT-4o mini",
+				ContextWindow:            128000,
+				PromptPriceMicrosUSD:     150,
+				CompletionPriceMicrosUSD: 600,
+			},
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	if _, err := db.Exec(`
+INSERT INTO models (id, provider, display_name, context_window, prompt_price_microusd, completion_price_microusd, curated, is_active)
+VALUES ('anthropic/claude-3.5-haiku', 'openrouter', 'Claude Haiku', 200000, 800, 1200, 0, 1);
+`); err != nil {
+		t.Fatalf("seed additional model: %v", err)
+	}
+
+	if _, err := db.Exec(`
+INSERT INTO user_model_favorites (user_id, model_id)
+VALUES (?, ?);
+`, user.ID, "anthropic/claude-3.5-haiku"); err != nil {
+		t.Fatalf("seed favorite: %v", err)
+	}
+
+	if _, err := db.Exec(`
+INSERT INTO user_model_preferences (user_id, last_used_model_id, last_used_deep_research_model_id)
+VALUES (?, ?, ?);
+`, user.ID, "anthropic/claude-3.5-haiku", "openrouter/free"); err != nil {
+		t.Fatalf("seed preferences: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ListModels(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var payload listModelsResponse
+	decodeJSONBody(t, resp, &payload)
+
+	if len(payload.Models) < 3 {
+		t.Fatalf("expected synced models to be returned, got %d", len(payload.Models))
+	}
+
+	foundSynced := false
+	for _, model := range payload.Models {
+		if model.ID == "openai/gpt-4o-mini" {
+			foundSynced = true
+			break
+		}
+	}
+	if !foundSynced {
+		t.Fatalf("expected synced model in response: %+v", payload.Models)
+	}
+
+	if len(payload.Curated) == 0 || payload.Curated[0].ID != "openrouter/free" {
+		t.Fatalf("expected curated list to include default seeded model, got %+v", payload.Curated)
+	}
+
+	if len(payload.Favorites) != 1 || payload.Favorites[0] != "anthropic/claude-3.5-haiku" {
+		t.Fatalf("unexpected favorites: %+v", payload.Favorites)
+	}
+
+	if payload.Preferences.LastUsedModelID != "anthropic/claude-3.5-haiku" {
+		t.Fatalf("unexpected last used model id: %q", payload.Preferences.LastUsedModelID)
+	}
+	if payload.Preferences.LastUsedDeepResearchModelID != "openrouter/free" {
+		t.Fatalf("unexpected last used deep research model id: %q", payload.Preferences.LastUsedDeepResearchModelID)
+	}
+}
+
+func TestUpdateModelFavoritePersistsFavorite(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	addReq := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/models/favorites",
+		strings.NewReader(`{"modelId":"openrouter/free","favorite":true}`),
+	)
+	addReq = requestWithSessionUser(addReq, user)
+	addResp := httptest.NewRecorder()
+
+	handler.UpdateModelFavorite(addResp, addReq)
+
+	if addResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, addResp.Code, addResp.Body.String())
+	}
+	var addPayload struct {
+		Favorites []string `json:"favorites"`
+	}
+	decodeJSONBody(t, addResp, &addPayload)
+	if len(addPayload.Favorites) != 1 || addPayload.Favorites[0] != "openrouter/free" {
+		t.Fatalf("unexpected favorites payload: %+v", addPayload.Favorites)
+	}
+
+	var count int
+	if err := db.QueryRow(`
+SELECT COUNT(*)
+FROM user_model_favorites
+WHERE user_id = ? AND model_id = ?;
+`, user.ID, "openrouter/free").Scan(&count); err != nil {
+		t.Fatalf("count favorites: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected favorite to be persisted, got %d", count)
+	}
+
+	removeReq := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/models/favorites",
+		strings.NewReader(`{"modelId":"openrouter/free","favorite":false}`),
+	)
+	removeReq = requestWithSessionUser(removeReq, user)
+	removeResp := httptest.NewRecorder()
+
+	handler.UpdateModelFavorite(removeResp, removeReq)
+
+	if removeResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, removeResp.Code, removeResp.Body.String())
+	}
+	if err := db.QueryRow(`
+SELECT COUNT(*)
+FROM user_model_favorites
+WHERE user_id = ? AND model_id = ?;
+`, user.ID, "openrouter/free").Scan(&count); err != nil {
+		t.Fatalf("count favorites after remove: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("expected favorite to be removed, got %d", count)
+	}
+}
+
+func TestUpdateModelPreferencesPersistsModeSpecificSelection(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+	if _, err := db.Exec(`
+INSERT INTO models (id, provider, display_name, context_window, prompt_price_microusd, completion_price_microusd, curated, is_active)
+VALUES ('openai/gpt-4o-mini', 'openrouter', 'GPT-4o mini', 128000, 150, 600, 0, 1);
+`); err != nil {
+		t.Fatalf("seed second model: %v", err)
+	}
+
+	chatReq := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/models/preferences",
+		strings.NewReader(`{"mode":"chat","modelId":"openrouter/free"}`),
+	)
+	chatReq = requestWithSessionUser(chatReq, user)
+	chatResp := httptest.NewRecorder()
+
+	handler.UpdateModelPreferences(chatResp, chatReq)
+
+	if chatResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, chatResp.Code, chatResp.Body.String())
+	}
+
+	deepReq := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/models/preferences",
+		strings.NewReader(`{"mode":"deep_research","modelId":"openai/gpt-4o-mini"}`),
+	)
+	deepReq = requestWithSessionUser(deepReq, user)
+	deepResp := httptest.NewRecorder()
+
+	handler.UpdateModelPreferences(deepResp, deepReq)
+
+	if deepResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, deepResp.Code, deepResp.Body.String())
+	}
+
+	var payload struct {
+		Preferences modelPreferencesResponse `json:"preferences"`
+	}
+	decodeJSONBody(t, deepResp, &payload)
+	if payload.Preferences.LastUsedModelID != "openrouter/free" {
+		t.Fatalf("unexpected last used model id: %q", payload.Preferences.LastUsedModelID)
+	}
+	if payload.Preferences.LastUsedDeepResearchModelID != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected deep research model id: %q", payload.Preferences.LastUsedDeepResearchModelID)
+	}
+}
+
 func TestChatMessagesPersistsConversationAndMessages(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Hi", " there"}})
 	t.Cleanup(func() { _ = db.Close() })
@@ -406,6 +609,22 @@ ORDER BY rowid ASC;
 	}
 	if messages[1].Role != "assistant" || messages[1].Content != "Hi there" {
 		t.Fatalf("unexpected second message: %+v", messages[1])
+	}
+
+	var lastUsedModelID sql.NullString
+	var lastUsedDeepResearchModelID sql.NullString
+	if err := db.QueryRow(`
+SELECT last_used_model_id, last_used_deep_research_model_id
+FROM user_model_preferences
+WHERE user_id = ?;
+`, user.ID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID); err != nil {
+		t.Fatalf("query model preferences: %v", err)
+	}
+	if !lastUsedModelID.Valid || lastUsedModelID.String != "openrouter/free" {
+		t.Fatalf("unexpected last_used_model_id: %+v", lastUsedModelID)
+	}
+	if !lastUsedDeepResearchModelID.Valid || lastUsedDeepResearchModelID.String != "openrouter/free" {
+		t.Fatalf("unexpected last_used_deep_research_model_id: %+v", lastUsedDeepResearchModelID)
 	}
 }
 
@@ -539,8 +758,10 @@ func decodeJSONBody(t *testing.T, resp *httptest.ResponseRecorder, target any) {
 }
 
 type stubStreamer struct {
-	tokens []string
-	err    error
+	tokens     []string
+	err        error
+	catalog    []openrouter.Model
+	catalogErr error
 }
 
 func (s stubStreamer) StreamChatCompletion(_ context.Context, _ openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error {
@@ -553,6 +774,13 @@ func (s stubStreamer) StreamChatCompletion(_ context.Context, _ openrouter.Strea
 		}
 	}
 	return s.err
+}
+
+func (s stubStreamer) ListModels(_ context.Context) ([]openrouter.Model, error) {
+	if s.catalogErr != nil {
+		return nil, s.catalogErr
+	}
+	return s.catalog, nil
 }
 
 const testSchema = `
@@ -579,6 +807,25 @@ CREATE TABLE models (
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE user_model_preferences (
+  user_id TEXT PRIMARY KEY,
+  last_used_model_id TEXT,
+  last_used_deep_research_model_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (last_used_model_id) REFERENCES models(id) ON DELETE SET NULL,
+  FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL
+);
+
+CREATE TABLE user_model_favorites (
+  user_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, model_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
 );
 
 CREATE TABLE conversations (

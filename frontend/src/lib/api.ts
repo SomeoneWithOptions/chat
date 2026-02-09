@@ -15,6 +15,18 @@ export type Model = {
   curated: boolean;
 };
 
+export type ModelPreferences = {
+  lastUsedModelId: string;
+  lastUsedDeepResearchModelId: string;
+};
+
+export type ModelCatalog = {
+  models: Model[];
+  curatedModels: Model[];
+  favorites: string[];
+  preferences: ModelPreferences;
+};
+
 export type Conversation = {
   id: string;
   title: string;
@@ -110,11 +122,27 @@ export async function logout(): Promise<void> {
   });
 }
 
-export async function listModels(): Promise<Model[]> {
-  const response = await requestJSON<{ models: Model[] }>('/v1/models', {
+export async function listModels(): Promise<ModelCatalog> {
+  const response = await requestJSON<ModelCatalog>('/v1/models', {
     method: 'GET',
   });
-  return response.models;
+  return response;
+}
+
+export async function updateModelPreference(mode: 'chat' | 'deep_research', modelId: string): Promise<ModelPreferences> {
+  const response = await requestJSON<{ preferences: ModelPreferences }>('/v1/models/preferences', {
+    method: 'PUT',
+    body: JSON.stringify({ mode, modelId }),
+  });
+  return response.preferences;
+}
+
+export async function updateModelFavorite(modelId: string, favorite: boolean): Promise<string[]> {
+  const response = await requestJSON<{ favorites: string[] }>('/v1/models/favorites', {
+    method: 'PUT',
+    body: JSON.stringify({ modelId, favorite }),
+  });
+  return response.favorites;
 }
 
 export async function createConversation(title?: string): Promise<Conversation> {

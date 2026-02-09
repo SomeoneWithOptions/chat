@@ -11,8 +11,11 @@ import {
   listModels,
   logout,
   streamMessage,
+  updateModelFavorite,
+  updateModelPreference,
   type Conversation,
   type Model,
+  type ModelPreferences,
   type User,
 } from './lib/api';
 
@@ -30,6 +33,13 @@ function formatPrice(micros: number): string {
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [models, setModels] = useState<Model[]>([]);
+  const [curatedModels, setCuratedModels] = useState<Model[]>([]);
+  const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>([]);
+  const [modelPreferences, setModelPreferences] = useState<ModelPreferences>({
+    lastUsedModelId: 'openrouter/free',
+    lastUsedDeepResearchModelId: 'openrouter/free',
+  });
+  const [showAllModels, setShowAllModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState('openrouter/free');
   const [prompt, setPrompt] = useState('');
   const [messages, setMessages] = useState<Message[]>([]);
@@ -44,6 +54,8 @@ export default function App() {
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
+  const [updatingModelFavorite, setUpdatingModelFavorite] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
@@ -104,6 +116,14 @@ export default function App() {
 
   useEffect(() => {
     if (!user) {
+      setModels([]);
+      setCuratedModels([]);
+      setFavoriteModelIds([]);
+      setModelPreferences({
+        lastUsedModelId: 'openrouter/free',
+        lastUsedDeepResearchModelId: 'openrouter/free',
+      });
+      setShowAllModels(false);
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
@@ -113,13 +133,16 @@ export default function App() {
 
     void (async () => {
       try {
-        const availableModels = await listModels();
-        setModels(availableModels);
-        if (availableModels.length > 0) {
-          setSelectedModel((current) => {
-            const found = availableModels.some((model) => model.id === current);
-            return found ? current : availableModels[0].id;
-          });
+        const catalog = await listModels();
+        setModels(catalog.models);
+        setCuratedModels(catalog.curatedModels);
+        setFavoriteModelIds(catalog.favorites);
+        setModelPreferences(catalog.preferences);
+        setShowAllModels(catalog.curatedModels.length === 0);
+
+        if (catalog.models.length > 0) {
+          const preferredModelId = catalog.preferences.lastUsedModelId || catalog.models[0].id;
+          setSelectedModel(catalog.models.some((model) => model.id === preferredModelId) ? preferredModelId : catalog.models[0].id);
         }
       } catch (err) {
         setError((err as Error).message);
@@ -193,10 +216,38 @@ export default function App() {
     };
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
 
+  const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
+
+  const visibleModels = useMemo(() => {
+    const base = showAllModels || curatedModels.length === 0 ? models : curatedModels;
+    return [...base].sort((a, b) => {
+      const aFavorite = favoriteModelIdSet.has(a.id) ? 1 : 0;
+      const bFavorite = favoriteModelIdSet.has(b.id) ? 1 : 0;
+      if (aFavorite !== bFavorite) {
+        return bFavorite - aFavorite;
+      }
+      return a.name.localeCompare(b.name);
+    });
+  }, [curatedModels, favoriteModelIdSet, models, showAllModels]);
+
+  const selectableModels = useMemo(() => {
+    const byID = new Map<string, Model>();
+    for (const model of visibleModels) {
+      byID.set(model.id, model);
+    }
+    const selected = models.find((model) => model.id === selectedModel);
+    if (selected) {
+      byID.set(selected.id, selected);
+    }
+    return [...byID.values()];
+  }, [models, selectedModel, visibleModels]);
+
   const currentModel = useMemo(
     () => models.find((model) => model.id === selectedModel) ?? null,
     [models, selectedModel],
   );
+
+  const selectedModelIsFavorite = favoriteModelIdSet.has(selectedModel);
 
   async function handleDevLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -219,12 +270,75 @@ export default function App() {
     try {
       await logout();
       setUser(null);
+      setModels([]);
+      setCuratedModels([]);
+      setFavoriteModelIds([]);
+      setModelPreferences({
+        lastUsedModelId: 'openrouter/free',
+        lastUsedDeepResearchModelId: 'openrouter/free',
+      });
+      setShowAllModels(false);
+      setSelectedModel('openrouter/free');
       setMessages([]);
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
     } catch (err) {
       setError((err as Error).message);
+    }
+  }
+
+  async function persistModelSelection(mode: 'chat' | 'deep_research', modelId: string) {
+    if (!user) {
+      return;
+    }
+    setUpdatingModelPreference(true);
+    try {
+      const preferences = await updateModelPreference(mode, modelId);
+      setModelPreferences(preferences);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUpdatingModelPreference(false);
+    }
+  }
+
+  function handleModelChange(nextModelId: string) {
+    setSelectedModel(nextModelId);
+    setError(null);
+    void persistModelSelection(deepResearch ? 'deep_research' : 'chat', nextModelId);
+  }
+
+  function handleDeepResearchChange(next: boolean) {
+    setDeepResearch(next);
+    setError(null);
+
+    const preferredModelID = next ? modelPreferences.lastUsedDeepResearchModelId : modelPreferences.lastUsedModelId;
+    const resolvedModelID =
+      preferredModelID && models.some((model) => model.id === preferredModelID) ? preferredModelID : selectedModel;
+
+    if (resolvedModelID !== selectedModel && resolvedModelID) {
+      setSelectedModel(resolvedModelID);
+    }
+    if (resolvedModelID) {
+      void persistModelSelection(next ? 'deep_research' : 'chat', resolvedModelID);
+    }
+  }
+
+  async function handleToggleFavorite() {
+    if (!selectedModel || !user) {
+      return;
+    }
+
+    setError(null);
+    setUpdatingModelFavorite(true);
+    try {
+      const favorites = await updateModelFavorite(selectedModel, !selectedModelIsFavorite);
+      setFavoriteModelIds(favorites);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUpdatingModelFavorite(false);
     }
   }
 
@@ -431,16 +545,37 @@ export default function App() {
         </div>
 
         <div className="controls">
-          <label>
+          <label className="model-select">
             Model
-            <select value={selectedModel} onChange={(event) => setSelectedModel(event.target.value)}>
-              {models.map((model) => (
+            <select value={selectedModel} onChange={(event) => handleModelChange(event.target.value)}>
+              {selectableModels.map((model) => (
                 <option key={model.id} value={model.id}>
-                  {model.name} ({model.id})
+                  {favoriteModelIdSet.has(model.id) ? '★ ' : ''}{model.name} ({model.id})
                 </option>
               ))}
             </select>
           </label>
+
+          <label className="checkbox">
+            <input
+              type="checkbox"
+              checked={showAllModels}
+              onChange={(event) => setShowAllModels(event.target.checked)}
+            />
+            Show All Models
+          </label>
+
+          <button
+            type="button"
+            onClick={() => void handleToggleFavorite()}
+            disabled={updatingModelFavorite || models.length === 0}
+          >
+            {updatingModelFavorite
+              ? 'Updating...'
+              : selectedModelIsFavorite
+                ? 'Unfavorite Model'
+                : 'Favorite Model'}
+          </button>
 
           <label className="checkbox">
             <input type="checkbox" checked={grounding} onChange={(event) => setGrounding(event.target.checked)} />
@@ -451,7 +586,7 @@ export default function App() {
             <input
               type="checkbox"
               checked={deepResearch}
-              onChange={(event) => setDeepResearch(event.target.checked)}
+              onChange={(event) => handleDeepResearchChange(event.target.checked)}
             />
             Deep Research
           </label>
@@ -468,6 +603,14 @@ export default function App() {
             <strong>{currentModel.name}</strong> • Context window: {currentModel.contextWindow.toLocaleString()} • Prompt:{' '}
             {formatPrice(currentModel.promptPriceMicrosUsd)} / token • Completion:{' '}
             {formatPrice(currentModel.outputPriceMicrosUsd)} / token
+          </p>
+          <p>
+            {showAllModels || curatedModels.length === 0
+              ? `Showing ${visibleModels.length.toLocaleString()} model${visibleModels.length === 1 ? '' : 's'}`
+              : `Showing ${visibleModels.length.toLocaleString()} curated model${visibleModels.length === 1 ? '' : 's'}`}
+            {' • '}
+            Favorites: {favoriteModelIds.length.toLocaleString()}
+            {updatingModelPreference ? ' • Saving preference...' : ''}
           </p>
         </section>
       ) : null}

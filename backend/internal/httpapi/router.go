@@ -27,7 +27,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	r.Use(chimw.Recoverer)
 	r.Use(cors.Handler(cors.Options{
 		AllowedOrigins:   cfg.AllowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "DELETE", "OPTIONS"},
+		AllowedMethods:   []string{"GET", "POST", "PUT", "DELETE", "OPTIONS"},
 		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-CSRF-Token", "X-Test-Email", "X-Test-Google-Sub"},
 		ExposedHeaders:   []string{"Content-Type"},
 		AllowCredentials: true,
@@ -49,6 +49,8 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 		v1.Group(func(p chi.Router) {
 			p.Use(h.RequireSession)
 			p.Get("/models", h.ListModels)
+			p.Put("/models/preferences", h.UpdateModelPreferences)
+			p.Put("/models/favorites", h.UpdateModelFavorite)
 			p.Post("/conversations", h.CreateConversation)
 			p.Get("/conversations", h.ListConversations)
 			p.Delete("/conversations", h.DeleteAllConversations)

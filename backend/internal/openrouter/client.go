@@ -8,7 +8,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
+	"math/big"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"chat/backend/internal/config"
@@ -21,6 +24,14 @@ var ErrMissingAPIKey = errors.New("openrouter api key is not configured")
 type Message struct {
 	Role    string `json:"role"`
 	Content string `json:"content"`
+}
+
+type Model struct {
+	ID                       string
+	Name                     string
+	ContextWindow            int
+	PromptPriceMicrosUSD     int
+	CompletionPriceMicrosUSD int
 }
 
 type StreamRequest struct {
@@ -43,6 +54,23 @@ type streamAPIResponse struct {
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
+}
+
+type listModelsAPIResponse struct {
+	Data []listModelsAPIModel `json:"data"`
+}
+
+type listModelsAPIModel struct {
+	ID            string `json:"id"`
+	Name          string `json:"name"`
+	ContextLength int    `json:"context_length"`
+	Pricing       struct {
+		Prompt     json.RawMessage `json:"prompt"`
+		Completion json.RawMessage `json:"completion"`
+	} `json:"pricing"`
+	TopProvider struct {
+		ContextLength int `json:"context_length"`
+	} `json:"top_provider"`
 }
 
 type Client struct {
@@ -154,4 +182,109 @@ func (c Client) StreamChatCompletion(
 		return fmt.Errorf("read openrouter stream: %w", err)
 	}
 	return nil
+}
+
+func (c Client) ListModels(ctx context.Context) ([]Model, error) {
+	if strings.TrimSpace(c.apiKey) == "" {
+		return nil, ErrMissingAPIKey
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	if err != nil {
+		return nil, fmt.Errorf("build openrouter models request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("request openrouter models: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return nil, fmt.Errorf("openrouter models returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed listModelsAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return nil, fmt.Errorf("decode openrouter models response: %w", err)
+	}
+
+	models := make([]Model, 0, len(parsed.Data))
+	for _, model := range parsed.Data {
+		id := strings.TrimSpace(model.ID)
+		if id == "" {
+			continue
+		}
+
+		name := strings.TrimSpace(model.Name)
+		if name == "" {
+			name = id
+		}
+
+		contextWindow := model.ContextLength
+		if contextWindow <= 0 {
+			contextWindow = model.TopProvider.ContextLength
+		}
+
+		models = append(models, Model{
+			ID:                       id,
+			Name:                     name,
+			ContextWindow:            contextWindow,
+			PromptPriceMicrosUSD:     parsePriceMicros(model.Pricing.Prompt),
+			CompletionPriceMicrosUSD: parsePriceMicros(model.Pricing.Completion),
+		})
+	}
+
+	return models, nil
+}
+
+func parsePriceMicros(raw json.RawMessage) int {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return 0
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return priceStringToMicros(asString)
+	}
+
+	var asNumber float64
+	if err := json.Unmarshal(raw, &asNumber); err == nil {
+		if asNumber < 0 {
+			return 0
+		}
+		return int(math.Round(asNumber * 1_000_000))
+	}
+
+	return 0
+}
+
+func priceStringToMicros(raw string) int {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0
+	}
+
+	if floatValue, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		if floatValue < 0 {
+			return 0
+		}
+		return int(math.Round(floatValue * 1_000_000))
+	}
+
+	rat := new(big.Rat)
+	if _, ok := rat.SetString(trimmed); !ok {
+		return 0
+	}
+	if rat.Sign() < 0 {
+		return 0
+	}
+
+	rat.Mul(rat, big.NewRat(1_000_000, 1))
+	value, _ := rat.Float64()
+	return int(math.Round(value))
 }

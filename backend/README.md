@@ -10,6 +10,8 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - `GET /v1/auth/me`
 - `POST /v1/auth/logout`
 - `GET /v1/models`
+- `PUT /v1/models/preferences`
+- `PUT /v1/models/favorites`
 - `POST /v1/conversations`
 - `GET /v1/conversations`
 - `DELETE /v1/conversations`
@@ -53,3 +55,4 @@ For temporary anonymous testing, set:
 - Session cookie defaults to 7 days (`SESSION_TTL_HOURS=168`).
 - Email allowlist is env-configurable (`ALLOWED_GOOGLE_EMAILS`).
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
+- `GET /v1/models` syncs available models from OpenRouter into the local `models` cache and returns all/curated lists with user favorites/preferences.
