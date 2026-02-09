@@ -14,4 +14,6 @@ Utility scripts for local development, DB lifecycle, and deployment.
 
 ## Cloud Run
 
-- `ENV_FILE=/path/to/env.yaml ./scripts/deploy_cloud_run_backend.sh`: deploy backend source to Cloud Run.
+- `./scripts/deploy_cloud_run_backend.sh`: deploy backend source to Cloud Run using existing Cloud Run env vars.
+- `./scripts/deploy_cloud_run_backend.sh --env-file /path/to/env.yaml`: deploy and replace env vars from a file.
+- Common overrides: `--project`, `--region`, `--service`, `--source`, `--private`, `--dry-run`.

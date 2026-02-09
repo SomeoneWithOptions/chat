@@ -7,10 +7,20 @@ Deployment and infrastructure notes.
 Deployment script:
 
 ```bash
-ENV_FILE=/path/to/cloud-run.env.yaml ./scripts/deploy_cloud_run_backend.sh
+./scripts/deploy_cloud_run_backend.sh
 ```
 
-Expected env vars in env file:
+Optional deployment with explicit env file override:
+
+```bash
+./scripts/deploy_cloud_run_backend.sh --env-file /path/to/cloud-run.env.yaml
+```
+
+Starter template:
+
+- `infra/cloud-run.env.example.yaml`
+
+Expected env vars in the env file:
 
 - `APP_ENV`
 - `FRONTEND_ORIGIN`
