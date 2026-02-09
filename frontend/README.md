@@ -6,6 +6,8 @@ React + Vite + TypeScript app (dark-mode-only shell).
 
 - Session bootstrap via `GET /v1/auth/me`
 - Model fetch via `GET /v1/models`
+- Conversation list/history via `GET /v1/conversations` and `GET /v1/conversations/{id}/messages`
+- Conversation creation via `POST /v1/conversations`
 - Chat composer with SSE stream handling from `POST /v1/chat/messages`
 - Dev sign-in form for local mode when backend enables insecure auth override
 

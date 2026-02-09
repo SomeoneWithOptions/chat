@@ -144,6 +144,40 @@ button:hover {
   color: var(--text-dim);
 }
 
+.conversations {
+  padding: 0.85rem 1rem;
+  display: grid;
+  gap: 0.75rem;
+}
+
+.conversations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.conversations-header .eyebrow {
+  margin: 0;
+}
+
+.conversation-list {
+  display: grid;
+  gap: 0.5rem;
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.conversation-item {
+  text-align: left;
+  width: 100%;
+}
+
+.conversation-item.active {
+  border-color: var(--accent-strong);
+  background: rgba(39, 168, 217, 0.2);
+}
+
 .messages {
   min-height: 360px;
   padding: 1rem;
@@ -171,6 +205,12 @@ button:hover {
 .bubble.assistant {
   justify-self: start;
   background: rgba(255, 255, 255, 0.03);
+}
+
+.bubble.system,
+.bubble.tool {
+  justify-self: start;
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .role {

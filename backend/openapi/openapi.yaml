@@ -122,6 +122,63 @@ paths:
                       $ref: '#/components/schemas/Model'
         '401':
           $ref: '#/components/responses/Error'
+  /v1/conversations:
+    post:
+      summary: Create a conversation
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateConversationRequest'
+      responses:
+        '201':
+          description: Conversation created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreateConversationResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+    get:
+      summary: List conversations for the current user
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Conversations ordered by recent activity
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListConversationsResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/conversations/{id}/messages:
+    get:
+      summary: List messages for a conversation
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Messages in chronological order
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ListMessagesResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /v1/chat/messages:
     post:
       summary: Send a chat message and stream assistant tokens (SSE)
@@ -144,6 +201,8 @@ paths:
         '400':
           $ref: '#/components/responses/Error'
         '401':
+          $ref: '#/components/responses/Error'
+        '404':
           $ref: '#/components/responses/Error'
 components:
   securitySchemes:
@@ -205,12 +264,78 @@ components:
           type: integer
         curated:
           type: boolean
+    Conversation:
+      type: object
+      required: [id, title, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    Message:
+      type: object
+      required:
+        [id, conversationId, role, content, groundingEnabled, deepResearchEnabled, createdAt]
+      properties:
+        id:
+          type: string
+        conversationId:
+          type: string
+        role:
+          type: string
+          enum: [system, user, assistant, tool]
+        content:
+          type: string
+        modelId:
+          type: string
+          nullable: true
+        groundingEnabled:
+          type: boolean
+        deepResearchEnabled:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+    CreateConversationRequest:
+      type: object
+      properties:
+        title:
+          type: string
+    CreateConversationResponse:
+      type: object
+      required: [conversation]
+      properties:
+        conversation:
+          $ref: '#/components/schemas/Conversation'
+    ListConversationsResponse:
+      type: object
+      required: [conversations]
+      properties:
+        conversations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Conversation'
+    ListMessagesResponse:
+      type: object
+      required: [messages]
+      properties:
+        messages:
+          type: array
+          items:
+            $ref: '#/components/schemas/Message'
     ChatMessageRequest:
       type: object
       required: [message]
       properties:
         conversationId:
           type: string
+          description: Existing conversation id. If omitted, the backend creates a new conversation.
         message:
           type: string
         modelId:

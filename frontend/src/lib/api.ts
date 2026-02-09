@@ -15,6 +15,24 @@ export type Model = {
   curated: boolean;
 };
 
+export type Conversation = {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type ConversationMessage = {
+  id: string;
+  conversationId: string;
+  role: 'system' | 'user' | 'assistant' | 'tool';
+  content: string;
+  modelId?: string | null;
+  groundingEnabled: boolean;
+  deepResearchEnabled: boolean;
+  createdAt: string;
+};
+
 export type ChatRequest = {
   conversationId?: string;
   message: string;
@@ -24,7 +42,7 @@ export type ChatRequest = {
 };
 
 export type StreamEvent =
-  | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string }
+  | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; conversationId?: string }
   | { type: 'token'; delta: string }
   | { type: 'done' };
 
@@ -85,6 +103,28 @@ export async function listModels(): Promise<Model[]> {
     method: 'GET',
   });
   return response.models;
+}
+
+export async function createConversation(title?: string): Promise<Conversation> {
+  const response = await requestJSON<{ conversation: Conversation }>('/v1/conversations', {
+    method: 'POST',
+    body: JSON.stringify(title ? { title } : {}),
+  });
+  return response.conversation;
+}
+
+export async function listConversations(): Promise<Conversation[]> {
+  const response = await requestJSON<{ conversations: Conversation[] }>('/v1/conversations', {
+    method: 'GET',
+  });
+  return response.conversations;
+}
+
+export async function listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
+  const response = await requestJSON<{ messages: ConversationMessage[] }>(`/v1/conversations/${conversationId}/messages`, {
+    method: 'GET',
+  });
+  return response.messages;
 }
 
 export async function streamMessage(

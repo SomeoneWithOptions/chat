@@ -49,6 +49,9 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 		v1.Group(func(p chi.Router) {
 			p.Use(h.RequireSession)
 			p.Get("/models", h.ListModels)
+			p.Post("/conversations", h.CreateConversation)
+			p.Get("/conversations", h.ListConversations)
+			p.Get("/conversations/{id}/messages", h.ListConversationMessages)
 			p.Post("/chat/messages", h.ChatMessages)
 		})
 	})
