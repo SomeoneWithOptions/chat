@@ -55,6 +55,18 @@ type ErrorEnvelope = {
   };
 };
 
+export class APIError extends Error {
+  status: number;
+  code?: string;
+
+  constructor(message: string, status: number, code?: string) {
+    super(message);
+    this.name = 'APIError';
+    this.status = status;
+    this.code = code;
+  }
+}
+
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     credentials: 'include',
@@ -68,7 +80,7 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
     const message = body?.error?.message ?? `Request failed with status ${response.status}`;
-    throw new Error(message);
+    throw new APIError(message, response.status, body?.error?.code);
   }
 
   return (await response.json()) as T;
@@ -144,7 +156,7 @@ export async function streamMessage(
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
     const message = body?.error?.message ?? `Request failed with status ${response.status}`;
-    throw new Error(message);
+    throw new APIError(message, response.status, body?.error?.code);
   }
 
   if (!response.body) {

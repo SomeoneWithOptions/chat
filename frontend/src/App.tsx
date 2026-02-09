@@ -1,5 +1,6 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  APIError,
   authWithGoogle,
   createConversation,
   getMe,
@@ -32,6 +33,7 @@ export default function App() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [conversationAPISupported, setConversationAPISupported] = useState(true);
   const [grounding, setGrounding] = useState(true);
   const [deepResearch, setDeepResearch] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -42,6 +44,10 @@ export default function App() {
 
   const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
   const [devSub, setDevSub] = useState('dev-user-1');
+
+  function isNotFoundError(err: unknown): err is APIError {
+    return err instanceof APIError && err.status === 404;
+  }
 
   useEffect(() => {
     void (async () => {
@@ -60,6 +66,7 @@ export default function App() {
     setLoadingConversations(true);
     try {
       const availableConversations = await listConversations();
+      setConversationAPISupported(true);
       setConversations(availableConversations);
       setActiveConversationId((current) => {
         if (preferredConversationId && availableConversations.some((conversation) => conversation.id === preferredConversationId)) {
@@ -74,6 +81,13 @@ export default function App() {
         setMessages([]);
       }
     } catch (err) {
+      if (isNotFoundError(err)) {
+        setConversationAPISupported(false);
+        setConversations([]);
+        setActiveConversationId(null);
+        setMessages([]);
+        return;
+      }
       setError((err as Error).message);
     } finally {
       setLoadingConversations(false);
@@ -84,6 +98,7 @@ export default function App() {
     if (!user) {
       setConversations([]);
       setActiveConversationId(null);
+      setConversationAPISupported(true);
       setMessages([]);
       return;
     }
@@ -108,11 +123,17 @@ export default function App() {
     if (!user) {
       return;
     }
+    if (!conversationAPISupported) {
+      return;
+    }
     void refreshConversations();
-  }, [refreshConversations, user]);
+  }, [conversationAPISupported, refreshConversations, user]);
 
   useEffect(() => {
     if (!user) {
+      return;
+    }
+    if (!conversationAPISupported) {
       return;
     }
     if (!activeConversationId) {
@@ -139,6 +160,12 @@ export default function App() {
           })),
         );
       } catch (err) {
+        if (isNotFoundError(err)) {
+          setConversationAPISupported(false);
+          setConversations([]);
+          setActiveConversationId(null);
+          return;
+        }
         if (!cancelled) {
           setError((err as Error).message);
         }
@@ -152,7 +179,7 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [activeConversationId, isStreaming, user]);
+  }, [activeConversationId, conversationAPISupported, isStreaming, user]);
 
   const currentModel = useMemo(
     () => models.find((model) => model.id === selectedModel) ?? null,
@@ -183,13 +210,14 @@ export default function App() {
       setMessages([]);
       setConversations([]);
       setActiveConversationId(null);
+      setConversationAPISupported(true);
     } catch (err) {
       setError((err as Error).message);
     }
   }
 
   async function handleNewConversation() {
-    if (isStreaming) {
+    if (isStreaming || !conversationAPISupported) {
       return;
     }
     setError(null);
@@ -200,6 +228,10 @@ export default function App() {
       setConversations((existing) => [conversation, ...existing.filter((item) => item.id !== conversation.id)]);
       setActiveConversationId(conversation.id);
     } catch (err) {
+      if (isNotFoundError(err)) {
+        setConversationAPISupported(false);
+        return;
+      }
       setError((err as Error).message);
     }
   }
@@ -258,7 +290,7 @@ export default function App() {
           }
         },
       );
-      if (resolvedConversationID) {
+      if (resolvedConversationID && conversationAPISupported) {
         await refreshConversations(resolvedConversationID);
       }
     } catch (err) {
@@ -351,33 +383,35 @@ export default function App() {
         </section>
       ) : null}
 
-      <section className="card conversations">
-        <div className="conversations-header">
-          <p className="eyebrow">Conversations</p>
-          <button type="button" onClick={handleNewConversation} disabled={isStreaming}>
-            New Chat
-          </button>
-        </div>
-        {loadingConversations ? <p className="empty">Loading conversations...</p> : null}
-        {!loadingConversations && conversations.length === 0 ? (
-          <p className="empty">No saved conversations yet.</p>
-        ) : null}
-        {!loadingConversations && conversations.length > 0 ? (
-          <div className="conversation-list">
-            {conversations.map((conversation) => (
-              <button
-                key={conversation.id}
-                type="button"
-                className={`conversation-item ${activeConversationId === conversation.id ? 'active' : ''}`}
-                onClick={() => setActiveConversationId(conversation.id)}
-                disabled={isStreaming}
-              >
-                {conversation.title}
-              </button>
-            ))}
+      {conversationAPISupported ? (
+        <section className="card conversations">
+          <div className="conversations-header">
+            <p className="eyebrow">Conversations</p>
+            <button type="button" onClick={handleNewConversation} disabled={isStreaming}>
+              New Chat
+            </button>
           </div>
-        ) : null}
-      </section>
+          {loadingConversations ? <p className="empty">Loading conversations...</p> : null}
+          {!loadingConversations && conversations.length === 0 ? (
+            <p className="empty">No saved conversations yet.</p>
+          ) : null}
+          {!loadingConversations && conversations.length > 0 ? (
+            <div className="conversation-list">
+              {conversations.map((conversation) => (
+                <button
+                  key={conversation.id}
+                  type="button"
+                  className={`conversation-item ${activeConversationId === conversation.id ? 'active' : ''}`}
+                  onClick={() => setActiveConversationId(conversation.id)}
+                  disabled={isStreaming}
+                >
+                  {conversation.title}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="card messages">
         {loadingMessages ? <p className="empty">Loading messages...</p> : null}
