@@ -30,9 +30,12 @@ Set at minimum:
 
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (required for `libsql://` URL)
-- `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
 - `OPENROUTER_API_KEY` (required to stream chat responses)
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
+
+Auth sequencing:
+
+- Add `GOOGLE_CLIENT_ID` and enable `AUTH_REQUIRED=true` in the final auth rollout phase.
 
 For temporary auth bypass while testing app flows:
 

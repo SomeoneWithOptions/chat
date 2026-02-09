@@ -40,6 +40,10 @@ Expected env vars in the env file:
 - `LOCAL_UPLOAD_DIR`
 - `DEEP_RESEARCH_TIMEOUT_SECONDS`
 
+Auth rollout sequencing note:
+
+- Keep auth-related values (`GOOGLE_CLIENT_ID`, `ALLOWED_GOOGLE_EMAILS`, `AUTH_REQUIRED`) as final rollout toggles after core feature stabilization.
+
 Current deployed service defaults:
 
 - Project: `chat-486915`

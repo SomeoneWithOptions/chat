@@ -4,7 +4,6 @@ React + Vite + TypeScript app (dark-mode-only shell).
 
 ## Current implementation
 
-- Session bootstrap via `GET /v1/auth/me`
 - Model fetch via `GET /v1/models` (all + curated, favorites, preferences)
 - Model preference persistence via `PUT /v1/models/preferences`
 - Model favorites via `PUT /v1/models/favorites`
@@ -12,7 +11,8 @@ React + Vite + TypeScript app (dark-mode-only shell).
 - Conversation creation via `POST /v1/conversations`
 - Conversation deletion via `DELETE /v1/conversations/{id}` and `DELETE /v1/conversations`
 - Chat composer with SSE stream handling from `POST /v1/chat/messages`
-- Dev sign-in form for local mode when backend enables insecure auth override
+- Attachment upload UX and send with `fileIds`
+- Final auth rollout: session bootstrap via `GET /v1/auth/me` and dev sign-in form for insecure local mode
 
 ## Run locally
 

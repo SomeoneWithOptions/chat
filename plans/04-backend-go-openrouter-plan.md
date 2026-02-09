@@ -17,19 +17,20 @@
 ## API Endpoints (MVP)
 
 1. `GET /healthz`
-2. `POST /v1/auth/google` (exchange Google ID token -> session)
-3. `GET /v1/auth/me` (session check)
-4. `POST /v1/auth/logout`
-5. `GET /v1/models`
-6. `POST /v1/files` (upload metadata/start)
-7. `POST /v1/chat/messages` (streaming)
-8. `GET /v1/conversations`
-9. `POST /v1/conversations`
-10. `GET /v1/conversations/{id}/messages`
-11. `DELETE /v1/conversations/{id}` (delete one chat)
-12. `DELETE /v1/conversations` (delete all chats for current user)
+2. `GET /v1/models`
+3. `POST /v1/files` (upload metadata/start)
+4. `POST /v1/chat/messages` (streaming)
+5. `GET /v1/conversations`
+6. `POST /v1/conversations`
+7. `GET /v1/conversations/{id}/messages`
+8. `DELETE /v1/conversations/{id}` (delete one chat)
+9. `DELETE /v1/conversations` (delete all chats for current user)
+10. Final rollout auth endpoints:
+    - `POST /v1/auth/google` (exchange Google ID token -> session)
+    - `GET /v1/auth/me` (session check)
+    - `POST /v1/auth/logout`
 
-## Authentication (Google, Email Allowlist)
+## Authentication (Google, Email Allowlist, Final Rollout Gate)
 
 - Verify Google ID token server-side (issuer, audience, signature, expiry).
 - Enforce allowlist via config (`ALLOWED_GOOGLE_EMAILS` comma-separated).
@@ -38,7 +39,7 @@
   - `obzen.black@gmail.com`
 - Create/update local `users` row and issue secure HTTP-only session cookie.
 - Session TTL: 7 days (168 hours).
-- Apply auth middleware to all non-auth routes.
+- Apply auth middleware to all non-auth routes in the final rollout phase.
 
 ## OpenRouter Integration
 
@@ -58,7 +59,7 @@
 ## Request Orchestration
 
 1. Validate request + limits
-2. Authorize session and user ownership
+2. Authorize session and user ownership (enforced as final rollout gate)
 3. Load conversation context window
 4. Resolve attachments into text snippets
 5. Execute grounding workflow (if enabled)
@@ -87,9 +88,9 @@
 ## Acceptance Criteria
 
 - Streaming response works reliably via Cloud Run
-- Invalid or non-allowlisted Google accounts cannot access chat APIs
 - Model list endpoint returns usable options from OpenRouter
 - Manual model fallback works when provider list fetch fails
 - Deep research respects 120s timeout and model-selection behavior
 - Chat deletion fully removes DB records and cleans up GCS-backed attachments
 - Errors return consistent JSON envelope
+- Final rollout gate: invalid or non-allowlisted Google accounts cannot access chat APIs

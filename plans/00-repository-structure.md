@@ -15,7 +15,7 @@
 ## Why These Folders
 
 - `/frontend`: isolate UI build/tooling and deployment concerns.
-- `/backend`: isolate API code, integrations, auth, and streaming logic.
+- `/backend`: isolate API code, integrations, streaming logic, and final-rollout auth.
 - `/db`: keep schema and SQL evolution changes versioned and reviewable.
 - `/infra`: separate runtime/deploy config from app code.
 - `/docs`: keep stable docs separate from active implementation plans.
@@ -29,6 +29,6 @@
 
 ## Ownership and Boundaries
 
-- Backend owns OpenRouter, Brave, auth verification, and DB writes.
+- Backend owns OpenRouter, Brave, DB writes, and final-rollout auth verification.
 - Frontend owns UX, model/mode controls, and streaming rendering.
 - DB folder is the single source of truth for schema/SQL changes.

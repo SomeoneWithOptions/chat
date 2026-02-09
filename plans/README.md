@@ -22,7 +22,7 @@ Core stack assumptions used in these plans:
 - Backend API: Go, deployed on Cloud Run (GCP)
 - Database: Turso (LibSQL/SQLite)
 - DB change strategy: schema SQL + versioned SQL scripts in `/db` (no migration framework initially)
-- Auth: Google sign-in with configurable email allowlist (initially 2 users)
+- Auth: Google sign-in with configurable email allowlist (initially 2 users), enabled as the final rollout gate
 - LLM provider gateway: OpenRouter
 - Web grounding: Brave Search API (Data for AI)
 - File storage: local processing path in MVP, GCS later for durable storage

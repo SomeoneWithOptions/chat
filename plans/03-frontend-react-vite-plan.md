@@ -11,7 +11,7 @@
 ## App Structure
 
 - `src/app/` application shell and providers
-- `src/features/auth/` Google sign-in and session bootstrap
+- `src/features/auth/` Google sign-in and session bootstrap (final rollout phase)
 - `src/features/chat/` chat thread, composer, message list
 - `src/features/models/` model selector
 - `src/features/files/` attachment uploader and chips
@@ -40,36 +40,33 @@
 ## Implementation Tasks
 
 1. Scaffold Vite + TypeScript + styling baseline
-2. Integrate Google Identity Services sign-in page
-3. Add auth bootstrap (`/v1/auth/me`) and guarded routes
-4. Build static layout for desktop + responsive mobile
-5. Add API client with typed contracts
-6. Add SSE streaming response handling
-7. Add model list fetch with curated-first + show-all behavior
-8. Add favorite-model actions and filter
-9. Implement model defaults:
+2. Build static layout for desktop + responsive mobile
+3. Add API client with typed contracts
+4. Add SSE streaming response handling
+5. Add model list fetch with curated-first + show-all behavior
+6. Add favorite-model actions and filter
+7. Implement model defaults:
    - normal chat uses last-used model
    - first app run uses `openrouter/free`
    - deep research model defaults to last-used normal-chat model, but is user-selectable
-10. Show model pricing/context window in selector and details panel
-11. Add file upload flow + selected attachments preview
-12. Render citations and tool activity timeline
-13. Add optimistic conversation updates and retries
-14. Add chat deletion UX: delete single conversation and delete all
+8. Show model pricing/context window in selector and details panel
+9. Add file upload flow + selected attachments preview
+10. Render citations and tool activity timeline
+11. Add optimistic conversation updates and retries
+12. Add chat deletion UX: delete single conversation and delete all
+13. Final rollout: integrate Google Identity Services sign-in page
+14. Final rollout: add auth bootstrap (`/v1/auth/me`) and guarded routes
 
 ## UI/Design Direction
 
 - Dark-only palette with high contrast text
 - Minimal chrome, generous spacing, smooth streaming animation
 - Clear visual differentiation between normal and deep research mode
-- Login screen follows same dark minimal visual style
+- Login screen follows same dark minimal visual style (added during final auth rollout)
 
 ## Acceptance Criteria
 
 - New conversation can be created and persisted
-- Unauthenticated users cannot access chat routes
-- Allowed Google account can login/logout successfully
-- App supports the configured allowlist and can expand to more emails later
 - Model can be changed before sending a message
 - Model metadata (pricing/context) is visible
 - Curated list can be empty while "show all models" still works
@@ -77,3 +74,4 @@
 - Files can be attached and included in request payload
 - Grounding defaults ON for every message unless user disables it
 - User can delete one chat or all chats from UI
+- Final rollout gate: unauthenticated users cannot access chat routes and allowlisted Google login/logout works end-to-end

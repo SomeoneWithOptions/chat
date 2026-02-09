@@ -23,6 +23,7 @@ Each env has isolated API keys and DB tokens.
 - Containerized Go API
 - Public HTTPS endpoint with CORS restricted to allowed frontend origins
 - Recommended backend API domain: `api.chat.sanetomore.com`
+- Auth-related env vars can be deferred until the final auth rollout phase.
 - Env vars:
   - `OPENROUTER_API_KEY`
   - `BRAVE_API_KEY`
@@ -70,15 +71,18 @@ Each env has isolated API keys and DB tokens.
    - lint
    - unit tests
    - build checks
-   - auth flow integration tests
+   - chat/attachments integration tests
 2. On merge to main:
    - deploy backend to Cloud Run
    - deploy frontend to Vercel
    - apply DB SQL change scripts if schema updates are needed
+3. Final auth rollout gate:
+   - enable auth env vars and `AUTH_REQUIRED=true`
+   - run auth flow integration tests
 
 ## Acceptance Criteria
 
 - One-command deploy path per environment
 - Secrets only from platform secret stores
 - Rollback path documented for frontend and backend
-- Auth config supports the two initial allowed emails and future expansion without code changes
+- Final rollout gate: auth config supports the two initial allowed emails and future expansion without code changes

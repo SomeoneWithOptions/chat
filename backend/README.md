@@ -6,9 +6,9 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 
 - `GET /health` (recommended for Cloud Run)
 - `GET /healthz` (local compatibility)
-- `POST /v1/auth/google`
-- `GET /v1/auth/me`
-- `POST /v1/auth/logout`
+- Final auth rollout: `POST /v1/auth/google`
+- Final auth rollout: `GET /v1/auth/me`
+- Final auth rollout: `POST /v1/auth/logout`
 - `GET /v1/models`
 - `PUT /v1/models/preferences`
 - `PUT /v1/models/favorites`
@@ -34,9 +34,12 @@ cp backend/.env.example backend/.env
 
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (if using `libsql://...` URL)
-- `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
 - `OPENROUTER_API_KEY` (required for `POST /v1/chat/messages` streaming)
 - `GCS_UPLOAD_BUCKET` (required for attachment uploads)
+
+Auth sequencing:
+
+- Configure `GOOGLE_CLIENT_ID` and `AUTH_REQUIRED=true` during the final auth rollout phase.
 
 For local auth testing without Google verification, set:
 

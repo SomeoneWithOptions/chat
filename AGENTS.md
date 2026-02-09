@@ -11,7 +11,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 ## Repository Layout
 
 - `/frontend`: React + Vite app (dark-mode-only UI).
-- `/backend`: Go API (auth, chat orchestration, search, streaming).
+- `/backend`: Go API (chat orchestration, search, streaming, final-rollout auth).
 - `/db`: Turso schema SQL and versioned SQL change scripts.
 - `/infra`: deployment/runtime docs and config notes.
 - `/docs`: long-lived architecture and operational docs.
@@ -31,7 +31,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 
 ## Product Invariants
 
-- Google authentication is required before app access.
+- Google authentication is required before app access at launch.
 - Email allowlist is config-driven and extensible.
 - Initial allowlist:
   - `acastesol@gmail.com`
@@ -44,6 +44,12 @@ Implementation guidance for this repository. Keep this file stable and high-sign
   - normal chat uses last-used model
   - first-run fallback is `openrouter/free`
   - deep research defaults to last-used normal model
+
+## Implementation Sequencing Rule
+
+- Authentication is a final rollout gate. Keep auth implementation/enforcement tasks last in plans and execution order.
+- During feature implementation phases, avoid blocking on auth setup unless explicitly requested.
+- Enable/verify full auth enforcement (`AUTH_REQUIRED=true`, Google sign-in, allowlist checks, auth route gating) at the end of implementation before launch.
 
 ## Model UX Rules
 

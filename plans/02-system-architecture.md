@@ -10,7 +10,11 @@
 6. Brave Search API for grounding
 7. Local attachment processing path (MVP) with optional future GCS bucket
 
-## Authentication Flow
+## Authentication Flow (Final Rollout Phase)
+
+Implementation timing note:
+
+- This flow is enforced in the final rollout phase after core chat, attachments, grounding, and deep-research stabilization.
 
 1. Frontend gets Google ID token from Google Identity Services.
 2. Frontend sends token to backend `POST /v1/auth/google`.
@@ -48,7 +52,7 @@
 ## Service Boundaries
 
 - Frontend handles UI state, sign-in UX, and streaming rendering.
-- Backend owns auth verification/session management, provider logic, web search logic, prompts, citations, cost controls.
+- Backend owns provider logic, web search logic, prompts, citations, cost controls, and final-rollout auth verification/session management.
 - DB stores canonical state and indexes.
 - Storage layer handles temporary local file processing and extracted text persistence.
 - Deletion workflow performs hard delete in DB and removes GCS objects when storage provider is `gcs`.

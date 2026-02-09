@@ -17,7 +17,8 @@ Monorepo for the Saneto Chat app.
 cp backend/.env.example backend/.env
 ```
 
-Populate `TURSO_DATABASE_URL`, `TURSO_AUTH_TOKEN`, and `GOOGLE_CLIENT_ID`.
+Populate `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN`.
+Set `GOOGLE_CLIENT_ID` during the final auth rollout phase.
 
 3. Run backend + frontend in separate terminals:
 

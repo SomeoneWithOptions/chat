@@ -7,31 +7,27 @@
    - support folders: `/infra`, `/docs`, `/scripts`
 2. Configure local env and secrets management
 3. Add local lint/test/build scripts (CI workflows can be added later)
-4. Configure Google OAuth app + email allowlist (`acastesol@gmail.com`, `obzen.black@gmail.com`)
-5. Configure 7-day session TTL
-6. Configure domains and CORS:
+4. Configure domains and CORS:
    - frontend `chat.sanetomore.com`
    - backend `api.chat.sanetomore.com` (recommended)
    - localhost origins for dev
-7. Set `OPENROUTER_FREE_TIER_DEFAULT_MODEL=openrouter/free`
-8. Create OpenAPI 3.1 baseline contract with `text/event-stream` for chat streaming endpoint
+5. Set `OPENROUTER_FREE_TIER_DEFAULT_MODEL=openrouter/free`
+6. Create OpenAPI 3.1 baseline contract with `text/event-stream` for chat streaming endpoint
 
 Exit criteria:
 
 - Local frontend and backend run together
 - Local quality commands run successfully
-- Login can issue and validate local session
 
 ## Phase 1: Core Chat Loop
 
 1. Users/sessions/conversation/message DB schema + SQL bootstrap/change scripts
-2. Backend auth endpoints + auth middleware
-3. Backend `/chat/messages` with OpenRouter streaming
-4. Frontend chat UI with model selector and auth gate
+2. Backend `/chat/messages` with OpenRouter streaming
+3. Frontend chat UI with model selector
 
 Exit criteria:
 
-- Allowed user can login and send message with streaming response
+- User can send message with streaming response in non-auth rollout mode
 
 ## Phase 2: Model Catalog and Persistence
 
@@ -88,3 +84,16 @@ Exit criteria:
 Exit criteria:
 
 - Stable production deployment on Vercel + Cloud Run
+
+## Phase 7: Authentication Final Rollout (Last)
+
+1. Configure Google OAuth app + email allowlist (`acastesol@gmail.com`, `obzen.black@gmail.com`)
+2. Configure and enforce 7-day session TTL
+3. Enable backend auth middleware and auth endpoints in production (`AUTH_REQUIRED=true`)
+4. Enable frontend auth gate and sign-in bootstrap for production
+5. Run auth-specific integration tests and production smoke checks
+
+Exit criteria:
+
+- Only allowlisted Google accounts can access chat APIs
+- Session issue/validation/logout works end-to-end in production
