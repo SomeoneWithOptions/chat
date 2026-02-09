@@ -4,7 +4,8 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 
 ## Current implementation
 
-- `GET /healthz`
+- `GET /health` (recommended for Cloud Run)
+- `GET /healthz` (local compatibility)
 - `POST /v1/auth/google`
 - `GET /v1/auth/me`
 - `POST /v1/auth/logout`

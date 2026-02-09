@@ -34,7 +34,10 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 		MaxAge:           300,
 	}))
 
+	// Cloud Run reserves exact `/healthz`, so expose a platform-safe health path.
+	r.Get("/health", h.Healthz)
 	r.Get("/healthz", h.Healthz)
+	r.Get("/healthz/", h.Healthz)
 
 	r.Route("/v1", func(v1 chi.Router) {
 		v1.Route("/auth", func(authR chi.Router) {

@@ -54,7 +54,7 @@ For local dev-only login flow:
 ## 4) Validate health
 
 ```bash
-curl http://localhost:8080/healthz
+curl http://localhost:8080/health
 ```
 
 Expected response:

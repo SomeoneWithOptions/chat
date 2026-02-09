@@ -10,9 +10,24 @@ servers:
   - url: http://localhost:8080
     description: Local
 paths:
+  /health:
+    get:
+      summary: Health check (Cloud Run-safe path)
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status]
+                properties:
+                  status:
+                    type: string
+                    example: ok
   /healthz:
     get:
-      summary: Health check
+      summary: Health check (local compatibility)
       responses:
         '200':
           description: OK
