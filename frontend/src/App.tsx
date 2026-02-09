@@ -14,6 +14,7 @@ import {
   streamMessage,
   updateModelFavorite,
   updateModelPreference,
+  type Citation,
   type Conversation,
   type Model,
   type ModelPreferences,
@@ -25,6 +26,7 @@ type Message = {
   id: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  citations: Citation[];
 };
 
 const acceptedAttachmentTypes = '.txt,.md,.pdf,.csv,.json';
@@ -38,6 +40,19 @@ function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function citationLabel(citation: Citation, index: number): string {
+  const trimmedTitle = citation.title?.trim();
+  if (trimmedTitle) {
+    return trimmedTitle;
+  }
+  try {
+    const parsed = new URL(citation.url);
+    return parsed.hostname.replace(/^www\./, '');
+  } catch {
+    return `Source ${index + 1}`;
+  }
 }
 
 export default function App() {
@@ -69,6 +84,7 @@ export default function App() {
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
   const [updatingModelFavorite, setUpdatingModelFavorite] = useState(false);
+  const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
@@ -141,6 +157,7 @@ export default function App() {
       setActiveConversationId(null);
       setConversationAPISupported(true);
       setMessages([]);
+      setStreamWarning(null);
       setPendingAttachments([]);
       setUploadingAttachments(false);
       return;
@@ -203,6 +220,7 @@ export default function App() {
             id: message.id,
             role: message.role,
             content: message.content,
+            citations: message.citations ?? [],
           })),
         );
       } catch (err) {
@@ -295,6 +313,7 @@ export default function App() {
       setShowAllModels(false);
       setSelectedModel('openrouter/free');
       setMessages([]);
+      setStreamWarning(null);
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
@@ -508,17 +527,20 @@ export default function App() {
       id: crypto.randomUUID(),
       role: 'user',
       content: prompt.trim(),
+      citations: [],
     };
 
     const assistantMessage: Message = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
+      citations: [],
     };
 
     setMessages((existing) => [...existing, userMessage, assistantMessage]);
     setPrompt('');
     setIsStreaming(true);
+    setStreamWarning(null);
     setError(null);
 
     let resolvedConversationID = activeConversationId;
@@ -539,6 +561,25 @@ export default function App() {
               resolvedConversationID = eventData.conversationId;
               setActiveConversationId(eventData.conversationId);
             }
+            return;
+          }
+
+          if (eventData.type === 'warning') {
+            setStreamWarning(eventData.message);
+            return;
+          }
+
+          if (eventData.type === 'error') {
+            setError(eventData.message);
+            return;
+          }
+
+          if (eventData.type === 'citations') {
+            setMessages((existing) =>
+              existing.map((message) =>
+                message.id === assistantMessage.id ? { ...message, citations: eventData.citations } : message,
+              ),
+            );
             return;
           }
 
@@ -735,6 +776,18 @@ export default function App() {
           <article key={message.id} className={`bubble ${message.role}`}>
             <p className="role">{message.role}</p>
             <p>{message.content || (message.role === 'assistant' ? '...' : '')}</p>
+            {message.citations.length > 0 ? (
+              <ol className="citations">
+                {message.citations.map((citation, index) => (
+                  <li key={`${message.id}-citation-${citation.url}-${index}`} className="citation-item">
+                    <a href={citation.url} target="_blank" rel="noreferrer">
+                      {citationLabel(citation, index)}
+                    </a>
+                    {citation.snippet ? <p className="citation-snippet">{citation.snippet}</p> : null}
+                  </li>
+                ))}
+              </ol>
+            ) : null}
           </article>
         ))}
       </section>
@@ -783,7 +836,10 @@ export default function App() {
           </div>
         ) : null}
         <div className="composer-row">
-          {error ? <p className="error">{error}</p> : <span />}
+          <div>
+            {streamWarning ? <p className="warning">{streamWarning}</p> : null}
+            {error ? <p className="error">{error}</p> : null}
+          </div>
           <button type="submit" disabled={isStreaming || uploadingAttachments || !prompt.trim()}>
             {isStreaming ? 'Streaming...' : uploadingAttachments ? 'Uploading...' : 'Send'}
           </button>

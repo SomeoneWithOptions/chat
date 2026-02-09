@@ -301,7 +301,7 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE events with `event: message` and JSON payload in `data:`
+                description: SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `warning`, `token`, `citations`, `error`, and `done`.
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -442,7 +442,7 @@ components:
     Message:
       type: object
       required:
-        [id, conversationId, role, content, groundingEnabled, deepResearchEnabled, createdAt]
+        [id, conversationId, role, content, groundingEnabled, deepResearchEnabled, citations, createdAt]
       properties:
         id:
           type: string
@@ -460,9 +460,26 @@ components:
           type: boolean
         deepResearchEnabled:
           type: boolean
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
         createdAt:
           type: string
           format: date-time
+    Citation:
+      type: object
+      required: [url]
+      properties:
+        url:
+          type: string
+          format: uri
+        title:
+          type: string
+        snippet:
+          type: string
+        sourceProvider:
+          type: string
     File:
       type: object
       required: [id, filename, mediaType, sizeBytes, createdAt]

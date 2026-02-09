@@ -42,7 +42,15 @@ export type ConversationMessage = {
   modelId?: string | null;
   groundingEnabled: boolean;
   deepResearchEnabled: boolean;
+  citations: Citation[];
   createdAt: string;
+};
+
+export type Citation = {
+  url: string;
+  title?: string;
+  snippet?: string;
+  sourceProvider?: string;
 };
 
 export type UploadedFile = {
@@ -64,7 +72,10 @@ export type ChatRequest = {
 
 export type StreamEvent =
   | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; conversationId?: string }
+  | { type: 'warning'; scope: string; message: string }
+  | { type: 'citations'; citations: Citation[] }
   | { type: 'token'; delta: string }
+  | { type: 'error'; message: string }
   | { type: 'done' };
 
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
@@ -260,7 +271,12 @@ export async function streamMessage(
         if (!jsonPayload) {
           continue;
         }
-        const event = JSON.parse(jsonPayload) as StreamEvent;
+        let event: StreamEvent;
+        try {
+          event = JSON.parse(jsonPayload) as StreamEvent;
+        } catch {
+          continue;
+        }
         onEvent(event);
       }
     }

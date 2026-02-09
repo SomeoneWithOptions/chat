@@ -15,6 +15,7 @@ const (
 	defaultSessionTTLHours     = 168
 	defaultDefaultModel        = "openrouter/free"
 	defaultOpenRouterBaseURL   = "https://openrouter.ai/api/v1"
+	defaultBraveBaseURL        = "https://api.search.brave.com/res/v1"
 	defaultFrontendOrigin      = "https://chat.sanetomore.com"
 	defaultUploadDir           = "/tmp/chat-uploads"
 	defaultGCSUploadPrefix     = "chat-uploads"
@@ -38,6 +39,8 @@ type Config struct {
 	OpenRouterAPIKey           string
 	OpenRouterBaseURL          string
 	OpenRouterDefaultModel     string
+	BraveAPIKey                string
+	BraveBaseURL               string
 	LocalUploadDir             string
 	GCSUploadBucket            string
 	GCSUploadPrefix            string
@@ -63,6 +66,8 @@ func Load() (Config, error) {
 		OpenRouterAPIKey:           strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
 		OpenRouterBaseURL:          envOrDefault("OPENROUTER_API_BASE_URL", defaultOpenRouterBaseURL),
 		OpenRouterDefaultModel:     envOrDefault("OPENROUTER_FREE_TIER_DEFAULT_MODEL", defaultDefaultModel),
+		BraveAPIKey:                strings.TrimSpace(os.Getenv("BRAVE_API_KEY")),
+		BraveBaseURL:               envOrDefault("BRAVE_API_BASE_URL", defaultBraveBaseURL),
 		LocalUploadDir:             envOrDefault("LOCAL_UPLOAD_DIR", defaultUploadDir),
 		GCSUploadBucket:            strings.TrimSpace(os.Getenv("GCS_UPLOAD_BUCKET")),
 		GCSUploadPrefix:            envOrDefault("GCS_UPLOAD_PREFIX", defaultGCSUploadPrefix),

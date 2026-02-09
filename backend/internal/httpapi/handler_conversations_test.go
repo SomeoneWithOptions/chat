@@ -5,6 +5,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -12,6 +13,7 @@ import (
 	"testing"
 
 	"chat/backend/internal/auth"
+	"chat/backend/internal/brave"
 	"chat/backend/internal/config"
 	"chat/backend/internal/openrouter"
 	"chat/backend/internal/session"
@@ -630,6 +632,114 @@ WHERE user_id = ?;
 	}
 }
 
+func TestChatMessagesPersistsGroundingCitationsAndStreamsCitationEvent(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Grounded", " answer"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{
+				URL:     "https://example.com/one",
+				Title:   "Example One",
+				Snippet: "First snippet",
+			},
+			{
+				URL:     "https://example.com/two",
+				Title:   "Example Two",
+				Snippet: "Second snippet",
+			},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"What happened?","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), `"type":"citations"`) {
+		t.Fatalf("expected citations event, got: %s", resp.Body.String())
+	}
+
+	var citationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM citations;`).Scan(&citationCount); err != nil {
+		t.Fatalf("count citations: %v", err)
+	}
+	if citationCount != 2 {
+		t.Fatalf("expected 2 persisted citations, got %d", citationCount)
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+conversationID+"/messages", nil)
+	listReq = requestWithSessionUser(listReq, user)
+	listReq = requestWithConversationID(listReq, conversationID)
+	listResp := httptest.NewRecorder()
+
+	handler.ListConversationMessages(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, listResp.Code, listResp.Body.String())
+	}
+
+	var payload struct {
+		Messages []messageResponse `json:"messages"`
+	}
+	decodeJSONBody(t, listResp, &payload)
+
+	if len(payload.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(payload.Messages))
+	}
+	assistant := payload.Messages[1]
+	if assistant.Role != "assistant" {
+		t.Fatalf("expected second message to be assistant, got %s", assistant.Role)
+	}
+	if len(assistant.Citations) != 2 {
+		t.Fatalf("expected 2 assistant citations, got %d", len(assistant.Citations))
+	}
+}
+
+func TestChatMessagesGroundingFailureStreamsWarningAndContinues(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Still", " works"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{err: errors.New("brave unavailable")}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Hello","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"type":"warning"`) {
+		t.Fatalf("expected warning event in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"type":"token"`) {
+		t.Fatalf("expected token events in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"type":"done"`) {
+		t.Fatalf("expected done event in stream body: %s", body)
+	}
+}
+
 func TestUploadFileStoresMetadataAndBlob(t *testing.T) {
 	store := &stubFileStore{objects: make(map[string][]byte)}
 	handler, db := newTestHandlerWithFileStore(t, stubStreamer{}, store)
@@ -932,6 +1042,7 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 	}
 
 	handler := NewHandlerWithFileStore(cfg, db, session.NewStore(db), auth.NewVerifier(cfg), streamer, fileStore)
+	handler.grounding = stubGrounder{}
 	return handler, db
 }
 
@@ -978,6 +1089,18 @@ type stubStreamer struct {
 	catalog    []openrouter.Model
 	catalogErr error
 	onRequest  func(openrouter.StreamRequest)
+}
+
+type stubGrounder struct {
+	results []brave.SearchResult
+	err     error
+}
+
+func (s stubGrounder) Search(_ context.Context, _ string, _ int) ([]brave.SearchResult, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.results, nil
 }
 
 func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error {
@@ -1092,6 +1215,17 @@ CREATE TABLE messages (
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE SET NULL
+);
+
+CREATE TABLE citations (
+  id TEXT PRIMARY KEY,
+  message_id TEXT NOT NULL,
+  url TEXT NOT NULL,
+  title TEXT,
+  snippet TEXT,
+  source_provider TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
 CREATE TABLE files (

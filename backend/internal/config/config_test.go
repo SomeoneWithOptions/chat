@@ -35,6 +35,10 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("unexpected openrouter base url: %s", cfg.OpenRouterBaseURL)
 	}
 
+	if cfg.BraveBaseURL != "https://api.search.brave.com/res/v1" {
+		t.Fatalf("unexpected brave base url: %s", cfg.BraveBaseURL)
+	}
+
 	if cfg.GCSUploadPrefix != "chat-uploads" {
 		t.Fatalf("unexpected gcs upload prefix: %s", cfg.GCSUploadPrefix)
 	}

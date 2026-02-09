@@ -31,6 +31,7 @@ Set at minimum:
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (required for `libsql://` URL)
 - `OPENROUTER_API_KEY` (required to stream chat responses)
+- `BRAVE_API_KEY` (required for grounding citations; requests still run without it)
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
 
 Auth sequencing:

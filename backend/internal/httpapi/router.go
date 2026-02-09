@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"chat/backend/internal/auth"
+	"chat/backend/internal/brave"
 	"chat/backend/internal/config"
 	"chat/backend/internal/openrouter"
 	"chat/backend/internal/session"
@@ -33,6 +34,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	}
 
 	h := NewHandlerWithFileStore(cfg, db, store, verifier, openRouterClient, files)
+	h.grounding = brave.NewClient(cfg, nil)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)

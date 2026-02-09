@@ -253,6 +253,26 @@ button:hover {
   white-space: pre-wrap;
 }
 
+.citations {
+  margin: 0.65rem 0 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.45rem;
+}
+
+.citation-item {
+  color: var(--text-dim);
+}
+
+.citation-item a {
+  color: var(--accent);
+}
+
+.citation-snippet {
+  margin: 0.2rem 0 0;
+  font-size: 0.85rem;
+}
+
 .composer {
   padding: 0.9rem;
   display: grid;
@@ -269,6 +289,12 @@ button:hover {
   justify-content: space-between;
   align-items: center;
   gap: 0.75rem;
+}
+
+.composer-row > div {
+  display: grid;
+  gap: 0.25rem;
+  min-height: 1.2rem;
 }
 
 .visually-hidden {
@@ -311,6 +337,11 @@ button:hover {
 
 .error {
   color: var(--danger);
+  margin: 0;
+}
+
+.warning {
+  color: var(--accent);
   margin: 0;
 }
 

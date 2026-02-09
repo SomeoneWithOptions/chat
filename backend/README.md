@@ -35,6 +35,7 @@ cp backend/.env.example backend/.env
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (if using `libsql://...` URL)
 - `OPENROUTER_API_KEY` (required for `POST /v1/chat/messages` streaming)
+- `BRAVE_API_KEY` (required for grounding citations in chat responses)
 - `GCS_UPLOAD_BUCKET` (required for attachment uploads)
 
 Auth sequencing:
@@ -61,4 +62,5 @@ For temporary anonymous testing, set:
 - Email allowlist is env-configurable (`ALLOWED_GOOGLE_EMAILS`).
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
 - `GET /v1/models` syncs available models from OpenRouter into the local `models` cache and returns all/curated lists with user favorites/preferences.
+- Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

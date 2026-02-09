@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"chat/backend/internal/auth"
+	"chat/backend/internal/brave"
 	"chat/backend/internal/config"
 	"chat/backend/internal/openrouter"
 	"chat/backend/internal/session"
@@ -26,6 +27,7 @@ type Handler struct {
 	sessions   session.Store
 	verifier   auth.Verifier
 	openrouter chatStreamer
+	grounding  groundingSearcher
 	models     modelCataloger
 	files      fileObjectStore
 }
@@ -36,6 +38,10 @@ type chatStreamer interface {
 
 type modelCataloger interface {
 	ListModels(ctx context.Context) ([]openrouter.Model, error)
+}
+
+type groundingSearcher interface {
+	Search(ctx context.Context, query string, count int) ([]brave.SearchResult, error)
 }
 
 func NewHandler(cfg config.Config, db *sql.DB, sessions session.Store, verifier auth.Verifier, streamer chatStreamer) Handler {
@@ -393,15 +399,23 @@ type conversationResponse struct {
 	UpdatedAt string `json:"updatedAt"`
 }
 
+type citationResponse struct {
+	URL            string `json:"url"`
+	Title          string `json:"title,omitempty"`
+	Snippet        string `json:"snippet,omitempty"`
+	SourceProvider string `json:"sourceProvider,omitempty"`
+}
+
 type messageResponse struct {
-	ID                  string  `json:"id"`
-	ConversationID      string  `json:"conversationId"`
-	Role                string  `json:"role"`
-	Content             string  `json:"content"`
-	ModelID             *string `json:"modelId,omitempty"`
-	GroundingEnabled    bool    `json:"groundingEnabled"`
-	DeepResearchEnabled bool    `json:"deepResearchEnabled"`
-	CreatedAt           string  `json:"createdAt"`
+	ID                  string             `json:"id"`
+	ConversationID      string             `json:"conversationId"`
+	Role                string             `json:"role"`
+	Content             string             `json:"content"`
+	ModelID             *string            `json:"modelId,omitempty"`
+	GroundingEnabled    bool               `json:"groundingEnabled"`
+	DeepResearchEnabled bool               `json:"deepResearchEnabled"`
+	Citations           []citationResponse `json:"citations"`
+	CreatedAt           string             `json:"createdAt"`
 }
 
 func (h Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
@@ -539,6 +553,7 @@ ORDER BY m.created_at ASC, m.id ASC;
 		message.ModelID = nullableStringPointer(modelID)
 		message.GroundingEnabled = groundingEnabled == 1
 		message.DeepResearchEnabled = deepResearchEnabled == 1
+		message.Citations = make([]citationResponse, 0)
 		messages = append(messages, message)
 	}
 
@@ -547,7 +562,65 @@ ORDER BY m.created_at ASC, m.id ASC;
 		return
 	}
 
+	citationsByMessageID, err := h.listConversationCitations(r.Context(), user.ID, conversationID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to read citations")
+		return
+	}
+
+	for i := range messages {
+		if citations, ok := citationsByMessageID[messages[i].ID]; ok {
+			messages[i].Citations = citations
+		}
+	}
+
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
+}
+
+func (h Handler) listConversationCitations(ctx context.Context, userID, conversationID string) (map[string][]citationResponse, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT c.message_id, c.url, c.title, c.snippet, c.source_provider
+FROM citations c
+JOIN messages m ON m.id = c.message_id
+JOIN conversations v ON v.id = m.conversation_id
+WHERE v.user_id = ? AND v.id = ?
+ORDER BY c.created_at ASC, c.id ASC;
+`, userID, conversationID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[string][]citationResponse)
+	for rows.Next() {
+		var messageID string
+		var citation citationResponse
+		var title sql.NullString
+		var snippet sql.NullString
+		var sourceProvider sql.NullString
+
+		if err := rows.Scan(&messageID, &citation.URL, &title, &snippet, &sourceProvider); err != nil {
+			return nil, err
+		}
+
+		if title.Valid {
+			citation.Title = strings.TrimSpace(title.String)
+		}
+		if snippet.Valid {
+			citation.Snippet = strings.TrimSpace(snippet.String)
+		}
+		if sourceProvider.Valid {
+			citation.SourceProvider = strings.TrimSpace(sourceProvider.String)
+		}
+
+		out[messageID] = append(out[messageID], citation)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return out, nil
 }
 
 func (h Handler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
@@ -730,6 +803,17 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userPrompt := h.appendFileContextToPrompt(req.Message, files)
+	groundingCitations, groundingWarning := h.resolveGroundingContext(r.Context(), req.Message, grounding)
+	promptMessages := []openrouter.Message{
+		{Role: "system", Content: buildSystemPrompt(grounding, deepResearch, len(groundingCitations) > 0)},
+	}
+	if len(groundingCitations) > 0 {
+		promptMessages = append(promptMessages, openrouter.Message{
+			Role:    "system",
+			Content: buildGroundingPrompt(groundingCitations),
+		})
+	}
+	promptMessages = append(promptMessages, openrouter.Message{Role: "user", Content: userPrompt})
 
 	started := false
 	var assistantContent strings.Builder
@@ -737,11 +821,8 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	streamErr := h.openrouter.StreamChatCompletion(
 		r.Context(),
 		openrouter.StreamRequest{
-			Model: modelID,
-			Messages: []openrouter.Message{
-				{Role: "system", Content: buildSystemPrompt(grounding, deepResearch)},
-				{Role: "user", Content: userPrompt},
-			},
+			Model:    modelID,
+			Messages: promptMessages,
 		},
 		func() error {
 			w.Header().Set("Content-Type", "text/event-stream")
@@ -756,6 +837,15 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 				"conversationId": conversationID,
 			}); err != nil {
 				return err
+			}
+			if groundingWarning != "" {
+				if err := writeSSEEvent(w, map[string]any{
+					"type":    "warning",
+					"scope":   "grounding",
+					"message": groundingWarning,
+				}); err != nil {
+					return err
+				}
 			}
 			flusher.Flush()
 			started = true
@@ -775,8 +865,24 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 
+	var persistedCitations []citationResponse
 	if assistantContent.Len() > 0 {
-		if err := h.insertMessage(r.Context(), user.ID, conversationID, "assistant", assistantContent.String(), modelID, grounding, deepResearch); err != nil {
+		persistedCitations = groundingCitations
+		if len(persistedCitations) > 8 {
+			persistedCitations = persistedCitations[:8]
+		}
+		_, err := h.insertMessageWithCitations(
+			r.Context(),
+			user.ID,
+			conversationID,
+			"assistant",
+			assistantContent.String(),
+			modelID,
+			grounding,
+			deepResearch,
+			persistedCitations,
+		)
+		if err != nil {
 			if !started {
 				writeError(w, http.StatusInternalServerError, "db_error", "failed to persist assistant response")
 				return
@@ -784,6 +890,12 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			_ = writeSSEEvent(w, map[string]any{
 				"type":    "error",
 				"message": "failed to persist assistant response",
+			})
+			flusher.Flush()
+		} else if started && len(persistedCitations) > 0 {
+			_ = writeSSEEvent(w, map[string]any{
+				"type":      "citations",
+				"citations": persistedCitations,
 			})
 			flusher.Flush()
 		}
@@ -811,6 +923,42 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	_ = writeSSEEvent(w, map[string]any{"type": "done"})
 	flusher.Flush()
+}
+
+const maxGroundingResults = 6
+
+func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled bool) ([]citationResponse, string) {
+	if !enabled {
+		return nil, ""
+	}
+
+	if h.grounding == nil {
+		return nil, "Grounding is unavailable for this response."
+	}
+
+	results, err := h.grounding.Search(ctx, message, maxGroundingResults)
+	if err != nil {
+		if errors.Is(err, brave.ErrMissingAPIKey) {
+			return nil, "Grounding is unavailable because BRAVE_API_KEY is not configured."
+		}
+		return nil, "Grounding search failed. Continuing without web sources."
+	}
+
+	citations := make([]citationResponse, 0, len(results))
+	for _, result := range results {
+		rawURL := strings.TrimSpace(result.URL)
+		if rawURL == "" {
+			continue
+		}
+		citations = append(citations, citationResponse{
+			URL:            rawURL,
+			Title:          trimToRunes(strings.TrimSpace(result.Title), 240),
+			Snippet:        trimToRunes(strings.TrimSpace(result.Snippet), 800),
+			SourceProvider: "brave",
+		})
+	}
+
+	return citations, ""
 }
 
 func (h Handler) RequireSession(next http.Handler) http.Handler {
@@ -947,17 +1095,38 @@ func (h Handler) resolveConversationID(ctx context.Context, userID, requestedCon
 }
 
 func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role, content, modelID string, groundingEnabled, deepResearchEnabled bool) error {
+	_, err := h.insertMessageWithCitations(
+		ctx,
+		userID,
+		conversationID,
+		role,
+		content,
+		modelID,
+		groundingEnabled,
+		deepResearchEnabled,
+		nil,
+	)
+	return err
+}
+
+func (h Handler) insertMessageWithCitations(
+	ctx context.Context,
+	userID, conversationID, role, content, modelID string,
+	groundingEnabled, deepResearchEnabled bool,
+	citations []citationResponse,
+) (string, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer tx.Rollback()
 
 	nullableModelID, err := resolveNullableModelID(ctx, tx, modelID)
 	if err != nil {
-		return err
+		return "", err
 	}
 
+	messageID := uuid.NewString()
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO messages (
   id,
@@ -970,8 +1139,28 @@ INSERT INTO messages (
   deep_research_enabled
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-`, uuid.NewString(), conversationID, userID, role, content, nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
-		return err
+`, messageID, conversationID, userID, role, content, nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+		return "", err
+	}
+
+	for _, citation := range citations {
+		rawURL := strings.TrimSpace(citation.URL)
+		if rawURL == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO citations (
+  id,
+  message_id,
+  url,
+  title,
+  snippet,
+  source_provider
+)
+VALUES (?, ?, ?, ?, ?, ?);
+`, uuid.NewString(), messageID, rawURL, nullableString(citation.Title), nullableString(citation.Snippet), nullableString(citation.SourceProvider)); err != nil {
+			return "", err
+		}
 	}
 
 	if _, err := tx.ExecContext(ctx, `
@@ -979,10 +1168,13 @@ UPDATE conversations
 SET updated_at = CURRENT_TIMESTAMP
 WHERE id = ? AND user_id = ?;
 `, conversationID, userID); err != nil {
-		return err
+		return "", err
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return messageID, nil
 }
 
 func (h Handler) persistModelSelection(ctx context.Context, userID, mode, modelID string) (modelPreferencesResponse, error) {
@@ -1329,14 +1521,45 @@ func writeSSEEvent(w io.Writer, payload any) error {
 	return nil
 }
 
-func buildSystemPrompt(grounding, deepResearch bool) string {
+func buildSystemPrompt(grounding, deepResearch, hasGroundingContext bool) string {
 	mode := "normal chat"
 	if deepResearch {
 		mode = "deep research"
 	}
 
+	if grounding && hasGroundingContext {
+		return fmt.Sprintf(
+			"You are a helpful assistant in %s mode. Use grounded, factual answers from the provided sources and call out uncertainty.",
+			mode,
+		)
+	}
 	if grounding {
 		return fmt.Sprintf("You are a helpful assistant in %s mode. Use grounded, factual answers and call out uncertainty.", mode)
 	}
 	return fmt.Sprintf("You are a helpful assistant in %s mode.", mode)
+}
+
+func buildGroundingPrompt(citations []citationResponse) string {
+	if len(citations) == 0 {
+		return ""
+	}
+
+	var builder strings.Builder
+	builder.WriteString("Grounding context from recent web search results:\n")
+	for i, citation := range citations {
+		label := strings.TrimSpace(citation.Title)
+		if label == "" {
+			label = citation.URL
+		}
+
+		builder.WriteString(fmt.Sprintf("\n[%d] %s\nURL: %s\n", i+1, label, citation.URL))
+		if snippet := strings.TrimSpace(citation.Snippet); snippet != "" {
+			builder.WriteString("Snippet: ")
+			builder.WriteString(snippet)
+			builder.WriteString("\n")
+		}
+	}
+
+	builder.WriteString("\nUse this context when relevant. If evidence is weak, say so clearly.")
+	return strings.TrimSpace(builder.String())
 }
