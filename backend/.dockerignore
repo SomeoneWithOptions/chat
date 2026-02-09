@@ -1,0 +1,6 @@
+.git
+.gitignore
+.env
+.env.*
+**/*_test.go
+openapi/
