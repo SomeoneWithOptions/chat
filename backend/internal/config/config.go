@@ -14,6 +14,7 @@ const (
 	defaultSessionCookieName   = "chat_session"
 	defaultSessionTTLHours     = 168
 	defaultDefaultModel        = "openrouter/free"
+	defaultOpenRouterBaseURL   = "https://openrouter.ai/api/v1"
 	defaultFrontendOrigin      = "https://chat.sanetomore.com"
 	defaultUploadDir           = "/tmp/chat-uploads"
 	defaultResearchTimeoutSecs = 120
@@ -33,6 +34,8 @@ type Config struct {
 	InsecureSkipGoogleVerify   bool
 	TursoDatabaseURL           string
 	TursoAuthToken             string
+	OpenRouterAPIKey           string
+	OpenRouterBaseURL          string
 	OpenRouterDefaultModel     string
 	LocalUploadDir             string
 	DeepResearchTimeoutSeconds int
@@ -54,6 +57,8 @@ func Load() (Config, error) {
 		InsecureSkipGoogleVerify:   boolOrDefault("AUTH_INSECURE_SKIP_GOOGLE_VERIFY", false),
 		TursoDatabaseURL:           strings.TrimSpace(os.Getenv("TURSO_DATABASE_URL")),
 		TursoAuthToken:             strings.TrimSpace(os.Getenv("TURSO_AUTH_TOKEN")),
+		OpenRouterAPIKey:           strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
+		OpenRouterBaseURL:          envOrDefault("OPENROUTER_API_BASE_URL", defaultOpenRouterBaseURL),
 		OpenRouterDefaultModel:     envOrDefault("OPENROUTER_FREE_TIER_DEFAULT_MODEL", defaultDefaultModel),
 		LocalUploadDir:             envOrDefault("LOCAL_UPLOAD_DIR", defaultUploadDir),
 		DeepResearchTimeoutSeconds: intOrDefault("DEEP_RESEARCH_TIMEOUT_SECONDS", defaultResearchTimeoutSecs),

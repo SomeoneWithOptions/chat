@@ -31,6 +31,7 @@ Set at minimum:
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (required for `libsql://` URL)
 - `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
+- `OPENROUTER_API_KEY` (required to stream chat responses)
 
 For temporary auth bypass while testing app flows:
 

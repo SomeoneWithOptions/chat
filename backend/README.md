@@ -9,7 +9,7 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - `GET /v1/auth/me`
 - `POST /v1/auth/logout`
 - `GET /v1/models`
-- `POST /v1/chat/messages` (SSE baseline stream)
+- `POST /v1/chat/messages` (SSE stream bridged from OpenRouter)
 
 OpenAPI 3.1 contract: `backend/openapi/openapi.yaml`.
 
@@ -26,6 +26,7 @@ cp backend/.env.example backend/.env
 - `TURSO_DATABASE_URL`
 - `TURSO_AUTH_TOKEN` (if using `libsql://...` URL)
 - `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
+- `OPENROUTER_API_KEY` (required for `POST /v1/chat/messages` streaming)
 
 For local auth testing without Google verification, set:
 

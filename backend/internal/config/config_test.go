@@ -30,6 +30,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.OpenRouterDefaultModel != "openrouter/free" {
 		t.Fatalf("unexpected default model: %s", cfg.OpenRouterDefaultModel)
 	}
+
+	if cfg.OpenRouterBaseURL != "https://openrouter.ai/api/v1" {
+		t.Fatalf("unexpected openrouter base url: %s", cfg.OpenRouterBaseURL)
+	}
 }
 
 func TestLoadRequiresGoogleClientIDWhenVerificationEnabled(t *testing.T) {

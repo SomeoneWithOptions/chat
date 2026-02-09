@@ -6,24 +6,31 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"time"
 
 	"chat/backend/internal/auth"
 	"chat/backend/internal/config"
+	"chat/backend/internal/openrouter"
 	"chat/backend/internal/session"
 )
 
 type Handler struct {
-	cfg      config.Config
-	db       *sql.DB
-	sessions session.Store
-	verifier auth.Verifier
+	cfg        config.Config
+	db         *sql.DB
+	sessions   session.Store
+	verifier   auth.Verifier
+	openrouter chatStreamer
 }
 
-func NewHandler(cfg config.Config, db *sql.DB, sessions session.Store, verifier auth.Verifier) Handler {
-	return Handler{cfg: cfg, db: db, sessions: sessions, verifier: verifier}
+type chatStreamer interface {
+	StreamChatCompletion(ctx context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error
+}
+
+func NewHandler(cfg config.Config, db *sql.DB, sessions session.Store, verifier auth.Verifier, streamer chatStreamer) Handler {
+	return Handler{cfg: cfg, db: db, sessions: sessions, verifier: verifier, openrouter: streamer}
 }
 
 type contextKey string
@@ -172,10 +179,6 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Content-Type", "text/event-stream")
-	w.Header().Set("Cache-Control", "no-cache")
-	w.Header().Set("Connection", "keep-alive")
-
 	grounding := true
 	if req.Grounding != nil {
 		grounding = *req.Grounding
@@ -186,19 +189,69 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		deepResearch = *req.DeepResearch
 	}
 
-	events := []map[string]any{
-		{"type": "metadata", "grounding": grounding, "deepResearch": deepResearch, "modelId": fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)},
-		{"type": "token", "delta": "Implementation baseline ready. "},
-		{"type": "token", "delta": "OpenRouter integration comes next. "},
-		{"type": "done"},
+	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
+	started := false
+
+	streamErr := h.openrouter.StreamChatCompletion(
+		r.Context(),
+		openrouter.StreamRequest{
+			Model: modelID,
+			Messages: []openrouter.Message{
+				{Role: "system", Content: buildSystemPrompt(grounding, deepResearch)},
+				{Role: "user", Content: req.Message},
+			},
+		},
+		func() error {
+			w.Header().Set("Content-Type", "text/event-stream")
+			w.Header().Set("Cache-Control", "no-cache")
+			w.Header().Set("Connection", "keep-alive")
+
+			if err := writeSSEEvent(w, map[string]any{
+				"type":         "metadata",
+				"grounding":    grounding,
+				"deepResearch": deepResearch,
+				"modelId":      modelID,
+			}); err != nil {
+				return err
+			}
+			flusher.Flush()
+			started = true
+			return nil
+		},
+		func(delta string) error {
+			if err := writeSSEEvent(w, map[string]any{
+				"type":  "token",
+				"delta": delta,
+			}); err != nil {
+				return err
+			}
+			flusher.Flush()
+			return nil
+		},
+	)
+
+	if streamErr != nil {
+		if !started {
+			status := http.StatusBadGateway
+			code := "openrouter_error"
+			message := "failed to stream from OpenRouter"
+			if errors.Is(streamErr, openrouter.ErrMissingAPIKey) {
+				status = http.StatusInternalServerError
+				code = "openrouter_unconfigured"
+				message = "OPENROUTER_API_KEY is required"
+			}
+			writeError(w, status, code, message)
+			return
+		}
+		_ = writeSSEEvent(w, map[string]any{
+			"type":    "error",
+			"message": "stream interrupted",
+		})
+		flusher.Flush()
 	}
 
-	for _, event := range events {
-		payload, _ := json.Marshal(event)
-		_, _ = fmt.Fprintf(w, "event: message\ndata: %s\n\n", payload)
-		flusher.Flush()
-		time.Sleep(150 * time.Millisecond)
-	}
+	_ = writeSSEEvent(w, map[string]any{"type": "done"})
+	flusher.Flush()
 }
 
 func (h Handler) RequireSession(next http.Handler) http.Handler {
@@ -302,4 +355,27 @@ func anonymousUser() session.User {
 		CreatedAt: "1970-01-01T00:00:00Z",
 		UpdatedAt: "1970-01-01T00:00:00Z",
 	}
+}
+
+func writeSSEEvent(w io.Writer, payload any) error {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal sse payload: %w", err)
+	}
+	if _, err := fmt.Fprintf(w, "event: message\ndata: %s\n\n", encoded); err != nil {
+		return fmt.Errorf("write sse payload: %w", err)
+	}
+	return nil
+}
+
+func buildSystemPrompt(grounding, deepResearch bool) string {
+	mode := "normal chat"
+	if deepResearch {
+		mode = "deep research"
+	}
+
+	if grounding {
+		return fmt.Sprintf("You are a helpful assistant in %s mode. Use grounded, factual answers and call out uncertainty.", mode)
+	}
+	return fmt.Sprintf("You are a helpful assistant in %s mode.", mode)
 }

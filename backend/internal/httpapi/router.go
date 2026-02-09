@@ -6,6 +6,7 @@ import (
 
 	"chat/backend/internal/auth"
 	"chat/backend/internal/config"
+	"chat/backend/internal/openrouter"
 	"chat/backend/internal/session"
 
 	"github.com/go-chi/chi/v5"
@@ -16,7 +17,8 @@ import (
 func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	store := session.NewStore(db)
 	verifier := auth.NewVerifier(cfg)
-	h := NewHandler(cfg, db, store, verifier)
+	openRouterClient := openrouter.NewClient(cfg, nil)
+	h := NewHandler(cfg, db, store, verifier, openRouterClient)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
