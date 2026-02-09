@@ -7,6 +7,7 @@ Database schema and migration scripts for Turso (LibSQL).
 - `schema.sql`: canonical schema for MVP entities.
 - `migrations/0001_init.sql`: base schema migration.
 - `migrations/0002_seed_default_model.sql`: seeds `openrouter/free` fallback model.
+- `migrations/0003_message_files_file_id_index.sql`: adds index to speed attachment cleanup by `file_id`.
 
 ## Turso CLI usage
 

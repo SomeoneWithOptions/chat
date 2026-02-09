@@ -12,6 +12,7 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - `GET /v1/models`
 - `PUT /v1/models/preferences`
 - `PUT /v1/models/favorites`
+- `POST /v1/files` (multipart upload for `.txt`, `.md`, `.pdf`, `.csv`, `.json`, max 25 MB)
 - `POST /v1/conversations`
 - `GET /v1/conversations`
 - `DELETE /v1/conversations`
@@ -35,6 +36,7 @@ cp backend/.env.example backend/.env
 - `TURSO_AUTH_TOKEN` (if using `libsql://...` URL)
 - `GOOGLE_CLIENT_ID` (required only when `AUTH_REQUIRED=true`)
 - `OPENROUTER_API_KEY` (required for `POST /v1/chat/messages` streaming)
+- `GCS_UPLOAD_BUCKET` (required for attachment uploads)
 
 For local auth testing without Google verification, set:
 
@@ -56,3 +58,4 @@ For temporary anonymous testing, set:
 - Email allowlist is env-configurable (`ALLOWED_GOOGLE_EMAILS`).
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
 - `GET /v1/models` syncs available models from OpenRouter into the local `models` cache and returns all/curated lists with user favorites/preferences.
+- Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

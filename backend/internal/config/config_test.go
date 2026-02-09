@@ -34,6 +34,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.OpenRouterBaseURL != "https://openrouter.ai/api/v1" {
 		t.Fatalf("unexpected openrouter base url: %s", cfg.OpenRouterBaseURL)
 	}
+
+	if cfg.GCSUploadPrefix != "chat-uploads" {
+		t.Fatalf("unexpected gcs upload prefix: %s", cfg.GCSUploadPrefix)
+	}
 }
 
 func TestLoadRequiresGoogleClientIDWhenVerificationEnabled(t *testing.T) {

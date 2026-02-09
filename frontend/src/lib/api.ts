@@ -45,12 +45,21 @@ export type ConversationMessage = {
   createdAt: string;
 };
 
+export type UploadedFile = {
+  id: string;
+  filename: string;
+  mediaType: string;
+  sizeBytes: number;
+  createdAt: string;
+};
+
 export type ChatRequest = {
   conversationId?: string;
   message: string;
   modelId: string;
   grounding: boolean;
   deepResearch: boolean;
+  fileIds?: string[];
 };
 
 export type StreamEvent =
@@ -79,6 +88,11 @@ export class APIError extends Error {
   }
 }
 
+function toAPIError(status: number, body: ErrorEnvelope | null): APIError {
+  const message = body?.error?.message ?? `Request failed with status ${status}`;
+  return new APIError(message, status, body?.error?.code);
+}
+
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
     credentials: 'include',
@@ -91,8 +105,7 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
-    const message = body?.error?.message ?? `Request failed with status ${response.status}`;
-    throw new APIError(message, response.status, body?.error?.code);
+    throw toAPIError(response.status, body);
   }
 
   return (await response.json()) as T;
@@ -179,6 +192,25 @@ export async function deleteAllConversations(): Promise<void> {
   });
 }
 
+export async function uploadFile(file: File): Promise<UploadedFile> {
+  const formData = new FormData();
+  formData.append('file', file);
+
+  const response = await fetch(`${apiBase}/v1/files`, {
+    method: 'POST',
+    credentials: 'include',
+    body: formData,
+  });
+
+  if (!response.ok) {
+    const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
+    throw toAPIError(response.status, body);
+  }
+
+  const payload = (await response.json()) as { file: UploadedFile };
+  return payload.file;
+}
+
 export async function streamMessage(
   request: ChatRequest,
   onEvent: (event: StreamEvent) => void,
@@ -195,8 +227,7 @@ export async function streamMessage(
 
   if (!response.ok) {
     const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
-    const message = body?.error?.message ?? `Request failed with status ${response.status}`;
-    throw new APIError(message, response.status, body?.error?.code);
+    throw toAPIError(response.status, body);
   }
 
   if (!response.body) {

@@ -1,8 +1,11 @@
 package httpapi
 
 import (
+	"context"
 	"database/sql"
+	"log"
 	"net/http"
+	"strings"
 
 	"chat/backend/internal/auth"
 	"chat/backend/internal/config"
@@ -18,7 +21,18 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	store := session.NewStore(db)
 	verifier := auth.NewVerifier(cfg)
 	openRouterClient := openrouter.NewClient(cfg, nil)
-	h := NewHandler(cfg, db, store, verifier, openRouterClient)
+
+	var files fileObjectStore
+	if strings.TrimSpace(cfg.GCSUploadBucket) != "" {
+		gcsStore, err := newGCSObjectStore(context.Background(), cfg.GCSUploadBucket)
+		if err != nil {
+			log.Printf("attachments disabled: failed to initialize gcs storage: %v", err)
+		} else {
+			files = gcsStore
+		}
+	}
+
+	h := NewHandlerWithFileStore(cfg, db, store, verifier, openRouterClient, files)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)
@@ -51,6 +65,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 			p.Get("/models", h.ListModels)
 			p.Put("/models/preferences", h.UpdateModelPreferences)
 			p.Put("/models/favorites", h.UpdateModelFavorite)
+			p.Post("/files", h.UploadFile)
 			p.Post("/conversations", h.CreateConversation)
 			p.Get("/conversations", h.ListConversations)
 			p.Delete("/conversations", h.DeleteAllConversations)

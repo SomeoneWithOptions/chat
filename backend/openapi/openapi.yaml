@@ -160,6 +160,37 @@ paths:
           $ref: '#/components/responses/Error'
         '401':
           $ref: '#/components/responses/Error'
+  /v1/files:
+    post:
+      summary: Upload one attachment file
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '201':
+          description: File uploaded and indexed for prompt usage
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UploadFileResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '413':
+          $ref: '#/components/responses/Error'
+        '503':
+          $ref: '#/components/responses/Error'
   /v1/conversations:
     post:
       summary: Create a conversation
@@ -432,6 +463,27 @@ components:
         createdAt:
           type: string
           format: date-time
+    File:
+      type: object
+      required: [id, filename, mediaType, sizeBytes, createdAt]
+      properties:
+        id:
+          type: string
+        filename:
+          type: string
+        mediaType:
+          type: string
+        sizeBytes:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+    UploadFileResponse:
+      type: object
+      required: [file]
+      properties:
+        file:
+          $ref: '#/components/schemas/File'
     CreateConversationRequest:
       type: object
       properties:

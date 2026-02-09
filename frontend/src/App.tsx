@@ -1,4 +1,4 @@
-import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
+import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   APIError,
   authWithGoogle,
@@ -10,12 +10,14 @@ import {
   listConversations,
   listModels,
   logout,
+  uploadFile,
   streamMessage,
   updateModelFavorite,
   updateModelPreference,
   type Conversation,
   type Model,
   type ModelPreferences,
+  type UploadedFile,
   type User,
 } from './lib/api';
 
@@ -25,12 +27,21 @@ type Message = {
   content: string;
 };
 
+const acceptedAttachmentTypes = '.txt,.md,.pdf,.csv,.json';
+
 function formatPrice(micros: number): string {
   if (micros <= 0) return '$0';
   return `$${(micros / 1_000_000).toFixed(6)}`;
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 export default function App() {
+  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [user, setUser] = useState<User | null>(null);
   const [models, setModels] = useState<Model[]>([]);
   const [curatedModels, setCuratedModels] = useState<Model[]>([]);
@@ -51,6 +62,8 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<UploadedFile[]>([]);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -128,6 +141,8 @@ export default function App() {
       setActiveConversationId(null);
       setConversationAPISupported(true);
       setMessages([]);
+      setPendingAttachments([]);
+      setUploadingAttachments(false);
       return;
     }
 
@@ -283,6 +298,8 @@ export default function App() {
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
+      setPendingAttachments([]);
+      setUploadingAttachments(false);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -439,11 +456,53 @@ export default function App() {
     }
   }
 
-  async function handleSend(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!prompt.trim() || isStreaming) {
+  function handleAttachmentButtonClick() {
+    if (isStreaming || uploadingAttachments) {
       return;
     }
+    attachmentInputRef.current?.click();
+  }
+
+  function handleRemoveAttachment(fileId: string) {
+    setPendingAttachments((existing) => existing.filter((attachment) => attachment.id !== fileId));
+  }
+
+  async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
+    const files = event.target.files;
+    if (!files || files.length === 0) {
+      return;
+    }
+
+    setError(null);
+    setUploadingAttachments(true);
+
+    try {
+      const uploaded = await Promise.all(Array.from(files).map((file) => uploadFile(file)));
+      setPendingAttachments((existing) => {
+        const byID = new Map<string, UploadedFile>();
+        for (const attachment of existing) {
+          byID.set(attachment.id, attachment);
+        }
+        for (const attachment of uploaded) {
+          byID.set(attachment.id, attachment);
+        }
+        return [...byID.values()];
+      });
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUploadingAttachments(false);
+      event.target.value = '';
+    }
+  }
+
+  async function handleSend(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!prompt.trim() || isStreaming || uploadingAttachments) {
+      return;
+    }
+
+    const attachmentIDs = pendingAttachments.map((attachment) => attachment.id);
 
     const userMessage: Message = {
       id: crypto.randomUUID(),
@@ -472,6 +531,7 @@ export default function App() {
           modelId: selectedModel,
           grounding,
           deepResearch,
+          fileIds: attachmentIDs.length > 0 ? attachmentIDs : undefined,
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
@@ -496,6 +556,7 @@ export default function App() {
       if (resolvedConversationID && conversationAPISupported) {
         await refreshConversations(resolvedConversationID);
       }
+      setPendingAttachments([]);
     } catch (err) {
       setError((err as Error).message);
     } finally {
@@ -679,16 +740,52 @@ export default function App() {
       </section>
 
       <form className="card composer" onSubmit={handleSend}>
+        <input
+          ref={attachmentInputRef}
+          type="file"
+          accept={acceptedAttachmentTypes}
+          multiple
+          onChange={handleAttachmentChange}
+          className="visually-hidden"
+        />
         <textarea
           value={prompt}
           onChange={(event) => setPrompt(event.target.value)}
           rows={4}
           placeholder="Ask something..."
         />
+        <div className="attachment-row">
+          <button
+            type="button"
+            onClick={handleAttachmentButtonClick}
+            disabled={isStreaming || uploadingAttachments}
+          >
+            {uploadingAttachments ? 'Uploading files...' : 'Attach Files'}
+          </button>
+          <span className="empty">Allowed: .txt, .md, .pdf, .csv, .json (max 25 MB each)</span>
+        </div>
+        {pendingAttachments.length > 0 ? (
+          <div className="attachment-chips">
+            {pendingAttachments.map((attachment) => (
+              <div key={attachment.id} className="attachment-chip">
+                <span>
+                  {attachment.filename} ({formatBytes(attachment.sizeBytes)})
+                </span>
+                <button
+                  type="button"
+                  onClick={() => handleRemoveAttachment(attachment.id)}
+                  disabled={isStreaming || uploadingAttachments}
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
         <div className="composer-row">
           {error ? <p className="error">{error}</p> : <span />}
-          <button type="submit" disabled={isStreaming || !prompt.trim()}>
-            {isStreaming ? 'Streaming...' : 'Send'}
+          <button type="submit" disabled={isStreaming || uploadingAttachments || !prompt.trim()}>
+            {isStreaming ? 'Streaming...' : uploadingAttachments ? 'Uploading...' : 'Send'}
           </button>
         </div>
       </form>

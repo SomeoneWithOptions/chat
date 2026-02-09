@@ -27,6 +27,7 @@ type Handler struct {
 	verifier   auth.Verifier
 	openrouter chatStreamer
 	models     modelCataloger
+	files      fileObjectStore
 }
 
 type chatStreamer interface {
@@ -38,11 +39,30 @@ type modelCataloger interface {
 }
 
 func NewHandler(cfg config.Config, db *sql.DB, sessions session.Store, verifier auth.Verifier, streamer chatStreamer) Handler {
+	return NewHandlerWithFileStore(cfg, db, sessions, verifier, streamer, nil)
+}
+
+func NewHandlerWithFileStore(
+	cfg config.Config,
+	db *sql.DB,
+	sessions session.Store,
+	verifier auth.Verifier,
+	streamer chatStreamer,
+	fileStore fileObjectStore,
+) Handler {
 	var catalog modelCataloger
 	if source, ok := streamer.(modelCataloger); ok {
 		catalog = source
 	}
-	return Handler{cfg: cfg, db: db, sessions: sessions, verifier: verifier, openrouter: streamer, models: catalog}
+	return Handler{
+		cfg:        cfg,
+		db:         db,
+		sessions:   sessions,
+		verifier:   verifier,
+		openrouter: streamer,
+		models:     catalog,
+		files:      fileStore,
+	}
 }
 
 type contextKey string
@@ -548,6 +568,12 @@ func (h Handler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	candidates, err := h.listConversationBlobRefs(r.Context(), user.ID, conversationID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to load attachment references")
+		return
+	}
+
 	result, err := h.db.ExecContext(r.Context(), `
 DELETE FROM conversations
 WHERE id = ? AND user_id = ?;
@@ -567,6 +593,8 @@ WHERE id = ? AND user_id = ?;
 		return
 	}
 
+	h.cleanupOrphanedFileBlobs(r.Context(), user.ID, candidates)
+
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
@@ -582,6 +610,12 @@ func (h Handler) DeleteAllConversations(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	candidates, err := h.listAllUserConversationBlobRefs(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to load attachment references")
+		return
+	}
+
 	if _, err := h.db.ExecContext(r.Context(), `
 DELETE FROM conversations
 WHERE user_id = ?;
@@ -590,15 +624,18 @@ WHERE user_id = ?;
 		return
 	}
 
+	h.cleanupOrphanedFileBlobs(r.Context(), user.ID, candidates)
+
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
 type chatMessageRequest struct {
-	ConversationID string `json:"conversationId"`
-	Message        string `json:"message"`
-	ModelID        string `json:"modelId"`
-	Grounding      *bool  `json:"grounding"`
-	DeepResearch   *bool  `json:"deepResearch"`
+	ConversationID string   `json:"conversationId"`
+	Message        string   `json:"message"`
+	ModelID        string   `json:"modelId"`
+	Grounding      *bool    `json:"grounding"`
+	DeepResearch   *bool    `json:"deepResearch"`
+	FileIDs        []string `json:"fileIds"`
 }
 
 func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -627,6 +664,20 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	user, err := h.persistedSessionUser(r.Context(), user)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
+
+	files, normalizedFileIDs, err := h.resolveUserFiles(r.Context(), user.ID, req.FileIDs)
+	if errors.Is(err, errTooManyFileIDs) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "a maximum of 5 attachments is supported")
+		return
+	}
+	if errors.Is(err, errInvalidFileIDs) {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve attachments")
 		return
 	}
 
@@ -660,10 +711,25 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.insertMessage(r.Context(), user.ID, conversationID, "user", req.Message, modelID, grounding, deepResearch); err != nil {
+	if _, err := h.insertUserMessageWithFiles(
+		r.Context(),
+		user.ID,
+		conversationID,
+		req.Message,
+		modelID,
+		grounding,
+		deepResearch,
+		normalizedFileIDs,
+	); err != nil {
+		if errors.Is(err, errInvalidFileIDs) {
+			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+			return
+		}
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to persist message")
 		return
 	}
+
+	userPrompt := h.appendFileContextToPrompt(req.Message, files)
 
 	started := false
 	var assistantContent strings.Builder
@@ -674,7 +740,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			Model: modelID,
 			Messages: []openrouter.Message{
 				{Role: "system", Content: buildSystemPrompt(grounding, deepResearch)},
-				{Role: "user", Content: req.Message},
+				{Role: "user", Content: userPrompt},
 			},
 		},
 		func() error {

@@ -1,9 +1,11 @@
 package httpapi
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -628,6 +630,215 @@ WHERE user_id = ?;
 	}
 }
 
+func TestUploadFileStoresMetadataAndBlob(t *testing.T) {
+	store := &stubFileStore{objects: make(map[string][]byte)}
+	handler, db := newTestHandlerWithFileStore(t, stubStreamer{}, store)
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+
+	var body bytes.Buffer
+	writer := multipart.NewWriter(&body)
+	part, err := writer.CreateFormFile("file", "notes.md")
+	if err != nil {
+		t.Fatalf("create multipart form file: %v", err)
+	}
+	if _, err := part.Write([]byte("# Notes\n\nAttachment text")); err != nil {
+		t.Fatalf("write multipart payload: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("close multipart writer: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/files", &body)
+	req = requestWithSessionUser(req, user)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	resp := httptest.NewRecorder()
+
+	handler.UploadFile(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusCreated, resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		File fileResponse `json:"file"`
+	}
+	decodeJSONBody(t, resp, &payload)
+	if payload.File.ID == "" {
+		t.Fatal("expected uploaded file id")
+	}
+	if payload.File.Filename != "notes.md" {
+		t.Fatalf("unexpected filename: %s", payload.File.Filename)
+	}
+
+	var storageBackend string
+	var storagePath string
+	var extractedText string
+	if err := db.QueryRow(`
+SELECT storage_backend, storage_path, extracted_text
+FROM files
+WHERE id = ?;
+`, payload.File.ID).Scan(&storageBackend, &storagePath, &extractedText); err != nil {
+		t.Fatalf("query file metadata: %v", err)
+	}
+	if storageBackend != "gcs" {
+		t.Fatalf("unexpected storage backend: %s", storageBackend)
+	}
+	if storagePath == "" {
+		t.Fatal("expected non-empty storage path")
+	}
+	if !strings.Contains(extractedText, "Attachment text") {
+		t.Fatalf("expected extracted text to include file content, got: %q", extractedText)
+	}
+
+	if _, ok := store.objects[storagePath]; !ok {
+		t.Fatalf("expected uploaded blob at %s", storagePath)
+	}
+}
+
+func TestChatMessagesPersistsMessageFilesAndUsesAttachmentPrompt(t *testing.T) {
+	var capturedRequest openrouter.StreamRequest
+	streamer := stubStreamer{
+		tokens: []string{"ok"},
+		onRequest: func(req openrouter.StreamRequest) {
+			capturedRequest = req
+		},
+	}
+	handler, db := newTestHandler(t, streamer)
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	if _, err := db.Exec(`
+INSERT INTO files (
+  id,
+  user_id,
+  filename,
+  media_type,
+  size_bytes,
+  storage_backend,
+  storage_path,
+  extracted_text
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+`, "file-1", user.ID, "notes.md", "text/markdown", 42, "gcs", "chat-uploads/users/user-1/file-1/notes.md", "Attached facts go here."); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Summarize this","modelId":"openrouter/free","fileIds":["file-1"]}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var linkedCount int
+	if err := db.QueryRow(`
+SELECT COUNT(*)
+FROM message_files mf
+JOIN messages m ON m.id = mf.message_id
+WHERE mf.file_id = ? AND m.role = 'user';
+`, "file-1").Scan(&linkedCount); err != nil {
+		t.Fatalf("count message files: %v", err)
+	}
+	if linkedCount != 1 {
+		t.Fatalf("expected 1 message-file link, got %d", linkedCount)
+	}
+
+	if len(capturedRequest.Messages) < 2 {
+		t.Fatalf("expected at least 2 prompt messages, got %+v", capturedRequest.Messages)
+	}
+	if !strings.Contains(capturedRequest.Messages[1].Content, "Attached facts go here.") {
+		t.Fatalf("expected attachment text in prompt, got: %q", capturedRequest.Messages[1].Content)
+	}
+}
+
+func TestDeleteConversationCleansAttachmentBlobAndMetadata(t *testing.T) {
+	store := &stubFileStore{objects: make(map[string][]byte)}
+	handler, db := newTestHandlerWithFileStore(t, stubStreamer{}, store)
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	conversation, err := handler.insertConversation(context.Background(), user.ID, "With Attachments")
+	if err != nil {
+		t.Fatalf("insert conversation: %v", err)
+	}
+	if err := handler.insertMessage(context.Background(), user.ID, conversation.ID, "user", "hello", "openrouter/free", true, false); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	var messageID string
+	if err := db.QueryRow(`
+SELECT id
+FROM messages
+WHERE conversation_id = ?
+LIMIT 1;
+`, conversation.ID).Scan(&messageID); err != nil {
+		t.Fatalf("query message id: %v", err)
+	}
+
+	storagePath := "chat-uploads/users/user-1/file-1/notes.md"
+	store.objects[storagePath] = []byte("blob-data")
+	if _, err := db.Exec(`
+INSERT INTO files (
+  id,
+  user_id,
+  filename,
+  media_type,
+  size_bytes,
+  storage_backend,
+  storage_path,
+  extracted_text
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+`, "file-1", user.ID, "notes.md", "text/markdown", 123, "gcs", storagePath, "attachment text"); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+	if _, err := db.Exec(`
+INSERT INTO message_files (message_id, file_id)
+VALUES (?, ?);
+`, messageID, "file-1"); err != nil {
+		t.Fatalf("seed message_files: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodDelete, "/v1/conversations/"+conversation.ID, nil)
+	req = requestWithSessionUser(req, user)
+	req = requestWithConversationID(req, conversation.ID)
+	resp := httptest.NewRecorder()
+
+	handler.DeleteConversation(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var fileCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files WHERE id = ?;`, "file-1").Scan(&fileCount); err != nil {
+		t.Fatalf("count files: %v", err)
+	}
+	if fileCount != 0 {
+		t.Fatalf("expected file metadata deletion, got %d rows", fileCount)
+	}
+
+	if len(store.deletedPaths) != 1 || store.deletedPaths[0] != storagePath {
+		t.Fatalf("expected blob delete path %q, got %+v", storagePath, store.deletedPaths)
+	}
+}
+
 func TestChatMessagesConversationOwnershipEnforced(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Should", " not", " stream"}})
 	t.Cleanup(func() { _ = db.Close() })
@@ -700,6 +911,10 @@ func TestCreateConversationInAuthDisabledMode(t *testing.T) {
 }
 
 func newTestHandler(t *testing.T, streamer chatStreamer) (Handler, *sql.DB) {
+	return newTestHandlerWithFileStore(t, streamer, nil)
+}
+
+func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore fileObjectStore) (Handler, *sql.DB) {
 	t.Helper()
 
 	db, err := sql.Open("sqlite", ":memory:")
@@ -716,7 +931,7 @@ func newTestHandler(t *testing.T, streamer chatStreamer) (Handler, *sql.DB) {
 		OpenRouterDefaultModel: "openrouter/free",
 	}
 
-	handler := NewHandler(cfg, db, session.NewStore(db), auth.NewVerifier(cfg), streamer)
+	handler := NewHandlerWithFileStore(cfg, db, session.NewStore(db), auth.NewVerifier(cfg), streamer, fileStore)
 	return handler, db
 }
 
@@ -762,9 +977,13 @@ type stubStreamer struct {
 	err        error
 	catalog    []openrouter.Model
 	catalogErr error
+	onRequest  func(openrouter.StreamRequest)
 }
 
-func (s stubStreamer) StreamChatCompletion(_ context.Context, _ openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error {
+func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error {
+	if s.onRequest != nil {
+		s.onRequest(req)
+	}
 	if err := onStart(); err != nil {
 		return err
 	}
@@ -781,6 +1000,29 @@ func (s stubStreamer) ListModels(_ context.Context) ([]openrouter.Model, error) 
 		return nil, s.catalogErr
 	}
 	return s.catalog, nil
+}
+
+type stubFileStore struct {
+	objects      map[string][]byte
+	deletedPaths []string
+}
+
+func (s *stubFileStore) Backend() string {
+	return "gcs"
+}
+
+func (s *stubFileStore) PutObject(_ context.Context, objectPath, _ string, data []byte) error {
+	if s.objects == nil {
+		s.objects = make(map[string][]byte)
+	}
+	s.objects[objectPath] = append([]byte(nil), data...)
+	return nil
+}
+
+func (s *stubFileStore) DeleteObject(_ context.Context, objectPath string) error {
+	s.deletedPaths = append(s.deletedPaths, objectPath)
+	delete(s.objects, objectPath)
+	return nil
 }
 
 const testSchema = `
@@ -850,5 +1092,27 @@ CREATE TABLE messages (
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE SET NULL
+);
+
+CREATE TABLE files (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  filename TEXT NOT NULL,
+  media_type TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL,
+  storage_backend TEXT NOT NULL CHECK (storage_backend IN ('local', 'gcs')),
+  storage_path TEXT NOT NULL,
+  extracted_text TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE TABLE message_files (
+  message_id TEXT NOT NULL,
+  file_id TEXT NOT NULL,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (message_id, file_id),
+  FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
+  FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 );
 `

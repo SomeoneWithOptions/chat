@@ -120,3 +120,5 @@ CREATE TABLE IF NOT EXISTS message_files (
   FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
   FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 );
+
+CREATE INDEX IF NOT EXISTS idx_message_files_file_id ON message_files(file_id);

@@ -17,6 +17,7 @@ const (
 	defaultOpenRouterBaseURL   = "https://openrouter.ai/api/v1"
 	defaultFrontendOrigin      = "https://chat.sanetomore.com"
 	defaultUploadDir           = "/tmp/chat-uploads"
+	defaultGCSUploadPrefix     = "chat-uploads"
 	defaultResearchTimeoutSecs = 120
 )
 
@@ -38,6 +39,8 @@ type Config struct {
 	OpenRouterBaseURL          string
 	OpenRouterDefaultModel     string
 	LocalUploadDir             string
+	GCSUploadBucket            string
+	GCSUploadPrefix            string
 	DeepResearchTimeoutSeconds int
 }
 
@@ -61,6 +64,8 @@ func Load() (Config, error) {
 		OpenRouterBaseURL:          envOrDefault("OPENROUTER_API_BASE_URL", defaultOpenRouterBaseURL),
 		OpenRouterDefaultModel:     envOrDefault("OPENROUTER_FREE_TIER_DEFAULT_MODEL", defaultDefaultModel),
 		LocalUploadDir:             envOrDefault("LOCAL_UPLOAD_DIR", defaultUploadDir),
+		GCSUploadBucket:            strings.TrimSpace(os.Getenv("GCS_UPLOAD_BUCKET")),
+		GCSUploadPrefix:            envOrDefault("GCS_UPLOAD_PREFIX", defaultGCSUploadPrefix),
 		DeepResearchTimeoutSeconds: intOrDefault("DEEP_RESEARCH_TIMEOUT_SECONDS", defaultResearchTimeoutSecs),
 	}
 
