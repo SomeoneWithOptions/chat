@@ -184,6 +184,31 @@ ORDER BY rowid ASC;
 	}
 }
 
+func TestCreateConversationInAuthDisabledMode(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.AuthRequired = false
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/conversations", strings.NewReader(`{"title":"Anon Chat"}`))
+	req = requestWithSessionUser(req, anonymousUser())
+	resp := httptest.NewRecorder()
+
+	handler.CreateConversation(resp, req)
+
+	if resp.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusCreated, resp.Code, resp.Body.String())
+	}
+
+	var userCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE google_sub = ?;`, "anonymous").Scan(&userCount); err != nil {
+		t.Fatalf("count anonymous user: %v", err)
+	}
+	if userCount != 1 {
+		t.Fatalf("expected anonymous user to be persisted, got %d", userCount)
+	}
+}
+
 func newTestHandler(t *testing.T, streamer chatStreamer) (Handler, *sql.DB) {
 	t.Helper()
 

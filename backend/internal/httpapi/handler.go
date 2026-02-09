@@ -184,6 +184,11 @@ func (h Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
 		return
 	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
 
 	var req createConversationRequest
 	if err := decodeJSON(r, &req); err != nil && !errors.Is(err, io.EOF) {
@@ -204,6 +209,11 @@ func (h Handler) ListConversations(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUserFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
 		return
 	}
 
@@ -242,6 +252,11 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	user, ok := sessionUserFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
 		return
 	}
 
@@ -338,6 +353,11 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUserFromContext(r.Context())
 	if !ok {
 		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
 		return
 	}
 
@@ -512,6 +532,18 @@ func (h Handler) clearSessionCookie(w http.ResponseWriter) {
 		Expires:  time.Unix(0, 0),
 		MaxAge:   -1,
 	})
+}
+
+func (h Handler) persistedSessionUser(ctx context.Context, user session.User) (session.User, error) {
+	if h.cfg.AuthRequired {
+		return user, nil
+	}
+
+	upserted, err := h.sessions.UpsertUser(ctx, user.GoogleSub, user.Email, user.Name, user.AvatarURL)
+	if err != nil {
+		return session.User{}, err
+	}
+	return upserted, nil
 }
 
 func (h Handler) insertConversation(ctx context.Context, userID, requestedTitle string) (conversationResponse, error) {
