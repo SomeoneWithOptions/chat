@@ -521,7 +521,7 @@ SELECT m.id, m.conversation_id, m.role, m.content, m.model_id, m.grounding_enabl
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
-ORDER BY m.created_at ASC, m.id ASC;
+ORDER BY m.created_at ASC, m.rowid ASC;
 `, conversationID, user.ID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to read messages")
@@ -803,14 +803,15 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userPrompt := h.appendFileContextToPrompt(req.Message, files)
-	groundingCitations, groundingWarning := h.resolveGroundingContext(r.Context(), req.Message, grounding)
+	timeSensitive := isTimeSensitivePrompt(req.Message)
+	groundingCitations, groundingWarning := h.resolveGroundingContext(r.Context(), req.Message, grounding, timeSensitive)
 	promptMessages := []openrouter.Message{
-		{Role: "system", Content: buildSystemPrompt(grounding, deepResearch, len(groundingCitations) > 0)},
+		{Role: "system", Content: buildSystemPrompt(grounding, deepResearch, len(groundingCitations) > 0, timeSensitive)},
 	}
 	if len(groundingCitations) > 0 {
 		promptMessages = append(promptMessages, openrouter.Message{
 			Role:    "system",
-			Content: buildGroundingPrompt(groundingCitations),
+			Content: buildGroundingPrompt(groundingCitations, timeSensitive),
 		})
 	}
 	promptMessages = append(promptMessages, openrouter.Message{Role: "user", Content: userPrompt})
@@ -927,7 +928,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 const maxGroundingResults = 6
 
-func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled bool) ([]citationResponse, string) {
+func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
 	if !enabled {
 		return nil, ""
 	}
@@ -936,26 +937,50 @@ func (h Handler) resolveGroundingContext(ctx context.Context, message string, en
 		return nil, "Grounding is unavailable for this response."
 	}
 
-	results, err := h.grounding.Search(ctx, message, maxGroundingResults)
-	if err != nil {
-		if errors.Is(err, brave.ErrMissingAPIKey) {
-			return nil, "Grounding is unavailable because BRAVE_API_KEY is not configured."
-		}
-		return nil, "Grounding search failed. Continuing without web sources."
+	queries := []string{strings.TrimSpace(message)}
+	if timeSensitive {
+		queries = append(queries, strings.TrimSpace(message)+" official release notes changelog")
 	}
 
-	citations := make([]citationResponse, 0, len(results))
-	for _, result := range results {
-		rawURL := strings.TrimSpace(result.URL)
-		if rawURL == "" {
+	citations := make([]citationResponse, 0, maxGroundingResults)
+	seenURLs := make(map[string]struct{}, maxGroundingResults)
+	for idx, query := range queries {
+		if query == "" {
 			continue
 		}
-		citations = append(citations, citationResponse{
-			URL:            rawURL,
-			Title:          trimToRunes(strings.TrimSpace(result.Title), 240),
-			Snippet:        trimToRunes(strings.TrimSpace(result.Snippet), 800),
-			SourceProvider: "brave",
-		})
+
+		results, err := h.grounding.Search(ctx, query, maxGroundingResults)
+		if err != nil {
+			if errors.Is(err, brave.ErrMissingAPIKey) {
+				return nil, "Grounding is unavailable because BRAVE_API_KEY is not configured."
+			}
+			if idx == 0 {
+				return nil, "Grounding search failed. Continuing without web sources."
+			}
+			continue
+		}
+
+		for _, result := range results {
+			rawURL := strings.TrimSpace(result.URL)
+			if rawURL == "" {
+				continue
+			}
+			if _, exists := seenURLs[rawURL]; exists {
+				continue
+			}
+			seenURLs[rawURL] = struct{}{}
+
+			citations = append(citations, citationResponse{
+				URL:            rawURL,
+				Title:          trimToRunes(strings.TrimSpace(result.Title), 240),
+				Snippet:        trimToRunes(strings.TrimSpace(result.Snippet), 800),
+				SourceProvider: "brave",
+			})
+
+			if len(citations) >= maxGroundingResults {
+				return citations, ""
+			}
+		}
 	}
 
 	return citations, ""
@@ -1521,31 +1546,40 @@ func writeSSEEvent(w io.Writer, payload any) error {
 	return nil
 }
 
-func buildSystemPrompt(grounding, deepResearch, hasGroundingContext bool) string {
+func buildSystemPrompt(grounding, deepResearch, hasGroundingContext, timeSensitive bool) string {
 	mode := "normal chat"
 	if deepResearch {
 		mode = "deep research"
 	}
 
+	timeSensitiveInstruction := ""
+	if timeSensitive {
+		timeSensitiveInstruction = " For time-sensitive questions (latest/current/today), do not assert an exact latest fact unless explicitly supported by the provided sources. If evidence is stale, missing dates, or conflicting, say you cannot verify the latest status."
+	}
+
 	if grounding && hasGroundingContext {
 		return fmt.Sprintf(
-			"You are a helpful assistant in %s mode. Use grounded, factual answers from the provided sources and call out uncertainty.",
-			mode,
+			"You are a helpful assistant in %s mode. Use grounded, factual answers from the provided sources and call out uncertainty.%s",
+			mode, timeSensitiveInstruction,
 		)
 	}
 	if grounding {
-		return fmt.Sprintf("You are a helpful assistant in %s mode. Use grounded, factual answers and call out uncertainty.", mode)
+		return fmt.Sprintf("You are a helpful assistant in %s mode. Use grounded, factual answers and call out uncertainty.%s", mode, timeSensitiveInstruction)
 	}
 	return fmt.Sprintf("You are a helpful assistant in %s mode.", mode)
 }
 
-func buildGroundingPrompt(citations []citationResponse) string {
+func buildGroundingPrompt(citations []citationResponse, timeSensitive bool) string {
 	if len(citations) == 0 {
 		return ""
 	}
 
 	var builder strings.Builder
 	builder.WriteString("Grounding context from recent web search results:\n")
+	if timeSensitive {
+		builder.WriteString(fmt.Sprintf("Current date (UTC): %s\n", time.Now().UTC().Format("2006-01-02")))
+		builder.WriteString("Prioritize sources with explicit recent dates and official release/changelog pages.\n")
+	}
 	for i, citation := range citations {
 		label := strings.TrimSpace(citation.Title)
 		if label == "" {
@@ -1562,4 +1596,30 @@ func buildGroundingPrompt(citations []citationResponse) string {
 
 	builder.WriteString("\nUse this context when relevant. If evidence is weak, say so clearly.")
 	return strings.TrimSpace(builder.String())
+}
+
+func isTimeSensitivePrompt(message string) bool {
+	lower := strings.ToLower(strings.TrimSpace(message))
+	if lower == "" {
+		return false
+	}
+
+	keywords := []string{
+		"latest",
+		"newest",
+		"current",
+		"today",
+		"right now",
+		"as of",
+		"recent",
+		"this week",
+		"this month",
+		"breaking",
+	}
+	for _, keyword := range keywords {
+		if strings.Contains(lower, keyword) {
+			return true
+		}
+	}
+	return false
 }
