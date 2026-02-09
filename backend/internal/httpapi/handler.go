@@ -324,6 +324,69 @@ ORDER BY m.created_at ASC, m.id ASC;
 	writeJSON(w, http.StatusOK, map[string]any{"messages": messages})
 }
 
+func (h Handler) DeleteConversation(w http.ResponseWriter, r *http.Request) {
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
+
+	conversationID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if conversationID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "conversation id is required")
+		return
+	}
+
+	result, err := h.db.ExecContext(r.Context(), `
+DELETE FROM conversations
+WHERE id = ? AND user_id = ?;
+`, conversationID, user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to delete conversation")
+		return
+	}
+
+	rowsAffected, err := result.RowsAffected()
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to delete conversation")
+		return
+	}
+	if rowsAffected == 0 {
+		writeError(w, http.StatusNotFound, "conversation_not_found", "conversation not found")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
+func (h Handler) DeleteAllConversations(w http.ResponseWriter, r *http.Request) {
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
+
+	if _, err := h.db.ExecContext(r.Context(), `
+DELETE FROM conversations
+WHERE user_id = ?;
+`, user.ID); err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to delete conversations")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"success": true})
+}
+
 type chatMessageRequest struct {
 	ConversationID string `json:"conversationId"`
 	Message        string `json:"message"`

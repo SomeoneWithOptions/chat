@@ -3,6 +3,8 @@ import {
   APIError,
   authWithGoogle,
   createConversation,
+  deleteAllConversations,
+  deleteConversation,
   getMe,
   listConversationMessages,
   listConversations,
@@ -37,6 +39,8 @@ export default function App() {
   const [grounding, setGrounding] = useState(true);
   const [deepResearch, setDeepResearch] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [loadingAuth, setLoadingAuth] = useState(true);
@@ -47,6 +51,10 @@ export default function App() {
 
   function isNotFoundError(err: unknown): err is APIError {
     return err instanceof APIError && err.status === 404;
+  }
+
+  function isConversationNotFoundError(err: unknown): err is APIError {
+    return err instanceof APIError && err.status === 404 && err.code === 'conversation_not_found';
   }
 
   useEffect(() => {
@@ -160,6 +168,10 @@ export default function App() {
           })),
         );
       } catch (err) {
+        if (isConversationNotFoundError(err)) {
+          await refreshConversations();
+          return;
+        }
         if (isNotFoundError(err)) {
           setConversationAPISupported(false);
           setConversations([]);
@@ -217,7 +229,7 @@ export default function App() {
   }
 
   async function handleNewConversation() {
-    if (isStreaming || !conversationAPISupported) {
+    if (isStreaming || !conversationAPISupported || deletingConversationId !== null || isDeletingAll) {
       return;
     }
     setError(null);
@@ -233,6 +245,83 @@ export default function App() {
         return;
       }
       setError((err as Error).message);
+    }
+  }
+
+  async function handleDeleteConversation(conversationId: string) {
+    if (isStreaming || deletingConversationId !== null || isDeletingAll || !conversationAPISupported) {
+      return;
+    }
+
+    const conversation = conversations.find((item) => item.id === conversationId);
+    const confirmed = window.confirm(`Delete "${conversation?.title ?? 'this chat'}"? This cannot be undone.`);
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+    setDeletingConversationId(conversationId);
+
+    if (activeConversationId === conversationId) {
+      setMessages([]);
+    }
+
+    try {
+      await deleteConversation(conversationId);
+      await refreshConversations();
+    } catch (err) {
+      if (isConversationNotFoundError(err)) {
+        await refreshConversations();
+        return;
+      }
+      if (isNotFoundError(err)) {
+        setConversationAPISupported(false);
+        setConversations([]);
+        setActiveConversationId(null);
+        setMessages([]);
+        return;
+      }
+      setError((err as Error).message);
+    } finally {
+      setDeletingConversationId(null);
+    }
+  }
+
+  async function handleDeleteAllConversations() {
+    if (
+      isStreaming ||
+      deletingConversationId !== null ||
+      isDeletingAll ||
+      !conversationAPISupported ||
+      conversations.length === 0
+    ) {
+      return;
+    }
+
+    const confirmed = window.confirm('Delete all conversations? This cannot be undone.');
+    if (!confirmed) {
+      return;
+    }
+
+    setError(null);
+    setIsDeletingAll(true);
+
+    try {
+      await deleteAllConversations();
+      setConversations([]);
+      setActiveConversationId(null);
+      setMessages([]);
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        setConversationAPISupported(false);
+        setConversations([]);
+        setActiveConversationId(null);
+        setMessages([]);
+        return;
+      }
+      setError((err as Error).message);
+    } finally {
+      setIsDeletingAll(false);
     }
   }
 
@@ -387,9 +476,22 @@ export default function App() {
         <section className="card conversations">
           <div className="conversations-header">
             <p className="eyebrow">Conversations</p>
-            <button type="button" onClick={handleNewConversation} disabled={isStreaming}>
-              New Chat
-            </button>
+            <div className="conversation-actions">
+              <button
+                type="button"
+                onClick={handleDeleteAllConversations}
+                disabled={isStreaming || deletingConversationId !== null || isDeletingAll || conversations.length === 0}
+              >
+                {isDeletingAll ? 'Deleting...' : 'Delete All'}
+              </button>
+              <button
+                type="button"
+                onClick={handleNewConversation}
+                disabled={isStreaming || deletingConversationId !== null || isDeletingAll}
+              >
+                New Chat
+              </button>
+            </div>
           </div>
           {loadingConversations ? <p className="empty">Loading conversations...</p> : null}
           {!loadingConversations && conversations.length === 0 ? (
@@ -398,15 +500,24 @@ export default function App() {
           {!loadingConversations && conversations.length > 0 ? (
             <div className="conversation-list">
               {conversations.map((conversation) => (
-                <button
-                  key={conversation.id}
-                  type="button"
-                  className={`conversation-item ${activeConversationId === conversation.id ? 'active' : ''}`}
-                  onClick={() => setActiveConversationId(conversation.id)}
-                  disabled={isStreaming}
-                >
-                  {conversation.title}
-                </button>
+                <div key={conversation.id} className="conversation-row">
+                  <button
+                    type="button"
+                    className={`conversation-item ${activeConversationId === conversation.id ? 'active' : ''}`}
+                    onClick={() => setActiveConversationId(conversation.id)}
+                    disabled={isStreaming || deletingConversationId !== null || isDeletingAll}
+                  >
+                    {conversation.title}
+                  </button>
+                  <button
+                    type="button"
+                    className="conversation-delete"
+                    onClick={() => void handleDeleteConversation(conversation.id)}
+                    disabled={isStreaming || deletingConversationId !== null || isDeletingAll}
+                  >
+                    {deletingConversationId === conversation.id ? 'Deleting...' : 'Delete'}
+                  </button>
+                </div>
               ))}
             </div>
           ) : null}

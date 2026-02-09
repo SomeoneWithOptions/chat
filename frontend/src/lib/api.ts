@@ -139,6 +139,18 @@ export async function listConversationMessages(conversationId: string): Promise<
   return response.messages;
 }
 
+export async function deleteConversation(conversationId: string): Promise<void> {
+  await requestJSON<{ success: boolean }>(`/v1/conversations/${conversationId}`, {
+    method: 'DELETE',
+  });
+}
+
+export async function deleteAllConversations(): Promise<void> {
+  await requestJSON<{ success: boolean }>('/v1/conversations', {
+    method: 'DELETE',
+  });
+}
+
 export async function streamMessage(
   request: ChatRequest,
   onEvent: (event: StreamEvent) => void,

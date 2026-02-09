@@ -12,6 +12,8 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - `GET /v1/models`
 - `POST /v1/conversations`
 - `GET /v1/conversations`
+- `DELETE /v1/conversations`
+- `DELETE /v1/conversations/{id}`
 - `GET /v1/conversations/{id}/messages`
 - `POST /v1/chat/messages` (SSE stream bridged from OpenRouter)
 

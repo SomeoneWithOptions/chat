@@ -51,6 +51,8 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 			p.Get("/models", h.ListModels)
 			p.Post("/conversations", h.CreateConversation)
 			p.Get("/conversations", h.ListConversations)
+			p.Delete("/conversations", h.DeleteAllConversations)
+			p.Delete("/conversations/{id}", h.DeleteConversation)
 			p.Get("/conversations/{id}/messages", h.ListConversationMessages)
 			p.Post("/chat/messages", h.ChatMessages)
 		})

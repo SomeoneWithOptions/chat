@@ -161,11 +161,22 @@ button:hover {
   margin: 0;
 }
 
+.conversation-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
 .conversation-list {
   display: grid;
   gap: 0.5rem;
   max-height: 220px;
   overflow-y: auto;
+}
+
+.conversation-row {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.5rem;
 }
 
 .conversation-item {
@@ -176,6 +187,11 @@ button:hover {
 .conversation-item.active {
   border-color: var(--accent-strong);
   background: rgba(39, 168, 217, 0.2);
+}
+
+.conversation-delete {
+  border-color: rgba(255, 138, 138, 0.55);
+  color: var(--danger);
 }
 
 .messages {

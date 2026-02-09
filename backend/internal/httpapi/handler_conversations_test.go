@@ -68,6 +68,231 @@ func TestCreateAndListConversations(t *testing.T) {
 	}
 }
 
+func TestConversationLifecycleCreateListGetAndDelete(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+
+	createReq := httptest.NewRequest(http.MethodPost, "/v1/conversations", strings.NewReader(`{"title":"Lifecycle Chat"}`))
+	createReq = requestWithSessionUser(createReq, user)
+	createResp := httptest.NewRecorder()
+
+	handler.CreateConversation(createResp, createReq)
+
+	if createResp.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d", http.StatusCreated, createResp.Code)
+	}
+
+	var created struct {
+		Conversation conversationResponse `json:"conversation"`
+	}
+	decodeJSONBody(t, createResp, &created)
+
+	if err := handler.insertMessage(context.Background(), user.ID, created.Conversation.ID, "user", "hello lifecycle", "", true, false); err != nil {
+		t.Fatalf("insert message: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations", nil)
+	listReq = requestWithSessionUser(listReq, user)
+	listResp := httptest.NewRecorder()
+
+	handler.ListConversations(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listResp.Code)
+	}
+	var listed struct {
+		Conversations []conversationResponse `json:"conversations"`
+	}
+	decodeJSONBody(t, listResp, &listed)
+	if len(listed.Conversations) != 1 {
+		t.Fatalf("expected 1 conversation, got %d", len(listed.Conversations))
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.Conversation.ID+"/messages", nil)
+	getReq = requestWithSessionUser(getReq, user)
+	getReq = requestWithConversationID(getReq, created.Conversation.ID)
+	getResp := httptest.NewRecorder()
+
+	handler.ListConversationMessages(getResp, getReq)
+
+	if getResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, getResp.Code)
+	}
+	var listedMessages struct {
+		Messages []messageResponse `json:"messages"`
+	}
+	decodeJSONBody(t, getResp, &listedMessages)
+	if len(listedMessages.Messages) != 1 {
+		t.Fatalf("expected 1 message, got %d", len(listedMessages.Messages))
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/conversations/"+created.Conversation.ID, nil)
+	deleteReq = requestWithSessionUser(deleteReq, user)
+	deleteReq = requestWithConversationID(deleteReq, created.Conversation.ID)
+	deleteResp := httptest.NewRecorder()
+
+	handler.DeleteConversation(deleteResp, deleteReq)
+
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, deleteResp.Code, deleteResp.Body.String())
+	}
+	var deletePayload struct {
+		Success bool `json:"success"`
+	}
+	decodeJSONBody(t, deleteResp, &deletePayload)
+	if !deletePayload.Success {
+		t.Fatalf("expected success=true, got %+v", deletePayload)
+	}
+
+	listReqAfterDelete := httptest.NewRequest(http.MethodGet, "/v1/conversations", nil)
+	listReqAfterDelete = requestWithSessionUser(listReqAfterDelete, user)
+	listRespAfterDelete := httptest.NewRecorder()
+
+	handler.ListConversations(listRespAfterDelete, listReqAfterDelete)
+
+	if listRespAfterDelete.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, listRespAfterDelete.Code)
+	}
+	var listedAfterDelete struct {
+		Conversations []conversationResponse `json:"conversations"`
+	}
+	decodeJSONBody(t, listRespAfterDelete, &listedAfterDelete)
+	if len(listedAfterDelete.Conversations) != 0 {
+		t.Fatalf("expected 0 conversations, got %d", len(listedAfterDelete.Conversations))
+	}
+
+	getReqAfterDelete := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+created.Conversation.ID+"/messages", nil)
+	getReqAfterDelete = requestWithSessionUser(getReqAfterDelete, user)
+	getReqAfterDelete = requestWithConversationID(getReqAfterDelete, created.Conversation.ID)
+	getRespAfterDelete := httptest.NewRecorder()
+
+	handler.ListConversationMessages(getRespAfterDelete, getReqAfterDelete)
+
+	if getRespAfterDelete.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, getRespAfterDelete.Code)
+	}
+
+	var messageCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id = ?;`, created.Conversation.ID).Scan(&messageCount); err != nil {
+		t.Fatalf("count messages: %v", err)
+	}
+	if messageCount != 0 {
+		t.Fatalf("expected messages to be deleted by cascade, got %d", messageCount)
+	}
+}
+
+func TestDeleteAllConversationsScopedByUser(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user1 := session.User{ID: "user-1"}
+	user2 := session.User{ID: "user-2"}
+	seedUser(t, db, user1.ID, "user1@example.com")
+	seedUser(t, db, user2.ID, "user2@example.com")
+
+	conversation1, err := handler.insertConversation(context.Background(), user1.ID, "U1 Chat A")
+	if err != nil {
+		t.Fatalf("insert conversation 1: %v", err)
+	}
+	conversation2, err := handler.insertConversation(context.Background(), user1.ID, "U1 Chat B")
+	if err != nil {
+		t.Fatalf("insert conversation 2: %v", err)
+	}
+	otherConversation, err := handler.insertConversation(context.Background(), user2.ID, "U2 Chat")
+	if err != nil {
+		t.Fatalf("insert other conversation: %v", err)
+	}
+
+	if err := handler.insertMessage(context.Background(), user1.ID, conversation1.ID, "user", "message one", "", true, false); err != nil {
+		t.Fatalf("insert message one: %v", err)
+	}
+	if err := handler.insertMessage(context.Background(), user1.ID, conversation2.ID, "assistant", "message two", "", true, false); err != nil {
+		t.Fatalf("insert message two: %v", err)
+	}
+	if err := handler.insertMessage(context.Background(), user2.ID, otherConversation.ID, "user", "keep me", "", true, false); err != nil {
+		t.Fatalf("insert other user message: %v", err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/conversations", nil)
+	deleteReq = requestWithSessionUser(deleteReq, user1)
+	deleteResp := httptest.NewRecorder()
+
+	handler.DeleteAllConversations(deleteResp, deleteReq)
+
+	if deleteResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, deleteResp.Code, deleteResp.Body.String())
+	}
+
+	var user1ConversationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversations WHERE user_id = ?;`, user1.ID).Scan(&user1ConversationCount); err != nil {
+		t.Fatalf("count user1 conversations: %v", err)
+	}
+	if user1ConversationCount != 0 {
+		t.Fatalf("expected user1 conversations to be deleted, got %d", user1ConversationCount)
+	}
+
+	var user1MessageCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE user_id = ?;`, user1.ID).Scan(&user1MessageCount); err != nil {
+		t.Fatalf("count user1 messages: %v", err)
+	}
+	if user1MessageCount != 0 {
+		t.Fatalf("expected user1 messages to be deleted, got %d", user1MessageCount)
+	}
+
+	var user2ConversationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversations WHERE user_id = ?;`, user2.ID).Scan(&user2ConversationCount); err != nil {
+		t.Fatalf("count user2 conversations: %v", err)
+	}
+	if user2ConversationCount != 1 {
+		t.Fatalf("expected user2 conversation to remain, got %d", user2ConversationCount)
+	}
+
+	var user2MessageCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE user_id = ?;`, user2.ID).Scan(&user2MessageCount); err != nil {
+		t.Fatalf("count user2 messages: %v", err)
+	}
+	if user2MessageCount != 1 {
+		t.Fatalf("expected user2 message to remain, got %d", user2MessageCount)
+	}
+}
+
+func TestDeleteConversationNotOwnedReturnsNotFound(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	owner := session.User{ID: "owner-1"}
+	other := session.User{ID: "other-1"}
+	seedUser(t, db, owner.ID, "owner@example.com")
+	seedUser(t, db, other.ID, "other@example.com")
+
+	conversation, err := handler.insertConversation(context.Background(), owner.ID, "Owner Chat")
+	if err != nil {
+		t.Fatalf("insert conversation: %v", err)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/v1/conversations/"+conversation.ID, nil)
+	deleteReq = requestWithSessionUser(deleteReq, other)
+	deleteReq = requestWithConversationID(deleteReq, conversation.ID)
+	deleteResp := httptest.NewRecorder()
+
+	handler.DeleteConversation(deleteResp, deleteReq)
+
+	if deleteResp.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d", http.StatusNotFound, deleteResp.Code)
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversations WHERE id = ?;`, conversation.ID).Scan(&count); err != nil {
+		t.Fatalf("count conversations: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("expected conversation to remain, got %d", count)
+	}
+}
+
 func TestListConversationMessagesScopedByUser(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{})
 	t.Cleanup(func() { _ = db.Close() })
@@ -181,6 +406,52 @@ ORDER BY rowid ASC;
 	}
 	if messages[1].Role != "assistant" || messages[1].Content != "Hi there" {
 		t.Fatalf("unexpected second message: %+v", messages[1])
+	}
+}
+
+func TestChatMessagesConversationOwnershipEnforced(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Should", " not", " stream"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	owner := session.User{ID: "owner-1"}
+	other := session.User{ID: "other-1"}
+	seedUser(t, db, owner.ID, "owner@example.com")
+	seedUser(t, db, other.ID, "other@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	conversation, err := handler.insertConversation(context.Background(), owner.ID, "Owner Conversation")
+	if err != nil {
+		t.Fatalf("insert conversation: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversation.ID+`","message":"Hello","modelId":"openrouter/free"}`),
+	)
+	req = requestWithSessionUser(req, other)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusNotFound, resp.Code, resp.Body.String())
+	}
+
+	var conversationMessageCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM messages WHERE conversation_id = ?;`, conversation.ID).Scan(&conversationMessageCount); err != nil {
+		t.Fatalf("count conversation messages: %v", err)
+	}
+	if conversationMessageCount != 0 {
+		t.Fatalf("expected no messages to be persisted, got %d", conversationMessageCount)
+	}
+
+	var otherConversationCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM conversations WHERE user_id = ?;`, other.ID).Scan(&otherConversationCount); err != nil {
+		t.Fatalf("count other conversations: %v", err)
+	}
+	if otherConversationCount != 0 {
+		t.Fatalf("expected no conversation to be auto-created, got %d", otherConversationCount)
 	}
 }
 

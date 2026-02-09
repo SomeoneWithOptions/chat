@@ -157,6 +157,41 @@ paths:
                 $ref: '#/components/schemas/ListConversationsResponse'
         '401':
           $ref: '#/components/responses/Error'
+    delete:
+      summary: Delete all conversations for the current user
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Conversations deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+  /v1/conversations/{id}:
+    delete:
+      summary: Delete one conversation for the current user
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Conversation deleted
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeleteResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
   /v1/conversations/{id}/messages:
     get:
       summary: List messages for a conversation
@@ -329,6 +364,13 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/Message'
+    DeleteResponse:
+      type: object
+      required: [success]
+      properties:
+        success:
+          type: boolean
+          example: true
     ChatMessageRequest:
       type: object
       required: [message]
