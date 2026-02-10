@@ -1,6 +1,6 @@
 # chat
 
-Monorepo for the Saneto Chat app.
+Monorepo for the chat app.
 
 ## Quick start
 
