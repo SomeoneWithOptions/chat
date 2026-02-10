@@ -10,10 +10,19 @@ Deployment script:
 ./scripts/deploy_cloud_run_backend.sh
 ```
 
+Image-based deploy script (local build -> Artifact Registry -> Cloud Run):
+
+```bash
+./scripts/deploy_cloud_run_backend_image.sh
+```
+
+The image deploy script automatically reuses the currently deployed service image repository when `--image-repo` is not provided.
+
 Optional deployment with explicit env file override:
 
 ```bash
 ./scripts/deploy_cloud_run_backend.sh --env-file /path/to/cloud-run.env.yaml
+./scripts/deploy_cloud_run_backend_image.sh --env-file /path/to/cloud-run.env.yaml
 ```
 
 Starter template:
