@@ -54,7 +54,7 @@ export default function Sidebar({
       <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
         <div className="sidebar-header">
           <span className="sidebar-brand">
-            Saneto <em>Chat</em>
+            <em>Chat</em>
           </span>
           <button
             className="btn-icon"

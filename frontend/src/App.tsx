@@ -546,7 +546,7 @@ export default function App() {
       <div className="auth-screen">
         <div className="auth-card">
           <h1 className="auth-brand">
-            Saneto <em>Chat</em>
+            <em>Chat</em>
           </h1>
           <p className="auth-subtitle">Sign in to continue</p>
 
