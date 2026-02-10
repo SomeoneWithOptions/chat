@@ -88,8 +88,9 @@ body {
   line-height: 1.6;
   color: var(--text-primary);
   background: var(--bg-base);
-  min-height: 100vh;
+  min-height: 100dvh;
   overflow: hidden;
+  overscroll-behavior: none;
 }
 
 ::selection {
@@ -456,7 +457,7 @@ code {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  height: 100vh;
+  height: 100%;
   position: relative;
 }
 
@@ -468,6 +469,7 @@ code {
   justify-content: space-between;
   padding: 0 24px;
   height: var(--header-height);
+  min-height: var(--header-height);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
   gap: 16px;
