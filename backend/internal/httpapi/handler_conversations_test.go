@@ -390,6 +390,14 @@ VALUES (?, ?, ?);
 	req = requestWithSessionUser(req, user)
 	resp := httptest.NewRecorder()
 
+	syncReq := httptest.NewRequest(http.MethodPost, "/v1/models/sync", nil)
+	syncReq = requestWithSessionUser(syncReq, user)
+	syncResp := httptest.NewRecorder()
+	handler.SyncModels(syncResp, syncReq)
+	if syncResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, syncResp.Code, syncResp.Body.String())
+	}
+
 	handler.ListModels(resp, req)
 
 	if resp.Code != http.StatusOK {
@@ -427,6 +435,85 @@ VALUES (?, ?, ?);
 	}
 	if payload.Preferences.LastUsedDeepResearchModelID != "openrouter/free" {
 		t.Fatalf("unexpected last used deep research model id: %q", payload.Preferences.LastUsedDeepResearchModelID)
+	}
+}
+
+func TestListModelsDoesNotAutoSyncCatalog(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		catalog: []openrouter.Model{
+			{
+				ID:                       "openai/gpt-4o-mini",
+				Name:                     "GPT-4o mini",
+				ContextWindow:            128000,
+				PromptPriceMicrosUSD:     150,
+				CompletionPriceMicrosUSD: 600,
+			},
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/models", nil)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ListModels(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var payload listModelsResponse
+	decodeJSONBody(t, resp, &payload)
+
+	for _, model := range payload.Models {
+		if model.ID == "openai/gpt-4o-mini" {
+			t.Fatalf("expected catalog model to be absent before manual sync, got %+v", payload.Models)
+		}
+	}
+}
+
+func TestSyncModelsReturnsSyncedCount(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		catalog: []openrouter.Model{
+			{
+				ID:                       "openai/gpt-4o-mini",
+				Name:                     "GPT-4o mini",
+				ContextWindow:            128000,
+				PromptPriceMicrosUSD:     150,
+				CompletionPriceMicrosUSD: 600,
+			},
+			{
+				ID:                       "anthropic/claude-3.5-haiku",
+				Name:                     "Claude Haiku",
+				ContextWindow:            200000,
+				PromptPriceMicrosUSD:     800,
+				CompletionPriceMicrosUSD: 1200,
+			},
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/models/sync", nil)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.SyncModels(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var payload syncModelsResponse
+	decodeJSONBody(t, resp, &payload)
+	if payload.Synced != 2 {
+		t.Fatalf("expected 2 synced models, got %d", payload.Synced)
 	}
 }
 

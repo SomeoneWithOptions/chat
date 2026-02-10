@@ -65,6 +65,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 		v1.Group(func(p chi.Router) {
 			p.Use(h.RequireSession)
 			p.Get("/models", h.ListModels)
+			p.Post("/models/sync", h.SyncModels)
 			p.Put("/models/preferences", h.UpdateModelPreferences)
 			p.Put("/models/favorites", h.UpdateModelFavorite)
 			p.Post("/files", h.UploadFile)

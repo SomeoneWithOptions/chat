@@ -116,6 +116,22 @@ paths:
                 $ref: '#/components/schemas/ListModelsResponse'
         '401':
           $ref: '#/components/responses/Error'
+  /v1/models/sync:
+    post:
+      summary: Manually sync model catalog from OpenRouter into local cache
+      security:
+        - SessionCookie: []
+      responses:
+        '200':
+          description: Catalog sync completed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SyncModelsResponse'
+        '401':
+          $ref: '#/components/responses/Error'
+        '502':
+          $ref: '#/components/responses/Error'
   /v1/models/preferences:
     put:
       summary: Update model preference for chat or deep research mode
@@ -394,6 +410,13 @@ components:
             type: string
         preferences:
           $ref: '#/components/schemas/ModelPreferences'
+    SyncModelsResponse:
+      type: object
+      required: [synced]
+      properties:
+        synced:
+          type: integer
+          minimum: 0
     UpdateModelPreferencesRequest:
       type: object
       required: [mode, modelId]

@@ -10,6 +10,7 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - Final auth rollout: `GET /v1/auth/me`
 - Final auth rollout: `POST /v1/auth/logout`
 - `GET /v1/models`
+- `POST /v1/models/sync`
 - `PUT /v1/models/preferences`
 - `PUT /v1/models/favorites`
 - `POST /v1/files` (multipart upload for `.txt`, `.md`, `.pdf`, `.csv`, `.json`, max 25 MB)
@@ -61,6 +62,7 @@ For temporary anonymous testing, set:
 - Session cookie defaults to 7 days (`SESSION_TTL_HOURS=168`).
 - Email allowlist is env-configurable (`ALLOWED_GOOGLE_EMAILS`).
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
-- `GET /v1/models` syncs available models from OpenRouter into the local `models` cache and returns all/curated lists with user favorites/preferences.
+- `GET /v1/models` returns cached models from the local `models` table (no provider sync in request path).
+- `POST /v1/models/sync` performs an on-demand OpenRouter sync into the local `models` cache and returns the synced row count.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

@@ -97,6 +97,10 @@ type listModelsResponse struct {
 	Preferences modelPreferencesResponse `json:"preferences"`
 }
 
+type syncModelsResponse struct {
+	Synced int `json:"synced"`
+}
+
 func (h Handler) Healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -177,8 +181,6 @@ func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	_ = h.syncModelsFromProvider(r.Context())
-
 	models, err := h.listActiveModels(r.Context())
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to read models")
@@ -228,6 +230,21 @@ func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+func (h Handler) SyncModels(w http.ResponseWriter, r *http.Request) {
+	if _, ok := sessionUserFromContext(r.Context()); !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+
+	synced, err := h.syncModelsFromProvider(r.Context())
+	if err != nil {
+		writeError(w, http.StatusBadGateway, "sync_failed", "failed to sync models from provider")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, syncModelsResponse{Synced: synced})
+}
+
 func (h Handler) listActiveModels(ctx context.Context) ([]modelResponse, error) {
 	rows, err := h.db.QueryContext(ctx, `
 SELECT id, display_name, provider, context_window, prompt_price_microusd, completion_price_microusd, curated
@@ -255,25 +272,26 @@ LIMIT 500;
 	return models, nil
 }
 
-func (h Handler) syncModelsFromProvider(ctx context.Context) error {
+func (h Handler) syncModelsFromProvider(ctx context.Context) (int, error) {
 	if h.models == nil {
-		return nil
+		return 0, nil
 	}
 
 	models, err := h.models.ListModels(ctx)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if len(models) == 0 {
-		return nil
+		return 0, nil
 	}
 
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	defer tx.Rollback()
 
+	synced := 0
 	for _, model := range models {
 		if strings.TrimSpace(model.ID) == "" {
 			continue
@@ -299,11 +317,16 @@ ON CONFLICT(id) DO UPDATE SET
   is_active = 1,
   updated_at = CURRENT_TIMESTAMP;
 `, model.ID, model.Name, model.ContextWindow, model.PromptPriceMicrosUSD, model.CompletionPriceMicrosUSD); err != nil {
-			return err
+			return 0, err
 		}
+		synced++
 	}
 
-	return tx.Commit()
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+
+	return synced, nil
 }
 
 type updateModelPreferencesRequest struct {
