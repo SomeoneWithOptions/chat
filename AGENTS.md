@@ -25,6 +25,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 - Backend: Go 1.22+.
 - Database: Turso (LibSQL/SQLite).
 - Local DB operations: Use `turso` CLI (already authenticated on this machine).
+- GCP operations: Use the local `gcloud` CLI (already authenticated) to look up information, create resources, and manage deployments on GCP infrastructure.
 - LLM gateway: OpenRouter.
 - Web grounding: Brave Data for AI.
 - Frontend domain: `https://chat.sanetomore.com`.

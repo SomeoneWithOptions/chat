@@ -1099,7 +1099,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	flusher.Flush()
 }
 
-const maxGroundingResults = 6
+const maxGroundingResults = 10
 const maxConversationHistoryMessages = 24
 
 func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
