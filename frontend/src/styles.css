@@ -1099,11 +1099,6 @@ code {
   padding: 0 14px 8px;
 }
 
-.composer-file-hint {
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
 /* ─── Status messages ────────────────────────── */
 
 .error-message {

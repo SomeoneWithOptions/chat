@@ -109,10 +109,6 @@ export default function Composer({
               </svg>
               {uploadingAttachments ? 'Uploading...' : 'Attach'}
             </button>
-
-            <span className="composer-file-hint">
-              .txt .md .pdf .csv .json
-            </span>
           </div>
 
           <div className="composer-toolbar-right">
