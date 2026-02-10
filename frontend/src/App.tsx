@@ -146,10 +146,14 @@ export default function App() {
 
   // ─── Conversation Effects ─────────────────────
 
-  const refreshConversations = useCallback(async (preferredConversationId?: string) => {
+  const refreshConversations = useCallback(async (
+    preferredConversationId?: string,
+    options?: { fallbackToFirstConversation?: boolean },
+  ) => {
     setLoadingConversations(true);
     try {
       const availableConversations = await listConversations();
+      const fallbackToFirstConversation = options?.fallbackToFirstConversation ?? true;
       setConversationAPISupported(true);
       setConversations(availableConversations);
       setActiveConversationId((current) => {
@@ -159,7 +163,7 @@ export default function App() {
         if (current && availableConversations.some((c) => c.id === current)) {
           return current;
         }
-        return availableConversations[0]?.id ?? null;
+        return fallbackToFirstConversation ? (availableConversations[0]?.id ?? null) : null;
       });
       if (availableConversations.length === 0) {
         setMessages([]);
@@ -180,7 +184,7 @@ export default function App() {
 
   useEffect(() => {
     if (!user || !conversationAPISupported) return;
-    void refreshConversations();
+    void refreshConversations(undefined, { fallbackToFirstConversation: false });
   }, [conversationAPISupported, refreshConversations, user]);
 
   useEffect(() => {
