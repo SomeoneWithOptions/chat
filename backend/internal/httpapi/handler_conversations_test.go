@@ -632,6 +632,82 @@ WHERE user_id = ?;
 	}
 }
 
+func TestChatMessagesIncludesConversationHistoryInPrompt(t *testing.T) {
+	capturedRequests := make([]openrouter.StreamRequest, 0, 2)
+	streamer := stubStreamer{
+		tokens: []string{"Ack"},
+		onRequest: func(req openrouter.StreamRequest) {
+			capturedRequests = append(capturedRequests, req)
+		},
+	}
+	handler, db := newTestHandler(t, streamer)
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"I love mangoes.","modelId":"openrouter/free"}`),
+	)
+	firstReq = requestWithSessionUser(firstReq, user)
+	firstResp := httptest.NewRecorder()
+
+	handler.ChatMessages(firstResp, firstReq)
+
+	if firstResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, firstResp.Code, firstResp.Body.String())
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","message":"What fruit do I love?","modelId":"openrouter/free"}`),
+	)
+	secondReq = requestWithSessionUser(secondReq, user)
+	secondResp := httptest.NewRecorder()
+
+	handler.ChatMessages(secondResp, secondReq)
+
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, secondResp.Code, secondResp.Body.String())
+	}
+	if len(capturedRequests) != 2 {
+		t.Fatalf("expected 2 streamed requests, got %d", len(capturedRequests))
+	}
+
+	secondPrompt := capturedRequests[1].Messages
+	if len(secondPrompt) < 4 {
+		t.Fatalf("expected history messages in second prompt, got %+v", secondPrompt)
+	}
+
+	historyStart := -1
+	for i, message := range secondPrompt {
+		if message.Role == "user" && message.Content == "I love mangoes." {
+			historyStart = i
+			break
+		}
+	}
+	if historyStart == -1 {
+		t.Fatalf("expected prior user message in second prompt, got %+v", secondPrompt)
+	}
+	if historyStart+1 >= len(secondPrompt) || secondPrompt[historyStart+1].Role != "assistant" || secondPrompt[historyStart+1].Content != "Ack" {
+		t.Fatalf("expected prior assistant message after prior user message, got %+v", secondPrompt)
+	}
+
+	current := secondPrompt[len(secondPrompt)-1]
+	if current.Role != "user" || current.Content != "What fruit do I love?" {
+		t.Fatalf("unexpected current message in second prompt: %+v", current)
+	}
+}
+
 func TestChatMessagesPersistsGroundingCitationsAndStreamsCitationEvent(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Grounded", " answer"}})
 	t.Cleanup(func() { _ = db.Close() })

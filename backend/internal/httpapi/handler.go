@@ -784,6 +784,12 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	historyMessages, err := h.listConversationPromptMessages(r.Context(), user.ID, conversationID, maxConversationHistoryMessages)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to load conversation history")
+		return
+	}
+
 	if _, err := h.insertUserMessageWithFiles(
 		r.Context(),
 		user.ID,
@@ -814,6 +820,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			Content: buildGroundingPrompt(groundingCitations, timeSensitive),
 		})
 	}
+	promptMessages = append(promptMessages, historyMessages...)
 	promptMessages = append(promptMessages, openrouter.Message{Role: "user", Content: userPrompt})
 
 	started := false
@@ -927,6 +934,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 }
 
 const maxGroundingResults = 6
+const maxConversationHistoryMessages = 24
 
 func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
 	if !enabled {
@@ -1117,6 +1125,52 @@ func (h Handler) resolveConversationID(ctx context.Context, userID, requestedCon
 		return "", sql.ErrNoRows
 	}
 	return conversationID, nil
+}
+
+func (h Handler) listConversationPromptMessages(ctx context.Context, userID, conversationID string, limit int) ([]openrouter.Message, error) {
+	if limit <= 0 {
+		return nil, nil
+	}
+
+	rows, err := h.db.QueryContext(ctx, `
+SELECT m.role, m.content
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.conversation_id = ?
+  AND c.user_id = ?
+  AND m.role IN ('user', 'assistant')
+ORDER BY m.created_at DESC, m.rowid DESC
+LIMIT ?;
+`, conversationID, userID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	messages := make([]openrouter.Message, 0, limit)
+	for rows.Next() {
+		var role string
+		var content string
+		if err := rows.Scan(&role, &content); err != nil {
+			return nil, err
+		}
+		if strings.TrimSpace(content) == "" {
+			continue
+		}
+		messages = append(messages, openrouter.Message{
+			Role:    role,
+			Content: content,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i, j := 0, len(messages)-1; i < j; i, j = i+1, j-1 {
+		messages[i], messages[j] = messages[j], messages[i]
+	}
+
+	return messages, nil
 }
 
 func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role, content, modelID string, groundingEnabled, deepResearchEnabled bool) error {
