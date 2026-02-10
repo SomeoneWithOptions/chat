@@ -6,60 +6,35 @@
 - User can toggle OFF per-message.
 - Backend uses Brave results and prompt guidance without custom source blocklists.
 
-## Brave API Integration
+## Normal Chat (Grounded)
 
-Use Brave "Data for AI" endpoints as the default retrieval tool for fresh web information.
+- Uses a single grounding pass with up to 6 Brave results.
+- Includes grounded context in system prompt when available.
+- Persists up to 8 citations on the assistant message.
+- On grounding errors, streams a warning event and continues response generation.
 
-Workflow:
+## Deep Research (Implemented)
 
-1. Generate search query from user message and conversation context.
-2. Call Brave API.
-3. Normalize results (title, URL, summary, timestamp if available).
-4. Rerank top N snippets for prompt inclusion.
-5. Persist selected citations for final answer traceability.
-
-## Modes
-
-### Mode A: Normal Search Chat
-
-- 1-2 query passes
-- Max 5-8 citations
-- Faster response and lighter synthesis
-
-### Mode B: Deep Research
-
-- Multi-pass query expansion (3-6 passes)
-- Broader evidence collection and dedupe
-- Structured synthesis with explicit sections
-- Higher timeout and token budget
-- Model is user-selectable per request
-- Default deep-research model is user's last-used normal-chat model
-
-## Prompt Templates (Draft)
-
-### System Prompt: Normal Search
-
-- Use attached context and provided web snippets.
-- Prefer recent, reliable sources.
-- Include concise citations for factual claims.
-- If evidence is weak, state uncertainty clearly.
-
-### System Prompt: Deep Research
-
-- Build a thorough analysis before answering.
-- Compare sources, note disagreements, and infer likely truth.
-- Output sections:
+- Dedicated multi-pass orchestration path (separate from normal chat).
+- Query planning + iterative Brave search across 3-6 passes.
+- URL dedupe and evidence ranking with confidence filtering.
+- High-confidence citations are used for synthesis and persistence.
+- Deep-research prompt template requires structured sections:
   1. Direct Answer
   2. Key Evidence
   3. Conflicting Signals
-  4. Practical Recommendations
+  4. Recommendations
   5. Source List
+- Inline source references use `[n]` markers mapped to provided evidence.
+- Final persisted citations are reordered to match claim/reference order when possible.
 
 ## Research Controls
 
-- Max search calls per request
-- Max runtime timeout: 120s
-- User-visible progress events:
+- Pass count: min 3, max 6.
+- Results per pass: 6.
+- Max deep-research citations persisted/streamed: 10.
+- Runtime timeout: `DEEP_RESEARCH_TIMEOUT_SECONDS` (default 120s), enforced with request-scoped context timeout.
+- User-visible progress events streamed over SSE:
   - `planning`
   - `searching`
   - `synthesizing`

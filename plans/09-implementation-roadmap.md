@@ -68,11 +68,15 @@ Exit criteria:
 
 1. Multi-pass search orchestration
 2. Deep research prompt templates + structured outputs
-3. Progress streaming events in UI
+3. Progress streaming events in API/UI (`planning`, `searching`, `synthesizing`, `finalizing`)
+4. Timeout/cancellation enforcement with `DEEP_RESEARCH_TIMEOUT_SECONDS`
+5. Deep-research citation quality controls (dedupe, confidence filtering, claim-order alignment)
+6. Backend + frontend streaming progress tests
 
 Exit criteria:
 
 - Deep research mode reliably provides richer analysis than normal mode
+- Deep research requests fail gracefully within configured timeout bounds
 
 ## Phase 6: Production Hardening
 

@@ -33,6 +33,7 @@ Set at minimum:
 - `OPENROUTER_API_KEY` (required to stream chat responses)
 - `BRAVE_API_KEY` (required for grounding citations; requests still run without it)
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
+- `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `120`; applies to deep-research requests only)
 
 Auth sequencing:
 
@@ -67,3 +68,10 @@ Expected response:
 ```json
 {"status":"ok"}
 ```
+
+## Deep Research Behavior (Local)
+
+- Deep research runs a dedicated multi-pass research pipeline (3-6 Brave search passes).
+- SSE progress events are streamed with phases: `planning`, `searching`, `synthesizing`, `finalizing`.
+- Timeout and cancellation are enforced server-side via `DEEP_RESEARCH_TIMEOUT_SECONDS`.
+- When Brave search partially fails, the request continues with available evidence and warning events.

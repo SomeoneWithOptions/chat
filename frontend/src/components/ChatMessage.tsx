@@ -1,3 +1,4 @@
+import { isValidElement, type HTMLAttributes, type ReactNode, useEffect, useState } from 'react';
 import { type Citation } from '../lib/api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -25,9 +26,84 @@ function citationLabel(citation: Citation, index: number): string {
   }
 }
 
+function extractNodeText(node: ReactNode): string {
+  if (typeof node === 'string' || typeof node === 'number') return String(node);
+  if (Array.isArray(node)) return node.map(extractNodeText).join('');
+  if (isValidElement<{ children?: ReactNode }>(node)) {
+    return extractNodeText(node.props.children);
+  }
+  return '';
+}
+
+async function copyToClipboard(text: string): Promise<boolean> {
+  if (!text) return false;
+
+  if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+    try {
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall back to document.execCommand for non-secure contexts.
+    }
+  }
+
+  if (typeof document === 'undefined') return false;
+
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.setAttribute('readonly', '');
+  textarea.style.position = 'fixed';
+  textarea.style.top = '-9999px';
+  document.body.appendChild(textarea);
+  textarea.select();
+
+  let copied = false;
+  try {
+    copied = document.execCommand('copy');
+  } finally {
+    document.body.removeChild(textarea);
+  }
+
+  return copied;
+}
+
+function MarkdownCodeBlock({ children, ...props }: HTMLAttributes<HTMLPreElement>) {
+  const [copied, setCopied] = useState(false);
+  const codeText = extractNodeText(children).replace(/\n$/, '');
+
+  useEffect(() => {
+    if (!copied) return;
+    const timeoutId = window.setTimeout(() => setCopied(false), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [copied]);
+
+  async function handleCopy() {
+    const didCopy = await copyToClipboard(codeText);
+    if (didCopy) setCopied(true);
+  }
+
+  return (
+    <div className="markdown-code-block">
+      <button
+        type="button"
+        className="code-copy-button"
+        onClick={handleCopy}
+        disabled={!codeText}
+        aria-label={copied ? 'Code copied' : 'Copy code'}
+      >
+        {copied ? 'Copied' : 'Copy'}
+      </button>
+      <pre {...props}>{children}</pre>
+    </div>
+  );
+}
+
 const markdownComponents: Components = {
   a: ({ node: _node, ...props }) => (
     <a {...props} target="_blank" rel="noreferrer" />
+  ),
+  pre: ({ node: _node, ...props }) => (
+    <MarkdownCodeBlock {...props} />
   ),
 };
 

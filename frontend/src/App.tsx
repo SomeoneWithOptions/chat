@@ -17,6 +17,7 @@ import {
   type Conversation,
   type Model,
   type ModelPreferences,
+  type ResearchPhase,
   type UploadedFile,
   type User,
 } from './lib/api';
@@ -32,6 +33,29 @@ function formatPrice(micros: number): string {
   if (dollars < 0.001) return `$${dollars.toFixed(6)}`;
   return `$${dollars.toFixed(4)}`;
 }
+
+type ResearchActivity = {
+  phase: ResearchPhase;
+  message: string;
+  pass?: number;
+  totalPasses?: number;
+};
+
+const researchPhases: ResearchPhase[] = ['planning', 'searching', 'synthesizing', 'finalizing'];
+
+const researchPhaseLabels: Record<ResearchPhase, string> = {
+  planning: 'Planning',
+  searching: 'Searching',
+  synthesizing: 'Synthesizing',
+  finalizing: 'Finalizing',
+};
+
+const researchPhaseDefaults: Record<ResearchPhase, string> = {
+  planning: 'Preparing research strategy',
+  searching: 'Collecting web evidence',
+  synthesizing: 'Drafting structured response',
+  finalizing: 'Ordering citations and finishing output',
+};
 
 export default function App() {
   // ─── Auth State ───────────────────────────────
@@ -60,6 +84,8 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [researchActivity, setResearchActivity] = useState<ResearchActivity[]>([]);
+  const [researchCompleted, setResearchCompleted] = useState(false);
 
   // ─── Conversation State ───────────────────────
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -123,6 +149,8 @@ export default function App() {
       setConversationAPISupported(true);
       setMessages([]);
       setStreamWarning(null);
+      setResearchActivity([]);
+      setResearchCompleted(false);
       setPendingAttachments([]);
       setUploadingAttachments(false);
       return;
@@ -266,6 +294,30 @@ export default function App() {
     [models, selectedModel],
   );
 
+  const latestResearchByPhase = useMemo(() => {
+    const byPhase = new Map<ResearchPhase, ResearchActivity>();
+    for (const entry of researchActivity) {
+      byPhase.set(entry.phase, entry);
+    }
+    return byPhase;
+  }, [researchActivity]);
+
+  const latestResearchPhaseIndex = useMemo(() => {
+    let highest = -1;
+    for (const entry of researchActivity) {
+      const index = researchPhases.indexOf(entry.phase);
+      if (index > highest) highest = index;
+    }
+    return highest;
+  }, [researchActivity]);
+
+  const researchStatus = useMemo(() => {
+    if (isStreaming && researchActivity.length > 0) return 'Running';
+    if (researchCompleted) return 'Complete';
+    if (researchActivity.length > 0) return 'Stopped';
+    return 'Ready';
+  }, [isStreaming, researchActivity.length, researchCompleted]);
+
   // ─── Handlers ─────────────────────────────────
 
   async function handleDevLogin(event: FormEvent<HTMLFormElement>) {
@@ -296,6 +348,8 @@ export default function App() {
       setSelectedModel('openrouter/free');
       setMessages([]);
       setStreamWarning(null);
+      setResearchActivity([]);
+      setResearchCompleted(false);
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
@@ -451,6 +505,7 @@ export default function App() {
     event.preventDefault();
     if (!prompt.trim() || isStreaming || uploadingAttachments) return;
 
+    const isDeepResearchRequest = deepResearch;
     const attachmentIDs = pendingAttachments.map((a) => a.id);
     const userMessage: MessageData = {
       id: crypto.randomUUID(),
@@ -470,6 +525,8 @@ export default function App() {
     setIsStreaming(true);
     setStreamWarning(null);
     setError(null);
+    setResearchActivity([]);
+    setResearchCompleted(false);
 
     let resolvedConversationID = activeConversationId;
     const abortController = new AbortController();
@@ -493,12 +550,31 @@ export default function App() {
             }
             return;
           }
+          if (eventData.type === 'progress') {
+            if (!isDeepResearchRequest) return;
+            setResearchActivity((existing) =>
+              [
+                ...existing,
+                {
+                  phase: eventData.phase,
+                  message: eventData.message ?? researchPhaseDefaults[eventData.phase],
+                  pass: eventData.pass,
+                  totalPasses: eventData.totalPasses,
+                },
+              ].slice(-30),
+            );
+            return;
+          }
           if (eventData.type === 'warning') { setStreamWarning(eventData.message); return; }
           if (eventData.type === 'error') { setError(eventData.message); return; }
           if (eventData.type === 'citations') {
             setMessages((existing) =>
               existing.map((m) => m.id === assistantMessage.id ? { ...m, citations: eventData.citations } : m),
             );
+            return;
+          }
+          if (eventData.type === 'done') {
+            if (isDeepResearchRequest) setResearchCompleted(true);
             return;
           }
           if (eventData.type === 'token') {
@@ -658,6 +734,10 @@ export default function App() {
         {/* Model info bar */}
         {currentModel && (
           <div className="model-info-bar">
+            <span className={`mode-chip ${deepResearch ? 'deep' : 'chat'}`}>
+              {deepResearch ? 'Deep Research Mode' : 'Chat Mode'}
+            </span>
+            <div className="model-info-divider" />
             <div className="model-info-item">
               <span className="model-info-label">Context</span>
               <span className="model-info-value">{currentModel.contextWindow.toLocaleString()}</span>
@@ -681,6 +761,43 @@ export default function App() {
               </>
             )}
           </div>
+        )}
+
+        {(deepResearch || researchActivity.length > 0) && (
+          <section className="research-panel" data-testid="research-timeline">
+            <div className="research-panel-header">
+              <span className="research-panel-title">Research Activity</span>
+              <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
+                {researchStatus}
+              </span>
+            </div>
+            <ol className="research-timeline">
+              {researchPhases.map((phase, index) => {
+                const latest = latestResearchByPhase.get(phase);
+                let state: 'pending' | 'active' | 'done' = 'pending';
+                if (index < latestResearchPhaseIndex) state = 'done';
+                if (index === latestResearchPhaseIndex) state = researchCompleted ? 'done' : 'active';
+                if (!isStreaming && researchCompleted && index <= latestResearchPhaseIndex) state = 'done';
+
+                return (
+                  <li key={phase} className={`research-step ${state}`}>
+                    <span className="research-step-marker" />
+                    <div className="research-step-content">
+                      <div className="research-step-row">
+                        <span className="research-step-title">{researchPhaseLabels[phase]}</span>
+                        {latest?.pass && latest.totalPasses ? (
+                          <span className="research-step-pass">
+                            {latest.pass}/{latest.totalPasses}
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="research-step-message">{latest?.message ?? researchPhaseDefaults[phase]}</p>
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
         )}
 
         {/* Messages */}

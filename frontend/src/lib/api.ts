@@ -70,8 +70,11 @@ export type ChatRequest = {
   fileIds?: string[];
 };
 
+export type ResearchPhase = 'planning' | 'searching' | 'synthesizing' | 'finalizing';
+
 export type StreamEvent =
   | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; conversationId?: string }
+  | { type: 'progress'; phase: ResearchPhase; message?: string; pass?: number; totalPasses?: number }
   | { type: 'warning'; scope: string; message: string }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'token'; delta: string }

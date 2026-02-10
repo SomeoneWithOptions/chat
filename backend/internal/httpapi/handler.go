@@ -607,7 +607,7 @@ FROM citations c
 JOIN messages m ON m.id = c.message_id
 JOIN conversations v ON v.id = m.conversation_id
 WHERE v.user_id = ? AND v.id = ?
-ORDER BY c.created_at ASC, c.id ASC;
+ORDER BY c.created_at ASC, c.rowid ASC;
 `, userID, conversationID)
 	if err != nil {
 		return nil, err
@@ -833,9 +833,22 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	userPrompt := h.appendFileContextToPrompt(req.Message, files)
 	timeSensitive := isTimeSensitivePrompt(req.Message)
+	if deepResearch {
+		h.streamDeepResearchResponse(r.Context(), w, flusher, deepResearchStreamInput{
+			UserID:         user.ID,
+			ConversationID: conversationID,
+			ModelID:        modelID,
+			Message:        req.Message,
+			Prompt:         userPrompt,
+			Grounding:      grounding,
+			History:        historyMessages,
+		})
+		return
+	}
+
 	groundingCitations, groundingWarning := h.resolveGroundingContext(r.Context(), req.Message, grounding, timeSensitive)
 	promptMessages := []openrouter.Message{
-		{Role: "system", Content: buildSystemPrompt(grounding, deepResearch, len(groundingCitations) > 0, timeSensitive)},
+		{Role: "system", Content: buildSystemPrompt(grounding, false, len(groundingCitations) > 0, timeSensitive)},
 	}
 	if len(groundingCitations) > 0 {
 		promptMessages = append(promptMessages, openrouter.Message{
@@ -899,8 +912,8 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	var persistedCitations []citationResponse
 	if assistantContent.Len() > 0 {
 		persistedCitations = groundingCitations
-		if len(persistedCitations) > 8 {
-			persistedCitations = persistedCitations[:8]
+		if len(persistedCitations) > maxNormalCitations {
+			persistedCitations = persistedCitations[:maxNormalCitations]
 		}
 		_, err := h.insertMessageWithCitations(
 			r.Context(),

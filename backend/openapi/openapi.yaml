@@ -317,7 +317,7 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `warning`, `token`, `citations`, `error`, and `done`.
+                description: SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `progress`, `warning`, `token`, `citations`, `error`, and `done`.
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -579,6 +579,97 @@ components:
           type: array
           items:
             type: string
+    StreamEvent:
+      oneOf:
+        - $ref: '#/components/schemas/StreamEventMetadata'
+        - $ref: '#/components/schemas/StreamEventProgress'
+        - $ref: '#/components/schemas/StreamEventWarning'
+        - $ref: '#/components/schemas/StreamEventToken'
+        - $ref: '#/components/schemas/StreamEventCitations'
+        - $ref: '#/components/schemas/StreamEventError'
+        - $ref: '#/components/schemas/StreamEventDone'
+      discriminator:
+        propertyName: type
+    StreamEventMetadata:
+      type: object
+      required: [type, grounding, deepResearch, modelId]
+      properties:
+        type:
+          type: string
+          enum: [metadata]
+        grounding:
+          type: boolean
+        deepResearch:
+          type: boolean
+        modelId:
+          type: string
+        conversationId:
+          type: string
+    StreamEventProgress:
+      type: object
+      required: [type, phase]
+      properties:
+        type:
+          type: string
+          enum: [progress]
+        phase:
+          type: string
+          enum: [planning, searching, synthesizing, finalizing]
+        message:
+          type: string
+        pass:
+          type: integer
+          minimum: 0
+        totalPasses:
+          type: integer
+          minimum: 0
+    StreamEventWarning:
+      type: object
+      required: [type, scope, message]
+      properties:
+        type:
+          type: string
+          enum: [warning]
+        scope:
+          type: string
+        message:
+          type: string
+    StreamEventToken:
+      type: object
+      required: [type, delta]
+      properties:
+        type:
+          type: string
+          enum: [token]
+        delta:
+          type: string
+    StreamEventCitations:
+      type: object
+      required: [type, citations]
+      properties:
+        type:
+          type: string
+          enum: [citations]
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+    StreamEventError:
+      type: object
+      required: [type, message]
+      properties:
+        type:
+          type: string
+          enum: [error]
+        message:
+          type: string
+    StreamEventDone:
+      type: object
+      required: [type]
+      properties:
+        type:
+          type: string
+          enum: [done]
     ErrorEnvelope:
       type: object
       required: [error]

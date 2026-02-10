@@ -11,6 +11,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"chat/backend/internal/auth"
 	"chat/backend/internal/brave"
@@ -903,6 +904,199 @@ func TestChatMessagesGroundingFailureStreamsWarningAndContinues(t *testing.T) {
 	}
 }
 
+func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Deep", " answer [1]"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://gov.example.gov/report", Title: "Official report", Snippet: "Detailed 2026 update."},
+			{URL: "https://docs.example.com/changelog", Title: "Changelog", Snippet: "Release notes and changes."},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Research this","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	events := decodeSSEEvents(t, resp.Body.String())
+	phases := make([]string, 0, 8)
+	for _, event := range events {
+		if event.Type == "progress" {
+			if phase, ok := event.Data["phase"].(string); ok {
+				phases = append(phases, phase)
+			}
+		}
+	}
+
+	position := -1
+	position = assertContainsPhaseInOrder(t, phases, "planning", position)
+	position = assertContainsPhaseInOrder(t, phases, "searching", position)
+	position = assertContainsPhaseInOrder(t, phases, "synthesizing", position)
+	_ = assertContainsPhaseInOrder(t, phases, "finalizing", position)
+}
+
+func TestChatMessagesDeepResearchTimeoutUsesConfig(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"This should never stream"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.DeepResearchTimeoutSeconds = 1
+	handler.grounding = stubGrounder{waitForContext: true}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Long running request","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	started := time.Now()
+	handler.ChatMessages(resp, req)
+	elapsed := time.Since(started)
+
+	if elapsed > 3*time.Second {
+		t.Fatalf("expected timeout close to configured value, elapsed=%v", elapsed)
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"deep research timed out after 1 seconds"`) {
+		t.Fatalf("expected timeout error in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"type":"done"`) {
+		t.Fatalf("expected done event in stream body: %s", body)
+	}
+}
+
+func TestChatMessagesDeepResearchFallbackOnSearchFailure(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Fallback", " synthesis"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{err: errors.New("brave unavailable")}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Research anyway","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"scope":"research"`) {
+		t.Fatalf("expected research warning in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"type":"token"`) {
+		t.Fatalf("expected token events in stream body: %s", body)
+	}
+}
+
+func TestChatMessagesDeepResearchCitationPersistenceOrderedByClaims(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Summary [2] then [1]."}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://gov.example.gov/report", Title: "Official report", Snippet: "Comprehensive official update with 2026 findings."},
+			{URL: "https://research.example.edu/changelog", Title: "Academic changelog analysis", Snippet: "Detailed release timeline, methodology, and deployment notes with cited publication dates from 2026 and 2025."},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Rank sources","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+conversationID+"/messages", nil)
+	listReq = requestWithSessionUser(listReq, user)
+	listReq = requestWithConversationID(listReq, conversationID)
+	listResp := httptest.NewRecorder()
+
+	handler.ListConversationMessages(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, listResp.Code, listResp.Body.String())
+	}
+
+	var payload struct {
+		Messages []messageResponse `json:"messages"`
+	}
+	decodeJSONBody(t, listResp, &payload)
+
+	if len(payload.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(payload.Messages))
+	}
+	assistant := payload.Messages[1]
+	if len(assistant.Citations) != 2 {
+		t.Fatalf("expected 2 citations, got %d", len(assistant.Citations))
+	}
+}
+
+func TestOrderCitationsByClaimsFollowsBracketOrder(t *testing.T) {
+	ordered := orderCitationsByClaims([]citationResponse{
+		{URL: "https://one.example.com"},
+		{URL: "https://two.example.com"},
+		{URL: "https://three.example.com"},
+	}, "Prioritize [2], then [1], and finally [3].")
+
+	if len(ordered) != 3 {
+		t.Fatalf("expected 3 citations, got %d", len(ordered))
+	}
+	if ordered[0].URL != "https://two.example.com" {
+		t.Fatalf("expected first citation from [2], got %s", ordered[0].URL)
+	}
+	if ordered[1].URL != "https://one.example.com" {
+		t.Fatalf("expected second citation from [1], got %s", ordered[1].URL)
+	}
+	if ordered[2].URL != "https://three.example.com" {
+		t.Fatalf("expected third citation from [3], got %s", ordered[2].URL)
+	}
+}
+
 func TestUploadFileStoresMetadataAndBlob(t *testing.T) {
 	store := &stubFileStore{objects: make(map[string][]byte)}
 	handler, db := newTestHandlerWithFileStore(t, stubStreamer{}, store)
@@ -1246,6 +1440,59 @@ func decodeJSONBody(t *testing.T, resp *httptest.ResponseRecorder, target any) {
 	}
 }
 
+type sseEvent struct {
+	Type string
+	Data map[string]any
+}
+
+func decodeSSEEvents(t *testing.T, raw string) []sseEvent {
+	t.Helper()
+
+	events := make([]sseEvent, 0, 8)
+	chunks := strings.Split(raw, "\n\n")
+	for _, chunk := range chunks {
+		chunk = strings.TrimSpace(chunk)
+		if chunk == "" {
+			continue
+		}
+		lines := strings.Split(chunk, "\n")
+		for _, line := range lines {
+			line = strings.TrimSpace(line)
+			if !strings.HasPrefix(line, "data:") {
+				continue
+			}
+			payload := strings.TrimSpace(strings.TrimPrefix(line, "data:"))
+			if payload == "" {
+				continue
+			}
+			data := make(map[string]any)
+			if err := json.Unmarshal([]byte(payload), &data); err != nil {
+				t.Fatalf("decode sse payload: %v (payload=%s)", err, payload)
+			}
+			typeValue, _ := data["type"].(string)
+			events = append(events, sseEvent{
+				Type: typeValue,
+				Data: data,
+			})
+		}
+	}
+	return events
+}
+
+func assertContainsPhaseInOrder(t *testing.T, phases []string, phase string, after int) int {
+	t.Helper()
+	for index, item := range phases {
+		if index <= after {
+			continue
+		}
+		if item == phase {
+			return index
+		}
+	}
+	t.Fatalf("expected phase %q in %+v", phase, phases)
+	return -1
+}
+
 type stubStreamer struct {
 	tokens     []string
 	err        error
@@ -1255,11 +1502,16 @@ type stubStreamer struct {
 }
 
 type stubGrounder struct {
-	results []brave.SearchResult
-	err     error
+	results        []brave.SearchResult
+	err            error
+	waitForContext bool
 }
 
-func (s stubGrounder) Search(_ context.Context, _ string, _ int) ([]brave.SearchResult, error) {
+func (s stubGrounder) Search(ctx context.Context, _ string, _ int) ([]brave.SearchResult, error) {
+	if s.waitForContext {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	if s.err != nil {
 		return nil, s.err
 	}
@@ -1270,8 +1522,10 @@ func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.Str
 	if s.onRequest != nil {
 		s.onRequest(req)
 	}
-	if err := onStart(); err != nil {
-		return err
+	if onStart != nil {
+		if err := onStart(); err != nil {
+			return err
+		}
 	}
 	for _, token := range s.tokens {
 		if err := onDelta(token); err != nil {
