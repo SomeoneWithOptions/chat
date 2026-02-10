@@ -14,50 +14,33 @@ import {
   streamMessage,
   updateModelFavorite,
   updateModelPreference,
-  type Citation,
   type Conversation,
   type Model,
   type ModelPreferences,
   type UploadedFile,
   type User,
 } from './lib/api';
-
-type Message = {
-  id: string;
-  role: 'system' | 'user' | 'assistant' | 'tool';
-  content: string;
-  citations: Citation[];
-};
-
-const acceptedAttachmentTypes = '.txt,.md,.pdf,.csv,.json';
+import Sidebar from './components/Sidebar';
+import Toggle from './components/Toggle';
+import ModelSelector from './components/ModelSelector';
+import ChatMessage, { type MessageData } from './components/ChatMessage';
+import Composer from './components/Composer';
 
 function formatPrice(micros: number): string {
-  if (micros <= 0) return '$0';
-  return `$${(micros / 1_000_000).toFixed(6)}`;
-}
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function citationLabel(citation: Citation, index: number): string {
-  const trimmedTitle = citation.title?.trim();
-  if (trimmedTitle) {
-    return trimmedTitle;
-  }
-  try {
-    const parsed = new URL(citation.url);
-    return parsed.hostname.replace(/^www\./, '');
-  } catch {
-    return `Source ${index + 1}`;
-  }
+  if (micros <= 0) return 'Free';
+  const dollars = micros / 1_000_000;
+  if (dollars < 0.001) return `$${dollars.toFixed(6)}`;
+  return `$${dollars.toFixed(4)}`;
 }
 
 export default function App() {
-  const attachmentInputRef = useRef<HTMLInputElement | null>(null);
+  // ─── Auth State ───────────────────────────────
   const [user, setUser] = useState<User | null>(null);
+  const [loadingAuth, setLoadingAuth] = useState(true);
+  const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
+  const [devSub, setDevSub] = useState('dev-user-1');
+
+  // ─── Model State ──────────────────────────────
   const [models, setModels] = useState<Model[]>([]);
   const [curatedModels, setCuratedModels] = useState<Model[]>([]);
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>([]);
@@ -67,28 +50,36 @@ export default function App() {
   });
   const [showAllModels, setShowAllModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState('openrouter/free');
+  const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
+
+  // ─── Chat State ───────────────────────────────
   const [prompt, setPrompt] = useState('');
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [conversationAPISupported, setConversationAPISupported] = useState(true);
+  const [messages, setMessages] = useState<MessageData[]>([]);
   const [grounding, setGrounding] = useState(true);
   const [deepResearch, setDeepResearch] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
-  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
-  const [isDeletingAll, setIsDeletingAll] = useState(false);
-  const [uploadingAttachments, setUploadingAttachments] = useState(false);
-  const [pendingAttachments, setPendingAttachments] = useState<UploadedFile[]>([]);
-  const [loadingConversations, setLoadingConversations] = useState(false);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [loadingAuth, setLoadingAuth] = useState(true);
-  const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
-  const [updatingModelFavorite, setUpdatingModelFavorite] = useState(false);
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
-  const [devSub, setDevSub] = useState('dev-user-1');
+  // ─── Conversation State ───────────────────────
+  const [conversations, setConversations] = useState<Conversation[]>([]);
+  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+  const [conversationAPISupported, setConversationAPISupported] = useState(true);
+  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [isDeletingAll, setIsDeletingAll] = useState(false);
+  const [loadingConversations, setLoadingConversations] = useState(false);
+  const [loadingMessages, setLoadingMessages] = useState(false);
+
+  // ─── Attachment State ─────────────────────────
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [pendingAttachments, setPendingAttachments] = useState<UploadedFile[]>([]);
+
+  // ─── UI State ─────────────────────────────────
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  // ─── Helpers ──────────────────────────────────
 
   function isNotFoundError(err: unknown): err is APIError {
     return err instanceof APIError && err.status === 404;
@@ -97,6 +88,8 @@ export default function App() {
   function isConversationNotFoundError(err: unknown): err is APIError {
     return err instanceof APIError && err.status === 404 && err.code === 'conversation_not_found';
   }
+
+  // ─── Auth Effects ─────────────────────────────
 
   useEffect(() => {
     void (async () => {
@@ -111,47 +104,14 @@ export default function App() {
     })();
   }, []);
 
-  const refreshConversations = useCallback(async (preferredConversationId?: string) => {
-    setLoadingConversations(true);
-    try {
-      const availableConversations = await listConversations();
-      setConversationAPISupported(true);
-      setConversations(availableConversations);
-      setActiveConversationId((current) => {
-        if (preferredConversationId && availableConversations.some((conversation) => conversation.id === preferredConversationId)) {
-          return preferredConversationId;
-        }
-        if (current && availableConversations.some((conversation) => conversation.id === current)) {
-          return current;
-        }
-        return availableConversations[0]?.id ?? null;
-      });
-      if (availableConversations.length === 0) {
-        setMessages([]);
-      }
-    } catch (err) {
-      if (isNotFoundError(err)) {
-        setConversationAPISupported(false);
-        setConversations([]);
-        setActiveConversationId(null);
-        setMessages([]);
-        return;
-      }
-      setError((err as Error).message);
-    } finally {
-      setLoadingConversations(false);
-    }
-  }, []);
+  // ─── Model Effects ────────────────────────────
 
   useEffect(() => {
     if (!user) {
       setModels([]);
       setCuratedModels([]);
       setFavoriteModelIds([]);
-      setModelPreferences({
-        lastUsedModelId: 'openrouter/free',
-        lastUsedDeepResearchModelId: 'openrouter/free',
-      });
+      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free' });
       setShowAllModels(false);
       setConversations([]);
       setActiveConversationId(null);
@@ -174,7 +134,9 @@ export default function App() {
 
         if (catalog.models.length > 0) {
           const preferredModelId = catalog.preferences.lastUsedModelId || catalog.models[0].id;
-          setSelectedModel(catalog.models.some((model) => model.id === preferredModelId) ? preferredModelId : catalog.models[0].id);
+          setSelectedModel(
+            catalog.models.some((m) => m.id === preferredModelId) ? preferredModelId : catalog.models[0].id,
+          );
         }
       } catch (err) {
         setError((err as Error).message);
@@ -182,45 +144,65 @@ export default function App() {
     })();
   }, [user]);
 
+  // ─── Conversation Effects ─────────────────────
+
+  const refreshConversations = useCallback(async (preferredConversationId?: string) => {
+    setLoadingConversations(true);
+    try {
+      const availableConversations = await listConversations();
+      setConversationAPISupported(true);
+      setConversations(availableConversations);
+      setActiveConversationId((current) => {
+        if (preferredConversationId && availableConversations.some((c) => c.id === preferredConversationId)) {
+          return preferredConversationId;
+        }
+        if (current && availableConversations.some((c) => c.id === current)) {
+          return current;
+        }
+        return availableConversations[0]?.id ?? null;
+      });
+      if (availableConversations.length === 0) {
+        setMessages([]);
+      }
+    } catch (err) {
+      if (isNotFoundError(err)) {
+        setConversationAPISupported(false);
+        setConversations([]);
+        setActiveConversationId(null);
+        setMessages([]);
+        return;
+      }
+      setError((err as Error).message);
+    } finally {
+      setLoadingConversations(false);
+    }
+  }, []);
+
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-    if (!conversationAPISupported) {
-      return;
-    }
+    if (!user || !conversationAPISupported) return;
     void refreshConversations();
   }, [conversationAPISupported, refreshConversations, user]);
 
   useEffect(() => {
-    if (!user) {
-      return;
-    }
-    if (!conversationAPISupported) {
-      return;
-    }
+    if (!user || !conversationAPISupported) return;
     if (!activeConversationId) {
       setMessages([]);
       return;
     }
-    if (isStreaming) {
-      return;
-    }
+    if (isStreaming) return;
 
     let cancelled = false;
     setLoadingMessages(true);
     void (async () => {
       try {
         const conversationMessages = await listConversationMessages(activeConversationId);
-        if (cancelled) {
-          return;
-        }
+        if (cancelled) return;
         setMessages(
-          conversationMessages.map((message) => ({
-            id: message.id,
-            role: message.role,
-            content: message.content,
-            citations: message.citations ?? [],
+          conversationMessages.map((m) => ({
+            id: m.id,
+            role: m.role,
+            content: m.content,
+            citations: m.citations ?? [],
           })),
         );
       } catch (err) {
@@ -234,58 +216,52 @@ export default function App() {
           setActiveConversationId(null);
           return;
         }
-        if (!cancelled) {
-          setError((err as Error).message);
-        }
+        if (!cancelled) setError((err as Error).message);
       } finally {
-        if (!cancelled) {
-          setLoadingMessages(false);
-        }
+        if (!cancelled) setLoadingMessages(false);
       }
     })();
 
-    return () => {
-      cancelled = true;
-    };
+    return () => { cancelled = true; };
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
+
+  // Auto-scroll on new messages
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
+
+  // ─── Computed ─────────────────────────────────
 
   const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
 
   const visibleModels = useMemo(() => {
     const base = showAllModels || curatedModels.length === 0 ? models : curatedModels;
     return [...base].sort((a, b) => {
-      const aFavorite = favoriteModelIdSet.has(a.id) ? 1 : 0;
-      const bFavorite = favoriteModelIdSet.has(b.id) ? 1 : 0;
-      if (aFavorite !== bFavorite) {
-        return bFavorite - aFavorite;
-      }
+      const aFav = favoriteModelIdSet.has(a.id) ? 1 : 0;
+      const bFav = favoriteModelIdSet.has(b.id) ? 1 : 0;
+      if (aFav !== bFav) return bFav - aFav;
       return a.name.localeCompare(b.name);
     });
   }, [curatedModels, favoriteModelIdSet, models, showAllModels]);
 
   const selectableModels = useMemo(() => {
     const byID = new Map<string, Model>();
-    for (const model of visibleModels) {
-      byID.set(model.id, model);
-    }
-    const selected = models.find((model) => model.id === selectedModel);
-    if (selected) {
-      byID.set(selected.id, selected);
-    }
+    for (const model of visibleModels) byID.set(model.id, model);
+    const selected = models.find((m) => m.id === selectedModel);
+    if (selected) byID.set(selected.id, selected);
     return [...byID.values()];
   }, [models, selectedModel, visibleModels]);
 
   const currentModel = useMemo(
-    () => models.find((model) => model.id === selectedModel) ?? null,
+    () => models.find((m) => m.id === selectedModel) ?? null,
     [models, selectedModel],
   );
 
-  const selectedModelIsFavorite = favoriteModelIdSet.has(selectedModel);
+  // ─── Handlers ─────────────────────────────────
 
   async function handleDevLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
-
     try {
       const authenticatedUser = await authWithGoogle('dev-token', {
         'X-Test-Email': devEmail,
@@ -306,10 +282,7 @@ export default function App() {
       setModels([]);
       setCuratedModels([]);
       setFavoriteModelIds([]);
-      setModelPreferences({
-        lastUsedModelId: 'openrouter/free',
-        lastUsedDeepResearchModelId: 'openrouter/free',
-      });
+      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free' });
       setShowAllModels(false);
       setSelectedModel('openrouter/free');
       setMessages([]);
@@ -325,9 +298,7 @@ export default function App() {
   }
 
   async function persistModelSelection(mode: 'chat' | 'deep_research', modelId: string) {
-    if (!user) {
-      return;
-    }
+    if (!user) return;
     setUpdatingModelPreference(true);
     try {
       const preferences = await updateModelPreference(mode, modelId);
@@ -348,46 +319,31 @@ export default function App() {
   function handleDeepResearchChange(next: boolean) {
     setDeepResearch(next);
     setError(null);
-
     const preferredModelID = next ? modelPreferences.lastUsedDeepResearchModelId : modelPreferences.lastUsedModelId;
     const resolvedModelID =
-      preferredModelID && models.some((model) => model.id === preferredModelID) ? preferredModelID : selectedModel;
-
-    if (resolvedModelID !== selectedModel && resolvedModelID) {
-      setSelectedModel(resolvedModelID);
-    }
-    if (resolvedModelID) {
-      void persistModelSelection(next ? 'deep_research' : 'chat', resolvedModelID);
-    }
+      preferredModelID && models.some((m) => m.id === preferredModelID) ? preferredModelID : selectedModel;
+    if (resolvedModelID !== selectedModel && resolvedModelID) setSelectedModel(resolvedModelID);
+    if (resolvedModelID) void persistModelSelection(next ? 'deep_research' : 'chat', resolvedModelID);
   }
 
-  async function handleToggleFavorite() {
-    if (!selectedModel || !user) {
-      return;
-    }
-
+  async function handleToggleFavorite(modelId: string) {
+    if (!user) return;
     setError(null);
-    setUpdatingModelFavorite(true);
     try {
-      const favorites = await updateModelFavorite(selectedModel, !selectedModelIsFavorite);
+      const favorites = await updateModelFavorite(modelId, !favoriteModelIdSet.has(modelId));
       setFavoriteModelIds(favorites);
     } catch (err) {
       setError((err as Error).message);
-    } finally {
-      setUpdatingModelFavorite(false);
     }
   }
 
   async function handleNewConversation() {
-    if (isStreaming || !conversationAPISupported || deletingConversationId !== null || isDeletingAll) {
-      return;
-    }
+    if (isStreaming || !conversationAPISupported || deletingConversationId !== null || isDeletingAll) return;
     setError(null);
     setMessages([]);
-
     try {
       const conversation = await createConversation();
-      setConversations((existing) => [conversation, ...existing.filter((item) => item.id !== conversation.id)]);
+      setConversations((existing) => [conversation, ...existing.filter((c) => c.id !== conversation.id)]);
       setActiveConversationId(conversation.id);
     } catch (err) {
       if (isNotFoundError(err)) {
@@ -399,31 +355,20 @@ export default function App() {
   }
 
   async function handleDeleteConversation(conversationId: string) {
-    if (isStreaming || deletingConversationId !== null || isDeletingAll || !conversationAPISupported) {
-      return;
-    }
-
-    const conversation = conversations.find((item) => item.id === conversationId);
+    if (isStreaming || deletingConversationId !== null || isDeletingAll || !conversationAPISupported) return;
+    const conversation = conversations.find((c) => c.id === conversationId);
     const confirmed = window.confirm(`Delete "${conversation?.title ?? 'this chat'}"? This cannot be undone.`);
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     setError(null);
     setDeletingConversationId(conversationId);
-
-    if (activeConversationId === conversationId) {
-      setMessages([]);
-    }
+    if (activeConversationId === conversationId) setMessages([]);
 
     try {
       await deleteConversation(conversationId);
       await refreshConversations();
     } catch (err) {
-      if (isConversationNotFoundError(err)) {
-        await refreshConversations();
-        return;
-      }
+      if (isConversationNotFoundError(err)) { await refreshConversations(); return; }
       if (isNotFoundError(err)) {
         setConversationAPISupported(false);
         setConversations([]);
@@ -438,24 +383,13 @@ export default function App() {
   }
 
   async function handleDeleteAllConversations() {
-    if (
-      isStreaming ||
-      deletingConversationId !== null ||
-      isDeletingAll ||
-      !conversationAPISupported ||
-      conversations.length === 0
-    ) {
+    if (isStreaming || deletingConversationId !== null || isDeletingAll || !conversationAPISupported || conversations.length === 0)
       return;
-    }
-
     const confirmed = window.confirm('Delete all conversations? This cannot be undone.');
-    if (!confirmed) {
-      return;
-    }
+    if (!confirmed) return;
 
     setError(null);
     setIsDeletingAll(true);
-
     try {
       await deleteAllConversations();
       setConversations([]);
@@ -475,36 +409,17 @@ export default function App() {
     }
   }
 
-  function handleAttachmentButtonClick() {
-    if (isStreaming || uploadingAttachments) {
-      return;
-    }
-    attachmentInputRef.current?.click();
-  }
-
-  function handleRemoveAttachment(fileId: string) {
-    setPendingAttachments((existing) => existing.filter((attachment) => attachment.id !== fileId));
-  }
-
   async function handleAttachmentChange(event: ChangeEvent<HTMLInputElement>) {
     const files = event.target.files;
-    if (!files || files.length === 0) {
-      return;
-    }
-
+    if (!files || files.length === 0) return;
     setError(null);
     setUploadingAttachments(true);
-
     try {
       const uploaded = await Promise.all(Array.from(files).map((file) => uploadFile(file)));
       setPendingAttachments((existing) => {
         const byID = new Map<string, UploadedFile>();
-        for (const attachment of existing) {
-          byID.set(attachment.id, attachment);
-        }
-        for (const attachment of uploaded) {
-          byID.set(attachment.id, attachment);
-        }
+        for (const a of existing) byID.set(a.id, a);
+        for (const a of uploaded) byID.set(a.id, a);
         return [...byID.values()];
       });
     } catch (err) {
@@ -515,22 +430,22 @@ export default function App() {
     }
   }
 
+  function handleRemoveAttachment(fileId: string) {
+    setPendingAttachments((existing) => existing.filter((a) => a.id !== fileId));
+  }
+
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!prompt.trim() || isStreaming || uploadingAttachments) {
-      return;
-    }
+    if (!prompt.trim() || isStreaming || uploadingAttachments) return;
 
-    const attachmentIDs = pendingAttachments.map((attachment) => attachment.id);
-
-    const userMessage: Message = {
+    const attachmentIDs = pendingAttachments.map((a) => a.id);
+    const userMessage: MessageData = {
       id: crypto.randomUUID(),
       role: 'user',
       content: prompt.trim(),
       citations: [],
     };
-
-    const assistantMessage: Message = {
+    const assistantMessage: MessageData = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
@@ -563,32 +478,18 @@ export default function App() {
             }
             return;
           }
-
-          if (eventData.type === 'warning') {
-            setStreamWarning(eventData.message);
-            return;
-          }
-
-          if (eventData.type === 'error') {
-            setError(eventData.message);
-            return;
-          }
-
+          if (eventData.type === 'warning') { setStreamWarning(eventData.message); return; }
+          if (eventData.type === 'error') { setError(eventData.message); return; }
           if (eventData.type === 'citations') {
             setMessages((existing) =>
-              existing.map((message) =>
-                message.id === assistantMessage.id ? { ...message, citations: eventData.citations } : message,
-              ),
+              existing.map((m) => m.id === assistantMessage.id ? { ...m, citations: eventData.citations } : m),
             );
             return;
           }
-
           if (eventData.type === 'token') {
             setMessages((existing) =>
-              existing.map((message) =>
-                message.id === assistantMessage.id
-                  ? { ...message, content: `${message.content}${eventData.delta}` }
-                  : message,
+              existing.map((m) =>
+                m.id === assistantMessage.id ? { ...m, content: `${m.content}${eventData.delta}` } : m,
               ),
             );
           }
@@ -605,246 +506,201 @@ export default function App() {
     }
   }
 
+  // ─── Loading Screen ───────────────────────────
+
   if (loadingAuth) {
-    return <main className="screen center">Loading session...</main>;
-  }
-
-  if (!user) {
     return (
-      <main className="screen center">
-        <section className="card auth-card">
-          <p className="eyebrow">SANETO CHAT</p>
-          <h1>Sign In Required</h1>
-          <p>
-            Production login uses Google Identity Services. For local development, enable{' '}
-            <code>AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true</code> on the backend and use this form.
-          </p>
-
-          <form onSubmit={handleDevLogin} className="auth-form">
-            <label>
-              Email
-              <input value={devEmail} onChange={(event) => setDevEmail(event.target.value)} type="email" required />
-            </label>
-            <label>
-              Google Subject
-              <input value={devSub} onChange={(event) => setDevSub(event.target.value)} required />
-            </label>
-            <button type="submit">Dev Sign In</button>
-          </form>
-
-          {error ? <p className="error">{error}</p> : null}
-        </section>
-      </main>
+      <div className="loading-screen">
+        <span className="loading-text">Loading...</span>
+      </div>
     );
   }
 
+  // ─── Auth Screen ──────────────────────────────
+
+  if (!user) {
+    return (
+      <div className="auth-screen">
+        <div className="auth-card">
+          <h1 className="auth-brand">
+            Saneto <em>Chat</em>
+          </h1>
+          <p className="auth-subtitle">Sign in to continue</p>
+
+          <form onSubmit={handleDevLogin} className="auth-form">
+            <div className="form-field">
+              <label className="form-label" htmlFor="dev-email">Email</label>
+              <input
+                id="dev-email"
+                className="form-input"
+                value={devEmail}
+                onChange={(e) => setDevEmail(e.target.value)}
+                type="email"
+                required
+              />
+            </div>
+            <div className="form-field">
+              <label className="form-label" htmlFor="dev-sub">Google Subject</label>
+              <input
+                id="dev-sub"
+                className="form-input"
+                value={devSub}
+                onChange={(e) => setDevSub(e.target.value)}
+                required
+              />
+            </div>
+            <button type="submit" className="btn-primary">
+              Sign In
+            </button>
+          </form>
+
+          <div className="auth-note">
+            Production uses Google Identity Services. For local dev, enable{' '}
+            <code>AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true</code> on the backend.
+          </div>
+
+          {error && <div className="auth-error">{error}</div>}
+        </div>
+      </div>
+    );
+  }
+
+  // ─── Main App ─────────────────────────────────
+
   return (
-    <main className="screen app-shell">
-      <header className="topbar card">
-        <div>
-          <p className="eyebrow">Signed In</p>
-          <strong>{user.email}</strong>
-        </div>
+    <div className="app-layout">
+      <Sidebar
+        conversations={conversations}
+        activeConversationId={activeConversationId}
+        onSelectConversation={setActiveConversationId}
+        onNewChat={() => void handleNewConversation()}
+        onDeleteConversation={(id) => void handleDeleteConversation(id)}
+        onDeleteAllConversations={() => void handleDeleteAllConversations()}
+        onLogout={() => void handleLogout()}
+        userEmail={user.email}
+        isStreaming={isStreaming}
+        deletingConversationId={deletingConversationId}
+        isDeletingAll={isDeletingAll}
+        loadingConversations={loadingConversations}
+        conversationAPISupported={conversationAPISupported}
+        collapsed={sidebarCollapsed}
+        onToggleCollapsed={() => setSidebarCollapsed(!sidebarCollapsed)}
+      />
 
-        <div className="controls">
-          <label className="model-select">
-            Model
-            <select value={selectedModel} onChange={(event) => handleModelChange(event.target.value)}>
-              {selectableModels.map((model) => (
-                <option key={model.id} value={model.id}>
-                  {favoriteModelIdSet.has(model.id) ? '★ ' : ''}{model.name} ({model.id})
-                </option>
-              ))}
-            </select>
-          </label>
+      <div className="main-content">
+        {/* Header */}
+        <header className="header">
+          <div className="header-left">
+            <button
+              className="btn-sidebar-toggle"
+              onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
+              aria-label="Toggle sidebar"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="3" y1="12" x2="21" y2="12" />
+                <line x1="3" y1="6" x2="21" y2="6" />
+                <line x1="3" y1="18" x2="21" y2="18" />
+              </svg>
+            </button>
 
-          <label className="checkbox">
-            <input
-              type="checkbox"
-              checked={showAllModels}
-              onChange={(event) => setShowAllModels(event.target.checked)}
+            <ModelSelector
+              models={selectableModels}
+              selectedModelId={selectedModel}
+              onSelectModel={handleModelChange}
+              favoriteModelIds={favoriteModelIdSet}
+              onToggleFavorite={(id) => void handleToggleFavorite(id)}
+              showAllModels={showAllModels}
+              onToggleShowAll={setShowAllModels}
+              disabled={models.length === 0}
             />
-            Show All Models
-          </label>
+          </div>
 
-          <button
-            type="button"
-            onClick={() => void handleToggleFavorite()}
-            disabled={updatingModelFavorite || models.length === 0}
-          >
-            {updatingModelFavorite
-              ? 'Updating...'
-              : selectedModelIsFavorite
-                ? 'Unfavorite Model'
-                : 'Favorite Model'}
-          </button>
+          <div className="header-right">
+            <Toggle
+              checked={grounding}
+              onChange={setGrounding}
+              label="Grounding"
+            />
 
-          <label className="checkbox">
-            <input type="checkbox" checked={grounding} onChange={(event) => setGrounding(event.target.checked)} />
-            Grounding
-          </label>
+            <div className="header-divider" />
 
-          <label className="checkbox">
-            <input
-              type="checkbox"
+            <Toggle
               checked={deepResearch}
-              onChange={(event) => handleDeepResearchChange(event.target.checked)}
+              onChange={handleDeepResearchChange}
+              label="Deep Research"
             />
-            Deep Research
-          </label>
-
-          <button type="button" onClick={handleLogout}>
-            Sign Out
-          </button>
-        </div>
-      </header>
-
-      {currentModel ? (
-        <section className="card model-meta">
-          <p>
-            <strong>{currentModel.name}</strong> • Context window: {currentModel.contextWindow.toLocaleString()} • Prompt:{' '}
-            {formatPrice(currentModel.promptPriceMicrosUsd)} / token • Completion:{' '}
-            {formatPrice(currentModel.outputPriceMicrosUsd)} / token
-          </p>
-          <p>
-            {showAllModels || curatedModels.length === 0
-              ? `Showing ${visibleModels.length.toLocaleString()} model${visibleModels.length === 1 ? '' : 's'}`
-              : `Showing ${visibleModels.length.toLocaleString()} curated model${visibleModels.length === 1 ? '' : 's'}`}
-            {' • '}
-            Favorites: {favoriteModelIds.length.toLocaleString()}
-            {updatingModelPreference ? ' • Saving preference...' : ''}
-          </p>
-        </section>
-      ) : null}
-
-      {conversationAPISupported ? (
-        <section className="card conversations">
-          <div className="conversations-header">
-            <p className="eyebrow">Conversations</p>
-            <div className="conversation-actions">
-              <button
-                type="button"
-                onClick={handleDeleteAllConversations}
-                disabled={isStreaming || deletingConversationId !== null || isDeletingAll || conversations.length === 0}
-              >
-                {isDeletingAll ? 'Deleting...' : 'Delete All'}
-              </button>
-              <button
-                type="button"
-                onClick={handleNewConversation}
-                disabled={isStreaming || deletingConversationId !== null || isDeletingAll}
-              >
-                New Chat
-              </button>
-            </div>
           </div>
-          {loadingConversations ? <p className="empty">Loading conversations...</p> : null}
-          {!loadingConversations && conversations.length === 0 ? (
-            <p className="empty">No saved conversations yet.</p>
-          ) : null}
-          {!loadingConversations && conversations.length > 0 ? (
-            <div className="conversation-list">
-              {conversations.map((conversation) => (
-                <div key={conversation.id} className="conversation-row">
-                  <button
-                    type="button"
-                    className={`conversation-item ${activeConversationId === conversation.id ? 'active' : ''}`}
-                    onClick={() => setActiveConversationId(conversation.id)}
-                    disabled={isStreaming || deletingConversationId !== null || isDeletingAll}
-                  >
-                    {conversation.title}
-                  </button>
-                  <button
-                    type="button"
-                    className="conversation-delete"
-                    onClick={() => void handleDeleteConversation(conversation.id)}
-                    disabled={isStreaming || deletingConversationId !== null || isDeletingAll}
-                  >
-                    {deletingConversationId === conversation.id ? 'Deleting...' : 'Delete'}
-                  </button>
-                </div>
-              ))}
+        </header>
+
+        {/* Model info bar */}
+        {currentModel && (
+          <div className="model-info-bar">
+            <div className="model-info-item">
+              <span className="model-info-label">Context</span>
+              <span className="model-info-value">{currentModel.contextWindow.toLocaleString()}</span>
             </div>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="card messages">
-        {loadingMessages ? <p className="empty">Loading messages...</p> : null}
-        {!loadingMessages && messages.length === 0 ? <p className="empty">No messages yet. Send one to start streaming.</p> : null}
-        {messages.map((message) => (
-          <article key={message.id} className={`bubble ${message.role}`}>
-            <p className="role">{message.role}</p>
-            <p>{message.content || (message.role === 'assistant' ? '...' : '')}</p>
-            {message.citations.length > 0 ? (
-              <ol className="citations">
-                {message.citations.map((citation, index) => (
-                  <li key={`${message.id}-citation-${citation.url}-${index}`} className="citation-item">
-                    <a href={citation.url} target="_blank" rel="noreferrer">
-                      {citationLabel(citation, index)}
-                    </a>
-                    {citation.snippet ? <p className="citation-snippet">{citation.snippet}</p> : null}
-                  </li>
-                ))}
-              </ol>
-            ) : null}
-          </article>
-        ))}
-      </section>
-
-      <form className="card composer" onSubmit={handleSend}>
-        <input
-          ref={attachmentInputRef}
-          type="file"
-          accept={acceptedAttachmentTypes}
-          multiple
-          onChange={handleAttachmentChange}
-          className="visually-hidden"
-        />
-        <textarea
-          value={prompt}
-          onChange={(event) => setPrompt(event.target.value)}
-          rows={4}
-          placeholder="Ask something..."
-        />
-        <div className="attachment-row">
-          <button
-            type="button"
-            onClick={handleAttachmentButtonClick}
-            disabled={isStreaming || uploadingAttachments}
-          >
-            {uploadingAttachments ? 'Uploading files...' : 'Attach Files'}
-          </button>
-          <span className="empty">Allowed: .txt, .md, .pdf, .csv, .json (max 25 MB each)</span>
-        </div>
-        {pendingAttachments.length > 0 ? (
-          <div className="attachment-chips">
-            {pendingAttachments.map((attachment) => (
-              <div key={attachment.id} className="attachment-chip">
-                <span>
-                  {attachment.filename} ({formatBytes(attachment.sizeBytes)})
+            <div className="model-info-divider" />
+            <div className="model-info-item">
+              <span className="model-info-label">Prompt</span>
+              <span className="model-info-value">{formatPrice(currentModel.promptPriceMicrosUsd)}/tok</span>
+            </div>
+            <div className="model-info-divider" />
+            <div className="model-info-item">
+              <span className="model-info-label">Output</span>
+              <span className="model-info-value">{formatPrice(currentModel.outputPriceMicrosUsd)}/tok</span>
+            </div>
+            {updatingModelPreference && (
+              <>
+                <div className="model-info-divider" />
+                <span className="model-info-item" style={{ color: 'var(--accent)', fontStyle: 'italic' }}>
+                  Saving...
                 </span>
-                <button
-                  type="button"
-                  onClick={() => handleRemoveAttachment(attachment.id)}
-                  disabled={isStreaming || uploadingAttachments}
-                >
-                  Remove
-                </button>
-              </div>
-            ))}
+              </>
+            )}
           </div>
-        ) : null}
-        <div className="composer-row">
-          <div>
-            {streamWarning ? <p className="warning">{streamWarning}</p> : null}
-            {error ? <p className="error">{error}</p> : null}
-          </div>
-          <button type="submit" disabled={isStreaming || uploadingAttachments || !prompt.trim()}>
-            {isStreaming ? 'Streaming...' : uploadingAttachments ? 'Uploading...' : 'Send'}
-          </button>
+        )}
+
+        {/* Messages */}
+        <div className="messages-container">
+          {loadingMessages && (
+            <div className="messages-empty">
+              <span className="loading-text">Loading messages...</span>
+            </div>
+          )}
+
+          {!loadingMessages && messages.length === 0 && (
+            <div className="messages-empty">
+              <span className="messages-empty-title">What's on your mind?</span>
+              <span className="messages-empty-subtitle">
+                Start a conversation. Your messages will appear here.
+              </span>
+            </div>
+          )}
+
+          {messages.map((message, index) => (
+            <ChatMessage
+              key={message.id}
+              message={message}
+              isStreaming={isStreaming && index === messages.length - 1}
+            />
+          ))}
+          <div ref={messagesEndRef} />
         </div>
-      </form>
-    </main>
+
+        {/* Composer */}
+        <Composer
+          prompt={prompt}
+          onPromptChange={setPrompt}
+          onSend={handleSend}
+          isStreaming={isStreaming}
+          uploadingAttachments={uploadingAttachments}
+          pendingAttachments={pendingAttachments}
+          onAttachmentChange={handleAttachmentChange}
+          onRemoveAttachment={handleRemoveAttachment}
+          error={error}
+          streamWarning={streamWarning}
+        />
+      </div>
+    </div>
   );
 }
