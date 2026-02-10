@@ -10,9 +10,23 @@ type MessageData = {
   citations: Citation[];
 };
 
+type ThinkingTraceStep = {
+  id: string;
+  label: string;
+  detail: string;
+  status: 'pending' | 'active' | 'done';
+};
+
+type ThinkingTrace = {
+  status: 'running' | 'done' | 'stopped';
+  summary: string;
+  steps: ThinkingTraceStep[];
+};
+
 type ChatMessageProps = {
   message: MessageData;
   isStreaming?: boolean;
+  thinkingTrace?: ThinkingTrace | null;
 };
 
 function citationLabel(citation: Citation, index: number): string {
@@ -107,11 +121,18 @@ const markdownComponents: Components = {
   ),
 };
 
-export default function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export default function ChatMessage({ message, isStreaming, thinkingTrace }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const renderMarkdown = !isUser;
   const isAssistant = message.role === 'assistant';
   const showStreamingIndicator = isStreaming && isAssistant && !message.content;
+  const [traceExpanded, setTraceExpanded] = useState(false);
+  const showThinkingTrace = isAssistant && !!thinkingTrace && thinkingTrace.steps.length > 0;
+  const tracePanelID = `${message.id}-thinking-trace`;
+
+  useEffect(() => {
+    setTraceExpanded(false);
+  }, [message.id]);
 
   return (
     <div className={`message ${message.role}`}>
@@ -123,6 +144,51 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
         )}
 
         <div className={`message-content ${renderMarkdown ? 'markdown' : 'plain'}`}>
+          {showThinkingTrace && thinkingTrace && (
+            <div className={`thinking-trace ${thinkingTrace.status}`}>
+              <button
+                type="button"
+                className="thinking-trace-toggle"
+                onClick={() => setTraceExpanded((open) => !open)}
+                aria-expanded={traceExpanded}
+                aria-controls={tracePanelID}
+              >
+                <span className="thinking-trace-heading">
+                  <span className="thinking-trace-title">
+                    {thinkingTrace.status === 'running' ? 'Thinking' : 'Thought Process'}
+                  </span>
+                  <span className="thinking-trace-summary">{thinkingTrace.summary}</span>
+                </span>
+                <svg
+                  className={`thinking-trace-chevron ${traceExpanded ? 'open' : ''}`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+
+              {traceExpanded && (
+                <ol id={tracePanelID} className="thinking-trace-steps">
+                  {thinkingTrace.steps.map((step) => (
+                    <li key={step.id} className={`thinking-trace-step ${step.status}`}>
+                      <span className="thinking-trace-step-dot" />
+                      <div className="thinking-trace-step-content">
+                        <span className="thinking-trace-step-label">{step.label}</span>
+                        <span className="thinking-trace-step-detail">{step.detail}</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
+            </div>
+          )}
+
           {renderMarkdown ? (
             <div className="message-markdown">
               <ReactMarkdown
@@ -137,10 +203,13 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
             message.content || ''
           )}
           {showStreamingIndicator && (
-            <span className="message-streaming-indicator">
-              <span />
-              <span />
-              <span />
+            <span className="message-streaming-indicator" aria-live="polite">
+              <span className="message-streaming-label">Thinking</span>
+              <span className="message-streaming-dots" aria-hidden="true">
+                <span />
+                <span />
+                <span />
+              </span>
             </span>
           )}
         </div>
@@ -170,4 +239,4 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
   );
 }
 
-export type { MessageData };
+export type { MessageData, ThinkingTrace, ThinkingTraceStep };

@@ -112,6 +112,39 @@ afterEach(() => {
 });
 
 describe('Deep research streaming UX', () => {
+  it('keeps first message visible and shows thinking UI before conversation metadata arrives', async () => {
+    let releaseStream: (() => void) | undefined;
+    streamMessageMock.mockImplementation(
+      async () =>
+        await new Promise<void>((resolve) => {
+          releaseStream = () => resolve();
+        }),
+    );
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    await user.click(screen.getByRole('button', { name: /new conversation/i }));
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'First prompt');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.getByText('First prompt')).toBeInTheDocument();
+    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0);
+    expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument();
+
+    releaseStream?.();
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
+    });
+  });
+
   it('adds a conversation only after first send starts streaming', async () => {
     const createdConversation: api.Conversation = {
       id: 'conv-new',

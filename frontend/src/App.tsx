@@ -23,7 +23,7 @@ import {
 import Sidebar from './components/Sidebar';
 import Toggle from './components/Toggle';
 import ModelSelector from './components/ModelSelector';
-import ChatMessage, { type MessageData } from './components/ChatMessage';
+import ChatMessage, { type MessageData, type ThinkingTrace } from './components/ChatMessage';
 import Composer from './components/Composer';
 
 function formatPrice(micros: number): string {
@@ -56,6 +56,48 @@ const researchPhaseDefaults: Record<ResearchPhase, string> = {
   finalizing: 'Ordering citations and finishing output',
 };
 
+function buildInitialThinkingTrace(options: { grounding: boolean; deepResearch: boolean }): ThinkingTrace {
+  if (options.deepResearch) {
+    return {
+      status: 'running',
+      summary: researchPhaseDefaults.planning,
+      steps: researchPhases.map((phase, index) => ({
+        id: phase,
+        label: researchPhaseLabels[phase],
+        detail: researchPhaseDefaults[phase],
+        status: index === 0 ? 'active' : 'pending',
+      })),
+    };
+  }
+
+  return {
+    status: 'running',
+    summary: 'Reviewing your request',
+    steps: [
+      {
+        id: 'understand',
+        label: 'Understand request',
+        detail: 'Reading your prompt and recent thread context.',
+        status: 'active',
+      },
+      {
+        id: 'grounding',
+        label: 'Check sources',
+        detail: options.grounding
+          ? 'Grounding is on, gathering useful web context.'
+          : 'Grounding is off for this message.',
+        status: options.grounding ? 'pending' : 'done',
+      },
+      {
+        id: 'compose',
+        label: 'Compose response',
+        detail: 'Preparing a clear final response.',
+        status: 'pending',
+      },
+    ],
+  };
+}
+
 export default function App() {
   // ─── Auth State ───────────────────────────────
   const [user, setUser] = useState<User | null>(null);
@@ -85,6 +127,8 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [researchActivity, setResearchActivity] = useState<ResearchActivity[]>([]);
   const [researchCompleted, setResearchCompleted] = useState(false);
+  const [thinkingTrace, setThinkingTrace] = useState<ThinkingTrace | null>(null);
+  const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<string | null>(null);
 
   // ─── Conversation State ───────────────────────
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -150,6 +194,8 @@ export default function App() {
       setStreamWarning(null);
       setResearchActivity([]);
       setResearchCompleted(false);
+      setThinkingTrace(null);
+      setActiveAssistantMessageId(null);
       setPendingAttachments([]);
       setUploadingAttachments(false);
       return;
@@ -222,7 +268,11 @@ export default function App() {
   useEffect(() => {
     if (!user || !conversationAPISupported) return;
     if (!activeConversationId) {
-      setMessages([]);
+      if (!isStreaming) {
+        setMessages([]);
+        setThinkingTrace(null);
+        setActiveAssistantMessageId(null);
+      }
       return;
     }
     if (isStreaming) return;
@@ -241,6 +291,8 @@ export default function App() {
             citations: m.citations ?? [],
           })),
         );
+        setThinkingTrace(null);
+        setActiveAssistantMessageId(null);
       } catch (err) {
         if (isConversationNotFoundError(err)) {
           await refreshConversations();
@@ -368,6 +420,8 @@ export default function App() {
       setStreamWarning(null);
       setResearchActivity([]);
       setResearchCompleted(false);
+      setThinkingTrace(null);
+      setActiveAssistantMessageId(null);
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
@@ -423,6 +477,8 @@ export default function App() {
     setError(null);
     setActiveConversationId(null);
     setMessages([]);
+    setThinkingTrace(null);
+    setActiveAssistantMessageId(null);
   }
 
   async function handleDeleteConversation(conversationId: string) {
@@ -433,7 +489,11 @@ export default function App() {
 
     setError(null);
     setDeletingConversationId(conversationId);
-    if (activeConversationId === conversationId) setMessages([]);
+    if (activeConversationId === conversationId) {
+      setMessages([]);
+      setThinkingTrace(null);
+      setActiveAssistantMessageId(null);
+    }
 
     try {
       await deleteConversation(conversationId);
@@ -466,6 +526,8 @@ export default function App() {
       setConversations([]);
       setActiveConversationId(null);
       setMessages([]);
+      setThinkingTrace(null);
+      setActiveAssistantMessageId(null);
     } catch (err) {
       if (isNotFoundError(err)) {
         setConversationAPISupported(false);
@@ -535,6 +597,8 @@ export default function App() {
     setError(null);
     setResearchActivity([]);
     setResearchCompleted(false);
+    setActiveAssistantMessageId(assistantMessage.id);
+    setThinkingTrace(buildInitialThinkingTrace({ grounding, deepResearch: isDeepResearchRequest }));
 
     let resolvedConversationID = activeConversationId;
     const abortController = new AbortController();
@@ -553,6 +617,21 @@ export default function App() {
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
+            if (!isDeepResearchRequest) {
+              setThinkingTrace((existing) => {
+                if (!existing) return existing;
+                return {
+                  ...existing,
+                  summary: grounding ? 'Gathering grounded context' : 'Drafting response',
+                  steps: existing.steps.map((step) => {
+                    if (step.id === 'understand') return { ...step, status: 'done' };
+                    if (step.id === 'grounding') return { ...step, status: grounding ? 'active' : 'done' };
+                    if (step.id === 'compose') return { ...step, status: grounding ? 'pending' : 'active' };
+                    return step;
+                  }),
+                };
+              });
+            }
             if (eventData.conversationId) {
               resolvedConversationID = eventData.conversationId;
               setActiveConversationId(eventData.conversationId);
@@ -565,6 +644,7 @@ export default function App() {
           }
           if (eventData.type === 'progress') {
             if (!isDeepResearchRequest) return;
+            const currentPhaseIndex = researchPhases.indexOf(eventData.phase);
             setResearchActivity((existing) =>
               [
                 ...existing,
@@ -576,6 +656,22 @@ export default function App() {
                 },
               ].slice(-30),
             );
+            setThinkingTrace((existing) => {
+              const previous = new Map(existing?.steps.map((step) => [step.id, step]));
+              return {
+                status: 'running',
+                summary: eventData.message ?? researchPhaseDefaults[eventData.phase],
+                steps: researchPhases.map((phase, index) => ({
+                  id: phase,
+                  label: researchPhaseLabels[phase],
+                  detail:
+                    phase === eventData.phase
+                      ? eventData.message ?? previous.get(phase)?.detail ?? researchPhaseDefaults[phase]
+                      : previous.get(phase)?.detail ?? researchPhaseDefaults[phase],
+                  status: index < currentPhaseIndex ? 'done' : index === currentPhaseIndex ? 'active' : 'pending',
+                })),
+              };
+            });
             return;
           }
           if (eventData.type === 'warning') { setStreamWarning(eventData.message); return; }
@@ -588,9 +684,31 @@ export default function App() {
           }
           if (eventData.type === 'done') {
             if (isDeepResearchRequest) setResearchCompleted(true);
+            setThinkingTrace((existing) => {
+              if (!existing) return existing;
+              return {
+                ...existing,
+                status: 'done',
+                summary: 'Thought process complete',
+                steps: existing.steps.map((step) => ({ ...step, status: 'done' })),
+              };
+            });
             return;
           }
           if (eventData.type === 'token') {
+            if (!isDeepResearchRequest) {
+              setThinkingTrace((existing) => {
+                if (!existing) return existing;
+                return {
+                  ...existing,
+                  summary: 'Writing response',
+                  steps: existing.steps.map((step) => {
+                    if (step.id === 'compose') return { ...step, status: 'active' };
+                    return { ...step, status: 'done' };
+                  }),
+                };
+              });
+            }
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === assistantMessage.id ? { ...m, content: `${m.content}${eventData.delta}` } : m,
@@ -607,8 +725,16 @@ export default function App() {
     } catch (err) {
       if (isAbortError(err)) {
         setStreamWarning('Response stopped.');
+        setThinkingTrace((existing) => {
+          if (!existing) return existing;
+          return { ...existing, status: 'stopped', summary: 'Stopped by user' };
+        });
         return;
       }
+      setThinkingTrace((existing) => {
+        if (!existing) return existing;
+        return { ...existing, status: 'stopped', summary: 'Stopped due to an error' };
+      });
       setError((err as Error).message);
     } finally {
       if (streamAbortControllerRef.current === abortController) {
@@ -830,13 +956,17 @@ export default function App() {
             </div>
           )}
 
-          {messages.map((message, index) => (
-            <ChatMessage
-              key={message.id}
-              message={message}
-              isStreaming={isStreaming && index === messages.length - 1}
-            />
-          ))}
+          {messages.map((message) => {
+            const isActiveAssistant = message.id === activeAssistantMessageId;
+            return (
+              <ChatMessage
+                key={message.id}
+                message={message}
+                isStreaming={isStreaming && isActiveAssistant}
+                thinkingTrace={isActiveAssistant ? thinkingTrace : null}
+              />
+            );
+          })}
           <div ref={messagesEndRef} />
         </div>
 
