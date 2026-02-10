@@ -13,9 +13,13 @@ import {
   streamMessage,
   updateModelFavorite,
   updateModelPreference,
+  updateModelReasoningPreset,
   type Conversation,
   type Model,
   type ModelPreferences,
+  type ReasoningEffort,
+  type ReasoningMode,
+  type ReasoningPreset,
   type ResearchPhase,
   type UploadedFile,
   type User,
@@ -55,6 +59,35 @@ const researchPhaseDefaults: Record<ResearchPhase, string> = {
   synthesizing: 'Drafting structured response',
   finalizing: 'Ordering citations and finishing output',
 };
+
+const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> = [
+  { value: 'low', label: 'Low' },
+  { value: 'medium', label: 'Medium' },
+  { value: 'high', label: 'High' },
+];
+
+const defaultReasoningEffortByMode: Record<ReasoningMode, ReasoningEffort> = {
+  chat: 'medium',
+  deep_research: 'high',
+};
+
+function resolveReasoningEffort(
+  presets: ReasoningPreset[],
+  modelId: string,
+  mode: ReasoningMode,
+): ReasoningEffort {
+  const existing = presets.find((preset) => preset.modelId === modelId && preset.mode === mode);
+  if (existing) return existing.effort;
+  return defaultReasoningEffortByMode[mode];
+}
+
+function upsertReasoningPreset(
+  presets: ReasoningPreset[],
+  next: ReasoningPreset,
+): ReasoningPreset[] {
+  const filtered = presets.filter((preset) => !(preset.modelId === next.modelId && preset.mode === next.mode));
+  return [...filtered, next];
+}
 
 function buildInitialThinkingTrace(options: { grounding: boolean; deepResearch: boolean }): ThinkingTrace {
   if (options.deepResearch) {
@@ -113,9 +146,11 @@ export default function App() {
     lastUsedModelId: 'openrouter/free',
     lastUsedDeepResearchModelId: 'openrouter/free',
   });
+  const [reasoningPresets, setReasoningPresets] = useState<ReasoningPreset[]>([]);
   const [showAllModels, setShowAllModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState('openrouter/free');
   const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
+  const [updatingReasoningPreset, setUpdatingReasoningPreset] = useState(false);
 
   // ─── Chat State ───────────────────────────────
   const [prompt, setPrompt] = useState('');
@@ -186,6 +221,7 @@ export default function App() {
       setCuratedModels([]);
       setFavoriteModelIds([]);
       setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free' });
+      setReasoningPresets([]);
       setShowAllModels(false);
       setConversations([]);
       setActiveConversationId(null);
@@ -208,6 +244,7 @@ export default function App() {
         setCuratedModels(catalog.curatedModels);
         setFavoriteModelIds(catalog.favorites);
         setModelPreferences(catalog.preferences);
+        setReasoningPresets(catalog.reasoningPresets ?? []);
         setShowAllModels(catalog.curatedModels.length === 0);
 
         if (catalog.models.length > 0) {
@@ -364,6 +401,13 @@ export default function App() {
     [models, selectedModel],
   );
 
+  const activeMode: ReasoningMode = deepResearch ? 'deep_research' : 'chat';
+  const currentModelSupportsReasoning = currentModel?.supportsReasoning === true;
+  const selectedReasoningEffort = useMemo(
+    () => resolveReasoningEffort(reasoningPresets, selectedModel, activeMode),
+    [activeMode, reasoningPresets, selectedModel],
+  );
+
   const latestResearchByPhase = useMemo(() => {
     const byPhase = new Map<ResearchPhase, ResearchActivity>();
     for (const entry of researchActivity) {
@@ -414,6 +458,7 @@ export default function App() {
       setCuratedModels([]);
       setFavoriteModelIds([]);
       setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free' });
+      setReasoningPresets([]);
       setShowAllModels(false);
       setSelectedModel('openrouter/free');
       setMessages([]);
@@ -459,6 +504,23 @@ export default function App() {
       preferredModelID && models.some((m) => m.id === preferredModelID) ? preferredModelID : selectedModel;
     if (resolvedModelID !== selectedModel && resolvedModelID) setSelectedModel(resolvedModelID);
     if (resolvedModelID) void persistModelSelection(next ? 'deep_research' : 'chat', resolvedModelID);
+  }
+
+  async function handleReasoningEffortChange(next: ReasoningEffort) {
+    if (!user || !currentModelSupportsReasoning) return;
+    setError(null);
+    setUpdatingReasoningPreset(true);
+    setReasoningPresets((existing) =>
+      upsertReasoningPreset(existing, { modelId: selectedModel, mode: activeMode, effort: next }),
+    );
+    try {
+      const presets = await updateModelReasoningPreset(selectedModel, activeMode, next);
+      setReasoningPresets(presets);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUpdatingReasoningPreset(false);
+    }
   }
 
   async function handleToggleFavorite(modelId: string) {
@@ -611,6 +673,7 @@ export default function App() {
           conversationId: activeConversationId ?? undefined,
           message: userMessage.content,
           modelId: selectedModel,
+          reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined,
           grounding,
           deepResearch,
           fileIds: attachmentIDs.length > 0 ? attachmentIDs : undefined,
@@ -854,6 +917,29 @@ export default function App() {
           </div>
 
           <div className="header-right">
+            <div className={`reasoning-control ${currentModelSupportsReasoning ? '' : 'disabled'}`}>
+              <span className="reasoning-label">Thinking</span>
+              {currentModelSupportsReasoning ? (
+                <select
+                  className="reasoning-select"
+                  value={selectedReasoningEffort}
+                  onChange={(event) => void handleReasoningEffortChange(event.target.value as ReasoningEffort)}
+                  disabled={isStreaming || updatingReasoningPreset}
+                  aria-label="Thinking effort"
+                >
+                  {reasoningEffortOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <span className="reasoning-unavailable">Unavailable</span>
+              )}
+            </div>
+
+            <div className="header-divider" />
+
             <Toggle
               checked={grounding}
               onChange={setGrounding}
@@ -891,7 +977,14 @@ export default function App() {
               <span className="model-info-label">Output</span>
               <span className="model-info-value">{formatPrice(currentModel.outputPriceMicrosUsd)}/tok</span>
             </div>
-            {updatingModelPreference && (
+            <div className="model-info-divider" />
+            <div className="model-info-item">
+              <span className="model-info-label">Thinking</span>
+              <span className="model-info-value">
+                {currentModelSupportsReasoning ? selectedReasoningEffort : 'N/A'}
+              </span>
+            </div>
+            {(updatingModelPreference || updatingReasoningPreset) && (
               <>
                 <div className="model-info-divider" />
                 <span className="model-info-item" style={{ color: 'var(--accent)', fontStyle: 'italic' }}>

@@ -8,6 +8,8 @@ INSERT INTO models (
   context_window,
   prompt_price_microusd,
   completion_price_microusd,
+  supported_parameters_json,
+  supports_reasoning,
   curated,
   is_active
 )
@@ -18,12 +20,16 @@ VALUES (
   0,
   0,
   0,
+  '["reasoning"]',
+  1,
   1,
   1
 )
 ON CONFLICT(id) DO UPDATE SET
   provider = excluded.provider,
   display_name = excluded.display_name,
+  supported_parameters_json = excluded.supported_parameters_json,
+  supports_reasoning = excluded.supports_reasoning,
   curated = excluded.curated,
   is_active = excluded.is_active,
   updated_at = CURRENT_TIMESTAMP;

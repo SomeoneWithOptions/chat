@@ -638,6 +638,81 @@ VALUES ('openai/gpt-4o-mini', 'openrouter', 'GPT-4o mini', 128000, 150, 600, 0, 
 	}
 }
 
+func TestUpdateModelReasoningPresetPersistsByModelAndMode(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/models/reasoning-presets",
+		strings.NewReader(`{"modelId":"openrouter/free","mode":"chat","effort":"high"}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.UpdateModelReasoningPreset(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var payload struct {
+		ReasoningPresets []reasoningPresetResponse `json:"reasoningPresets"`
+	}
+	decodeJSONBody(t, resp, &payload)
+	if len(payload.ReasoningPresets) != 1 {
+		t.Fatalf("expected 1 reasoning preset, got %d", len(payload.ReasoningPresets))
+	}
+	if payload.ReasoningPresets[0].Effort != "high" {
+		t.Fatalf("unexpected effort: %+v", payload.ReasoningPresets[0])
+	}
+
+	var effort string
+	if err := db.QueryRow(`
+SELECT effort
+FROM user_model_reasoning_presets
+WHERE user_id = ? AND model_id = ? AND mode = ?;
+`, user.ID, "openrouter/free", "chat").Scan(&effort); err != nil {
+		t.Fatalf("query reasoning preset: %v", err)
+	}
+	if effort != "high" {
+		t.Fatalf("unexpected stored effort: %q", effort)
+	}
+}
+
+func TestUpdateModelReasoningPresetRejectsUnsupportedModel(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+
+	if _, err := db.Exec(`
+INSERT INTO models (id, provider, display_name, context_window, prompt_price_microusd, completion_price_microusd, supports_reasoning, curated, is_active)
+VALUES ('example/basic-model', 'openrouter', 'Basic', 32000, 0, 0, 0, 0, 1);
+`); err != nil {
+		t.Fatalf("seed model: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPut,
+		"/v1/models/reasoning-presets",
+		strings.NewReader(`{"modelId":"example/basic-model","mode":"chat","effort":"high"}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.UpdateModelReasoningPreset(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusBadRequest, resp.Code, resp.Body.String())
+	}
+}
+
 func TestChatMessagesPersistsConversationAndMessages(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Hi", " there"}})
 	t.Cleanup(func() { _ = db.Close() })
@@ -717,6 +792,47 @@ WHERE user_id = ?;
 	}
 	if !lastUsedDeepResearchModelID.Valid || lastUsedDeepResearchModelID.String != "openrouter/free" {
 		t.Fatalf("unexpected last_used_deep_research_model_id: %+v", lastUsedDeepResearchModelID)
+	}
+}
+
+func TestChatMessagesAppliesReasoningEffortOverrideAndPersistsPreset(t *testing.T) {
+	var capturedRequest openrouter.StreamRequest
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Hi"},
+		onRequest: func(req openrouter.StreamRequest) {
+			capturedRequest = req
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Hello","modelId":"openrouter/free","reasoningEffort":"high"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	if capturedRequest.Reasoning == nil || capturedRequest.Reasoning.Effort != "high" {
+		t.Fatalf("expected reasoning effort high, got %+v", capturedRequest.Reasoning)
+	}
+
+	var effort string
+	if err := db.QueryRow(`
+SELECT effort
+FROM user_model_reasoning_presets
+WHERE user_id = ? AND model_id = ? AND mode = ?;
+`, user.ID, "openrouter/free", "chat").Scan(&effort); err != nil {
+		t.Fatalf("query reasoning preset: %v", err)
+	}
+	if effort != "high" {
+		t.Fatalf("unexpected stored effort: %q", effort)
 	}
 }
 
@@ -1393,9 +1509,11 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 	}
 
 	cfg := config.Config{
-		AuthRequired:           true,
-		SessionCookieName:      "chat_session",
-		OpenRouterDefaultModel: "openrouter/free",
+		AuthRequired:               true,
+		SessionCookieName:          "chat_session",
+		OpenRouterDefaultModel:     "openrouter/free",
+		DefaultChatReasoningEffort: "medium",
+		DefaultDeepReasoningEffort: "high",
 	}
 
 	handler := NewHandlerWithFileStore(cfg, db, session.NewStore(db), auth.NewVerifier(cfg), streamer, fileStore)
@@ -1416,8 +1534,19 @@ VALUES (?, ?, ?, ?);
 func seedModel(t *testing.T, db *sql.DB, id string) {
 	t.Helper()
 	if _, err := db.Exec(`
-INSERT INTO models (id, provider, display_name, context_window, prompt_price_microusd, completion_price_microusd, curated, is_active)
-VALUES (?, 'openrouter', 'OpenRouter Free', 0, 0, 0, 1, 1);
+INSERT INTO models (
+  id,
+  provider,
+  display_name,
+  context_window,
+  prompt_price_microusd,
+  completion_price_microusd,
+  supported_parameters_json,
+  supports_reasoning,
+  curated,
+  is_active
+)
+VALUES (?, 'openrouter', 'OpenRouter Free', 0, 0, 0, '["reasoning"]', 1, 1, 1);
 `, id); err != nil {
 		t.Fatalf("seed model: %v", err)
 	}
@@ -1585,6 +1714,8 @@ CREATE TABLE models (
   context_window INTEGER NOT NULL DEFAULT 0,
   prompt_price_microusd INTEGER NOT NULL DEFAULT 0,
   completion_price_microusd INTEGER NOT NULL DEFAULT 0,
+  supported_parameters_json TEXT,
+  supports_reasoning INTEGER NOT NULL DEFAULT 0,
   curated INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -1606,6 +1737,17 @@ CREATE TABLE user_model_favorites (
   model_id TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, model_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+);
+
+CREATE TABLE user_model_reasoning_presets (
+  user_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research')),
+  effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high')),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, model_id, mode),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
 );

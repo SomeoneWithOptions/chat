@@ -35,6 +35,8 @@ Set at minimum:
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
 - `MODEL_SYNC_BEARER_TOKEN` (required for `POST /v1/models/sync`; send it as `Authorization: Bearer <token>`)
 - `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `150`; applies to deep-research requests only)
+- `DEFAULT_CHAT_REASONING_EFFORT` (optional, default `medium`)
+- `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional, default `high`)
 
 Auth sequencing:
 

@@ -178,6 +178,28 @@ paths:
           $ref: '#/components/responses/Error'
         '401':
           $ref: '#/components/responses/Error'
+  /v1/models/reasoning-presets:
+    put:
+      summary: Update reasoning effort preset for a model and mode
+      security:
+        - SessionCookie: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateReasoningPresetRequest'
+      responses:
+        '200':
+          description: Updated reasoning presets
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UpdateReasoningPresetResponse'
+        '400':
+          $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
   /v1/files:
     post:
       summary: Upload one attachment file
@@ -374,7 +396,7 @@ components:
     Model:
       type: object
       required:
-        [id, name, provider, contextWindow, promptPriceMicrosUsd, outputPriceMicrosUsd, curated]
+        [id, name, provider, contextWindow, promptPriceMicrosUsd, outputPriceMicrosUsd, supportsReasoning, curated]
       properties:
         id:
           type: string
@@ -388,8 +410,24 @@ components:
           type: integer
         outputPriceMicrosUsd:
           type: integer
+        supportsReasoning:
+          type: boolean
         curated:
           type: boolean
+    ReasoningEffort:
+      type: string
+      enum: [low, medium, high]
+    ReasoningPreset:
+      type: object
+      required: [modelId, mode, effort]
+      properties:
+        modelId:
+          type: string
+        mode:
+          type: string
+          enum: [chat, deep_research]
+        effort:
+          $ref: '#/components/schemas/ReasoningEffort'
     ModelPreferences:
       type: object
       required: [lastUsedModelId, lastUsedDeepResearchModelId]
@@ -400,7 +438,7 @@ components:
           type: string
     ListModelsResponse:
       type: object
-      required: [models, curatedModels, favorites, preferences]
+      required: [models, curatedModels, favorites, preferences, reasoningPresets]
       properties:
         models:
           type: array
@@ -416,6 +454,10 @@ components:
             type: string
         preferences:
           $ref: '#/components/schemas/ModelPreferences'
+        reasoningPresets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReasoningPreset'
     SyncModelsResponse:
       type: object
       required: [synced]
@@ -454,6 +496,25 @@ components:
           type: array
           items:
             type: string
+    UpdateReasoningPresetRequest:
+      type: object
+      required: [modelId, mode, effort]
+      properties:
+        modelId:
+          type: string
+        mode:
+          type: string
+          enum: [chat, deep_research]
+        effort:
+          $ref: '#/components/schemas/ReasoningEffort'
+    UpdateReasoningPresetResponse:
+      type: object
+      required: [reasoningPresets]
+      properties:
+        reasoningPresets:
+          type: array
+          items:
+            $ref: '#/components/schemas/ReasoningPreset'
     Conversation:
       type: object
       required: [id, title, createdAt, updatedAt]
@@ -575,6 +636,8 @@ components:
           type: string
         modelId:
           type: string
+        reasoningEffort:
+          $ref: '#/components/schemas/ReasoningEffort'
         grounding:
           type: boolean
           default: true
@@ -609,6 +672,8 @@ components:
           type: boolean
         modelId:
           type: string
+        reasoningEffort:
+          $ref: '#/components/schemas/ReasoningEffort'
         conversationId:
           type: string
     StreamEventProgress:

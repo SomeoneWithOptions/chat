@@ -12,7 +12,17 @@ export type Model = {
   contextWindow: number;
   promptPriceMicrosUsd: number;
   outputPriceMicrosUsd: number;
+  supportsReasoning?: boolean;
   curated: boolean;
+};
+
+export type ReasoningMode = 'chat' | 'deep_research';
+export type ReasoningEffort = 'low' | 'medium' | 'high';
+
+export type ReasoningPreset = {
+  modelId: string;
+  mode: ReasoningMode;
+  effort: ReasoningEffort;
 };
 
 export type ModelPreferences = {
@@ -25,6 +35,7 @@ export type ModelCatalog = {
   curatedModels: Model[];
   favorites: string[];
   preferences: ModelPreferences;
+  reasoningPresets?: ReasoningPreset[];
 };
 
 export type Conversation = {
@@ -65,6 +76,7 @@ export type ChatRequest = {
   conversationId?: string;
   message: string;
   modelId: string;
+  reasoningEffort?: ReasoningEffort;
   grounding: boolean;
   deepResearch: boolean;
   fileIds?: string[];
@@ -73,7 +85,7 @@ export type ChatRequest = {
 export type ResearchPhase = 'planning' | 'searching' | 'synthesizing' | 'finalizing';
 
 export type StreamEvent =
-  | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; conversationId?: string }
+  | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; reasoningEffort?: ReasoningEffort; conversationId?: string }
   | { type: 'progress'; phase: ResearchPhase; message?: string; pass?: number; totalPasses?: number }
   | { type: 'warning'; scope: string; message: string }
   | { type: 'citations'; citations: Citation[] }
@@ -156,12 +168,24 @@ export async function listModels(): Promise<ModelCatalog> {
   return response;
 }
 
-export async function updateModelPreference(mode: 'chat' | 'deep_research', modelId: string): Promise<ModelPreferences> {
+export async function updateModelPreference(mode: ReasoningMode, modelId: string): Promise<ModelPreferences> {
   const response = await requestJSON<{ preferences: ModelPreferences }>('/v1/models/preferences', {
     method: 'PUT',
     body: JSON.stringify({ mode, modelId }),
   });
   return response.preferences;
+}
+
+export async function updateModelReasoningPreset(
+  modelId: string,
+  mode: ReasoningMode,
+  effort: ReasoningEffort,
+): Promise<ReasoningPreset[]> {
+  const response = await requestJSON<{ reasoningPresets: ReasoningPreset[] }>('/v1/models/reasoning-presets', {
+    method: 'PUT',
+    body: JSON.stringify({ modelId, mode, effort }),
+  });
+  return response.reasoningPresets;
 }
 
 export async function updateModelFavorite(modelId: string, favorite: boolean): Promise<string[]> {

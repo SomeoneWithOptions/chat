@@ -29,6 +29,8 @@ CREATE TABLE IF NOT EXISTS models (
   context_window INTEGER NOT NULL DEFAULT 0,
   prompt_price_microusd INTEGER NOT NULL DEFAULT 0,
   completion_price_microusd INTEGER NOT NULL DEFAULT 0,
+  supported_parameters_json TEXT,
+  supports_reasoning INTEGER NOT NULL DEFAULT 0,
   curated INTEGER NOT NULL DEFAULT 0,
   is_active INTEGER NOT NULL DEFAULT 1,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -52,6 +54,17 @@ CREATE TABLE IF NOT EXISTS user_model_favorites (
   model_id TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, model_id),
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS user_model_reasoning_presets (
+  user_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research')),
+  effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high')),
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (user_id, model_id, mode),
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (model_id) REFERENCES models(id) ON DELETE CASCADE
 );

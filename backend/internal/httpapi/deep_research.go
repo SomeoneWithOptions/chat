@@ -25,15 +25,16 @@ const (
 var citationIndexPattern = regexp.MustCompile(`\[(\d{1,2})\]`)
 
 type deepResearchStreamInput struct {
-	UserID         string
-	UserMessageID  string
-	ConversationID string
-	ModelID        string
-	Message        string
-	Prompt         string
-	Grounding      bool
-	IsAnonymous    bool
-	History        []openrouter.Message
+	UserID          string
+	UserMessageID   string
+	ConversationID  string
+	ModelID         string
+	ReasoningEffort string
+	Message         string
+	Prompt          string
+	Grounding       bool
+	IsAnonymous     bool
+	History         []openrouter.Message
 }
 
 func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input deepResearchStreamInput) {
@@ -63,13 +64,17 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
 
-	_ = writeSSEEvent(w, map[string]any{
+	metadataEvent := map[string]any{
 		"type":           "metadata",
 		"grounding":      input.Grounding,
 		"deepResearch":   true,
 		"modelId":        input.ModelID,
 		"conversationId": input.ConversationID,
-	})
+	}
+	if input.ReasoningEffort != "" {
+		metadataEvent["reasoningEffort"] = input.ReasoningEffort
+	}
+	_ = writeSSEEvent(w, metadataEvent)
 	flusher.Flush()
 
 	timeSensitive := isTimeSensitivePrompt(input.Message)
@@ -196,7 +201,11 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	var assistantContent strings.Builder
 	streamErr := h.openrouter.StreamChatCompletion(
 		researchCtx,
-		openrouter.StreamRequest{Model: input.ModelID, Messages: promptMessages},
+		openrouter.StreamRequest{
+			Model:     input.ModelID,
+			Messages:  promptMessages,
+			Reasoning: openRouterReasoningConfig(input.ReasoningEffort),
+		},
 		nil,
 		func(delta string) error {
 			assistantContent.WriteString(delta)

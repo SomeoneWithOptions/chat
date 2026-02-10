@@ -14,6 +14,8 @@ const (
 	defaultSessionCookieName   = "chat_session"
 	defaultSessionTTLHours     = 168
 	defaultDefaultModel        = "openrouter/free"
+	defaultChatReasoningEffort = "medium"
+	defaultDeepReasoningEffort = "high"
 	defaultOpenRouterBaseURL   = "https://openrouter.ai/api/v1"
 	defaultBraveBaseURL        = "https://api.search.brave.com/res/v1"
 	defaultFrontendOrigin      = "https://chat.sanetomore.com"
@@ -40,6 +42,8 @@ type Config struct {
 	OpenRouterAPIKey           string
 	OpenRouterBaseURL          string
 	OpenRouterDefaultModel     string
+	DefaultChatReasoningEffort string
+	DefaultDeepReasoningEffort string
 	BraveAPIKey                string
 	BraveBaseURL               string
 	LocalUploadDir             string
@@ -68,6 +72,8 @@ func Load() (Config, error) {
 		OpenRouterAPIKey:           strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
 		OpenRouterBaseURL:          envOrDefault("OPENROUTER_API_BASE_URL", defaultOpenRouterBaseURL),
 		OpenRouterDefaultModel:     envOrDefault("OPENROUTER_FREE_TIER_DEFAULT_MODEL", defaultDefaultModel),
+		DefaultChatReasoningEffort: strings.ToLower(envOrDefault("DEFAULT_CHAT_REASONING_EFFORT", defaultChatReasoningEffort)),
+		DefaultDeepReasoningEffort: strings.ToLower(envOrDefault("DEFAULT_DEEP_RESEARCH_REASONING_EFFORT", defaultDeepReasoningEffort)),
 		BraveAPIKey:                strings.TrimSpace(os.Getenv("BRAVE_API_KEY")),
 		BraveBaseURL:               envOrDefault("BRAVE_API_BASE_URL", defaultBraveBaseURL),
 		LocalUploadDir:             envOrDefault("LOCAL_UPLOAD_DIR", defaultUploadDir),
@@ -103,6 +109,12 @@ func Load() (Config, error) {
 	}
 	if cfg.AuthRequired && !cfg.InsecureSkipGoogleVerify && cfg.GoogleClientID == "" {
 		return Config{}, errors.New("GOOGLE_CLIENT_ID is required unless AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true")
+	}
+	if err := validateReasoningEffort(cfg.DefaultChatReasoningEffort); err != nil {
+		return Config{}, fmt.Errorf("DEFAULT_CHAT_REASONING_EFFORT %w", err)
+	}
+	if err := validateReasoningEffort(cfg.DefaultDeepReasoningEffort); err != nil {
+		return Config{}, fmt.Errorf("DEFAULT_DEEP_RESEARCH_REASONING_EFFORT %w", err)
 	}
 
 	return cfg, nil
@@ -159,4 +171,13 @@ func parseEmailSet(raw string) map[string]struct{} {
 		out[strings.ToLower(email)] = struct{}{}
 	}
 	return out
+}
+
+func validateReasoningEffort(effort string) error {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "low", "medium", "high":
+		return nil
+	default:
+		return fmt.Errorf("must be one of: low, medium, high")
+	}
 }

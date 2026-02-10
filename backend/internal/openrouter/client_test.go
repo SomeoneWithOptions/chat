@@ -82,6 +82,47 @@ func TestStreamChatCompletionStreamsDeltas(t *testing.T) {
 	}
 }
 
+func TestStreamChatCompletionIncludesReasoningEffortWhenProvided(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		rawBody := string(body)
+		if !strings.Contains(rawBody, `"reasoning":{"effort":"high"}`) {
+			t.Fatalf("request body missing reasoning effort: %s", rawBody)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(config.Config{
+		OpenRouterAPIKey:  "test-key",
+		OpenRouterBaseURL: server.URL,
+	}, server.Client())
+
+	err := client.StreamChatCompletion(
+		context.Background(),
+		StreamRequest{
+			Model: "openrouter/free",
+			Messages: []Message{
+				{Role: "user", Content: "hi"},
+			},
+			Reasoning: &ReasoningConfig{Effort: "high"},
+		},
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("stream chat completion: %v", err)
+	}
+}
+
 func TestStreamChatCompletionReturnsUpstreamError(t *testing.T) {
 	t.Parallel()
 
@@ -162,6 +203,7 @@ func TestListModelsParsesCatalog(t *testing.T) {
 					"id":"openrouter/free",
 					"name":"OpenRouter Free",
 					"context_length":131072,
+					"supported_parameters":["reasoning","temperature"],
 					"pricing":{"prompt":"0","completion":"0"}
 				},
 				{
@@ -196,6 +238,9 @@ func TestListModelsParsesCatalog(t *testing.T) {
 	}
 	if models[0].ContextWindow != 131072 {
 		t.Fatalf("unexpected first context window: %d", models[0].ContextWindow)
+	}
+	if !models[0].SupportsReasoning {
+		t.Fatalf("expected first model to support reasoning")
 	}
 
 	if models[1].Name != "provider/model-two" {

@@ -21,6 +21,11 @@ import (
 	"github.com/google/uuid"
 )
 
+var (
+	errInvalidReasoningEffort    = errors.New("invalid reasoning effort")
+	errReasoningUnsupportedModel = errors.New("model does not support reasoning")
+)
+
 type Handler struct {
 	cfg        config.Config
 	db         *sql.DB
@@ -76,13 +81,14 @@ type contextKey string
 const sessionUserContextKey contextKey = "session_user"
 
 type modelResponse struct {
-	ID              string `json:"id"`
-	Name            string `json:"name"`
-	Provider        string `json:"provider"`
-	ContextWindow   int    `json:"contextWindow"`
-	PromptPriceMUSD int    `json:"promptPriceMicrosUsd"`
-	OutputPriceMUSD int    `json:"outputPriceMicrosUsd"`
-	Curated         bool   `json:"curated"`
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	Provider          string `json:"provider"`
+	ContextWindow     int    `json:"contextWindow"`
+	PromptPriceMUSD   int    `json:"promptPriceMicrosUsd"`
+	OutputPriceMUSD   int    `json:"outputPriceMicrosUsd"`
+	SupportsReasoning bool   `json:"supportsReasoning"`
+	Curated           bool   `json:"curated"`
 }
 
 type modelPreferencesResponse struct {
@@ -90,11 +96,18 @@ type modelPreferencesResponse struct {
 	LastUsedDeepResearchModelID string `json:"lastUsedDeepResearchModelId"`
 }
 
+type reasoningPresetResponse struct {
+	ModelID string `json:"modelId"`
+	Mode    string `json:"mode"`
+	Effort  string `json:"effort"`
+}
+
 type listModelsResponse struct {
-	Models      []modelResponse          `json:"models"`
-	Curated     []modelResponse          `json:"curatedModels"`
-	Favorites   []string                 `json:"favorites"`
-	Preferences modelPreferencesResponse `json:"preferences"`
+	Models           []modelResponse           `json:"models"`
+	Curated          []modelResponse           `json:"curatedModels"`
+	Favorites        []string                  `json:"favorites"`
+	Preferences      modelPreferencesResponse  `json:"preferences"`
+	ReasoningPresets []reasoningPresetResponse `json:"reasoningPresets"`
 }
 
 type syncModelsResponse struct {
@@ -188,13 +201,14 @@ func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 	}
 	if len(models) == 0 {
 		models = append(models, modelResponse{
-			ID:              h.cfg.OpenRouterDefaultModel,
-			Name:            "OpenRouter Free",
-			Provider:        "openrouter",
-			ContextWindow:   0,
-			PromptPriceMUSD: 0,
-			OutputPriceMUSD: 0,
-			Curated:         true,
+			ID:                h.cfg.OpenRouterDefaultModel,
+			Name:              "OpenRouter Free",
+			Provider:          "openrouter",
+			ContextWindow:     0,
+			PromptPriceMUSD:   0,
+			OutputPriceMUSD:   0,
+			SupportsReasoning: true,
+			Curated:           true,
 		})
 	}
 
@@ -209,11 +223,18 @@ func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to read preferences")
 		return
 	}
+	reasoningPresets, err := h.listUserReasoningPresets(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to read reasoning presets")
+		return
+	}
 
 	allowed := make(map[string]struct{}, len(models))
+	reasoningSupported := make(map[string]bool, len(models))
 	curated := make([]modelResponse, 0, len(models))
 	for _, model := range models {
 		allowed[model.ID] = struct{}{}
+		reasoningSupported[model.ID] = model.SupportsReasoning
 		if model.Curated {
 			curated = append(curated, model)
 		}
@@ -221,12 +242,14 @@ func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 
 	preferences = normalizeModelPreferences(preferences, allowed, h.cfg.OpenRouterDefaultModel)
 	filteredFavorites := filterKnownModelIDs(favorites, allowed)
+	filteredReasoningPresets := filterReasoningPresets(reasoningPresets, allowed, reasoningSupported)
 
 	writeJSON(w, http.StatusOK, listModelsResponse{
-		Models:      models,
-		Curated:     curated,
-		Favorites:   filteredFavorites,
-		Preferences: preferences,
+		Models:           models,
+		Curated:          curated,
+		Favorites:        filteredFavorites,
+		Preferences:      preferences,
+		ReasoningPresets: filteredReasoningPresets,
 	})
 }
 
@@ -243,6 +266,7 @@ func (h Handler) SyncModels(w http.ResponseWriter, r *http.Request) {
 func (h Handler) listActiveModels(ctx context.Context) ([]modelResponse, error) {
 	rows, err := h.db.QueryContext(ctx, `
 SELECT id, display_name, provider, context_window, prompt_price_microusd, completion_price_microusd, curated
+     , supports_reasoning
 FROM models
 WHERE is_active = 1
 ORDER BY curated DESC, updated_at DESC
@@ -256,9 +280,11 @@ LIMIT 500;
 	models := make([]modelResponse, 0, 16)
 	for rows.Next() {
 		var m modelResponse
-		if err := rows.Scan(&m.ID, &m.Name, &m.Provider, &m.ContextWindow, &m.PromptPriceMUSD, &m.OutputPriceMUSD, &m.Curated); err != nil {
+		var supportsReasoning int
+		if err := rows.Scan(&m.ID, &m.Name, &m.Provider, &m.ContextWindow, &m.PromptPriceMUSD, &m.OutputPriceMUSD, &m.Curated, &supportsReasoning); err != nil {
 			return nil, err
 		}
+		m.SupportsReasoning = supportsReasoning == 1
 		models = append(models, m)
 	}
 	if err := rows.Err(); err != nil {
@@ -291,6 +317,10 @@ func (h Handler) syncModelsFromProvider(ctx context.Context) (int, error) {
 		if strings.TrimSpace(model.ID) == "" {
 			continue
 		}
+		supportedParameters, err := json.Marshal(model.SupportedParameters)
+		if err != nil {
+			return 0, err
+		}
 		if _, err := tx.ExecContext(ctx, `
 INSERT INTO models (
   id,
@@ -299,19 +329,23 @@ INSERT INTO models (
   context_window,
   prompt_price_microusd,
   completion_price_microusd,
+  supported_parameters_json,
+  supports_reasoning,
   curated,
   is_active
 )
-VALUES (?, 'openrouter', ?, ?, ?, ?, 0, 1)
+VALUES (?, 'openrouter', ?, ?, ?, ?, ?, ?, 0, 1)
 ON CONFLICT(id) DO UPDATE SET
   provider = excluded.provider,
   display_name = excluded.display_name,
   context_window = excluded.context_window,
   prompt_price_microusd = excluded.prompt_price_microusd,
   completion_price_microusd = excluded.completion_price_microusd,
+  supported_parameters_json = excluded.supported_parameters_json,
+  supports_reasoning = excluded.supports_reasoning,
   is_active = 1,
   updated_at = CURRENT_TIMESTAMP;
-`, model.ID, model.Name, model.ContextWindow, model.PromptPriceMicrosUSD, model.CompletionPriceMicrosUSD); err != nil {
+`, model.ID, model.Name, model.ContextWindow, model.PromptPriceMicrosUSD, model.CompletionPriceMicrosUSD, string(supportedParameters), boolToInt(model.SupportsReasoning)); err != nil {
 			return 0, err
 		}
 		synced++
@@ -368,6 +402,12 @@ type updateModelFavoriteRequest struct {
 	Favorite bool   `json:"favorite"`
 }
 
+type updateReasoningPresetRequest struct {
+	ModelID string `json:"modelId"`
+	Mode    string `json:"mode"`
+	Effort  string `json:"effort"`
+}
+
 func (h Handler) UpdateModelFavorite(w http.ResponseWriter, r *http.Request) {
 	user, ok := sessionUserFromContext(r.Context())
 	if !ok {
@@ -404,6 +444,60 @@ func (h Handler) UpdateModelFavorite(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]any{"favorites": favorites})
+}
+
+func (h Handler) UpdateModelReasoningPreset(w http.ResponseWriter, r *http.Request) {
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+	user, err := h.persistedSessionUser(r.Context(), user)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve user")
+		return
+	}
+
+	var req updateReasoningPresetRequest
+	if err := decodeJSON(r, &req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
+		return
+	}
+
+	modelID := strings.TrimSpace(req.ModelID)
+	if modelID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "modelId is required")
+		return
+	}
+
+	mode := strings.TrimSpace(req.Mode)
+	if mode != "chat" && mode != "deep_research" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research")
+		return
+	}
+
+	effort, ok := normalizeReasoningEffort(req.Effort)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "invalid_request", "effort must be one of: low, medium, high")
+		return
+	}
+
+	if err := h.setReasoningPreset(r.Context(), user.ID, modelID, mode, effort); err != nil {
+		if errors.Is(err, errReasoningUnsupportedModel) {
+			writeError(w, http.StatusBadRequest, "invalid_request", "selected model does not support reasoning controls")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to update reasoning preset")
+		return
+	}
+
+	presets, err := h.listUserReasoningPresets(r.Context(), user.ID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to read reasoning presets")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]any{"reasoningPresets": presets})
 }
 
 type createConversationRequest struct {
@@ -721,12 +815,13 @@ WHERE user_id = ?;
 }
 
 type chatMessageRequest struct {
-	ConversationID string   `json:"conversationId"`
-	Message        string   `json:"message"`
-	ModelID        string   `json:"modelId"`
-	Grounding      *bool    `json:"grounding"`
-	DeepResearch   *bool    `json:"deepResearch"`
-	FileIDs        []string `json:"fileIds"`
+	ConversationID  string   `json:"conversationId"`
+	Message         string   `json:"message"`
+	ModelID         string   `json:"modelId"`
+	ReasoningEffort string   `json:"reasoningEffort"`
+	Grounding       *bool    `json:"grounding"`
+	DeepResearch    *bool    `json:"deepResearch"`
+	FileIDs         []string `json:"fileIds"`
 }
 
 func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -792,6 +887,19 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	reasoningEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, modelID, mode, req.ReasoningEffort)
+	if err != nil {
+		switch {
+		case errors.Is(err, errInvalidReasoningEffort):
+			writeError(w, http.StatusBadRequest, "invalid_request", "reasoningEffort must be one of: low, medium, high")
+		case errors.Is(err, errReasoningUnsupportedModel):
+			writeError(w, http.StatusBadRequest, "invalid_request", "selected model does not support reasoning controls")
+		default:
+			writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve reasoning effort")
+		}
+		return
+	}
+
 	conversationID, err := h.resolveConversationID(r.Context(), user.ID, req.ConversationID, req.Message)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -831,15 +939,16 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	timeSensitive := isTimeSensitivePrompt(req.Message)
 	if deepResearch {
 		h.streamDeepResearchResponse(r.Context(), w, flusher, deepResearchStreamInput{
-			UserID:         user.ID,
-			UserMessageID:  userMessageID,
-			ConversationID: conversationID,
-			ModelID:        modelID,
-			Message:        req.Message,
-			Prompt:         userPrompt,
-			Grounding:      grounding,
-			IsAnonymous:    user.GoogleSub == "anonymous",
-			History:        historyMessages,
+			UserID:          user.ID,
+			UserMessageID:   userMessageID,
+			ConversationID:  conversationID,
+			ModelID:         modelID,
+			ReasoningEffort: reasoningEffort,
+			Message:         req.Message,
+			Prompt:          userPrompt,
+			Grounding:       grounding,
+			IsAnonymous:     user.GoogleSub == "anonymous",
+			History:         historyMessages,
 		})
 		return
 	}
@@ -863,21 +972,26 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	streamErr := h.openrouter.StreamChatCompletion(
 		r.Context(),
 		openrouter.StreamRequest{
-			Model:    modelID,
-			Messages: promptMessages,
+			Model:     modelID,
+			Messages:  promptMessages,
+			Reasoning: openRouterReasoningConfig(reasoningEffort),
 		},
 		func() error {
 			w.Header().Set("Content-Type", "text/event-stream")
 			w.Header().Set("Cache-Control", "no-cache")
 			w.Header().Set("Connection", "keep-alive")
 
-			if err := writeSSEEvent(w, map[string]any{
+			metadataEvent := map[string]any{
 				"type":           "metadata",
 				"grounding":      grounding,
 				"deepResearch":   deepResearch,
 				"modelId":        modelID,
 				"conversationId": conversationID,
-			}); err != nil {
+			}
+			if reasoningEffort != "" {
+				metadataEvent["reasoningEffort"] = reasoningEffort
+			}
+			if err := writeSSEEvent(w, metadataEvent); err != nil {
 				return err
 			}
 			if groundingWarning != "" {
@@ -1393,6 +1507,33 @@ WHERE user_id = ? AND model_id = ?;
 	return tx.Commit()
 }
 
+func (h Handler) setReasoningPreset(ctx context.Context, userID, modelID, mode, effort string) error {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	resolvedModelID, err := ensureModelExists(ctx, tx, modelID)
+	if err != nil {
+		return err
+	}
+
+	supportsReasoning, err := modelSupportsReasoning(ctx, tx, resolvedModelID)
+	if err != nil {
+		return err
+	}
+	if !supportsReasoning {
+		return errReasoningUnsupportedModel
+	}
+
+	if err := upsertUserReasoningPreset(ctx, tx, userID, resolvedModelID, mode, effort); err != nil {
+		return err
+	}
+
+	return tx.Commit()
+}
+
 func (h Handler) listUserModelFavorites(ctx context.Context, userID string) ([]string, error) {
 	rows, err := h.db.QueryContext(ctx, `
 SELECT f.model_id
@@ -1444,6 +1585,99 @@ LIMIT 1;
 	}, nil
 }
 
+func (h Handler) listUserReasoningPresets(ctx context.Context, userID string) ([]reasoningPresetResponse, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT p.model_id, p.mode, p.effort
+FROM user_model_reasoning_presets p
+JOIN models m ON m.id = p.model_id
+WHERE p.user_id = ?
+  AND m.is_active = 1
+ORDER BY p.updated_at DESC;
+`, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	presets := make([]reasoningPresetResponse, 0, 16)
+	for rows.Next() {
+		var preset reasoningPresetResponse
+		if err := rows.Scan(&preset.ModelID, &preset.Mode, &preset.Effort); err != nil {
+			return nil, err
+		}
+		presets = append(presets, preset)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return presets, nil
+}
+
+func (h Handler) resolveReasoningEffort(ctx context.Context, userID, modelID, mode, rawOverride string) (string, error) {
+	override := strings.TrimSpace(rawOverride)
+	if override != "" {
+		effort, ok := normalizeReasoningEffort(override)
+		if !ok {
+			return "", errInvalidReasoningEffort
+		}
+		if err := h.setReasoningPreset(ctx, userID, modelID, mode, effort); err != nil {
+			return "", err
+		}
+		return effort, nil
+	}
+
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+
+	resolvedModelID, err := ensureModelExists(ctx, tx, modelID)
+	if err != nil {
+		return "", err
+	}
+
+	supportsReasoning, err := modelSupportsReasoning(ctx, tx, resolvedModelID)
+	if err != nil {
+		return "", err
+	}
+	if !supportsReasoning {
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+		return "", nil
+	}
+
+	var storedEffort sql.NullString
+	err = tx.QueryRowContext(ctx, `
+SELECT effort
+FROM user_model_reasoning_presets
+WHERE user_id = ?
+  AND model_id = ?
+  AND mode = ?
+LIMIT 1;
+`, userID, resolvedModelID, mode).Scan(&storedEffort)
+	switch {
+	case err == nil:
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+		effort, ok := normalizeReasoningEffort(storedEffort.String)
+		if !ok {
+			return h.defaultReasoningEffortForMode(mode), nil
+		}
+		return effort, nil
+	case errors.Is(err, sql.ErrNoRows):
+		if err := tx.Commit(); err != nil {
+			return "", err
+		}
+		return h.defaultReasoningEffortForMode(mode), nil
+	default:
+		return "", err
+	}
+}
+
 func upsertUserModelPreferences(ctx context.Context, tx *sql.Tx, userID string, preferences modelPreferencesResponse) error {
 	normalModelID := nullableString(preferences.LastUsedModelID)
 	deepModelID := nullableString(preferences.LastUsedDeepResearchModelID)
@@ -1462,6 +1696,40 @@ ON CONFLICT(user_id) DO UPDATE SET
   updated_at = CURRENT_TIMESTAMP;
 `, userID, normalModelID, deepModelID)
 	return err
+}
+
+func upsertUserReasoningPreset(ctx context.Context, tx *sql.Tx, userID, modelID, mode, effort string) error {
+	_, err := tx.ExecContext(ctx, `
+INSERT INTO user_model_reasoning_presets (
+  user_id,
+  model_id,
+  mode,
+  effort,
+  updated_at
+)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+ON CONFLICT(user_id, model_id, mode) DO UPDATE SET
+  effort = excluded.effort,
+  updated_at = CURRENT_TIMESTAMP;
+`, userID, modelID, mode, effort)
+	return err
+}
+
+func modelSupportsReasoning(ctx context.Context, tx *sql.Tx, modelID string) (bool, error) {
+	var supportsReasoning int
+	err := tx.QueryRowContext(ctx, `
+SELECT supports_reasoning
+FROM models
+WHERE id = ?
+LIMIT 1;
+`, modelID).Scan(&supportsReasoning)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	return supportsReasoning == 1, nil
 }
 
 func ensureModelExists(ctx context.Context, tx *sql.Tx, rawModelID string) (string, error) {
@@ -1492,10 +1760,12 @@ INSERT INTO models (
   context_window,
   prompt_price_microusd,
   completion_price_microusd,
+  supported_parameters_json,
+  supports_reasoning,
   curated,
   is_active
 )
-VALUES (?, 'openrouter', ?, 0, 0, 0, 0, 1)
+VALUES (?, 'openrouter', ?, 0, 0, 0, NULL, 0, 0, 1)
 ON CONFLICT(id) DO UPDATE SET
   is_active = 1,
   updated_at = CURRENT_TIMESTAMP;
@@ -1601,6 +1871,79 @@ func filterKnownModelIDs(modelIDs []string, available map[string]struct{}) []str
 		}
 	}
 	return filtered
+}
+
+func filterReasoningPresets(
+	presets []reasoningPresetResponse,
+	available map[string]struct{},
+	reasoningSupported map[string]bool,
+) []reasoningPresetResponse {
+	if len(presets) == 0 {
+		return make([]reasoningPresetResponse, 0)
+	}
+
+	filtered := make([]reasoningPresetResponse, 0, len(presets))
+	seen := make(map[string]struct{}, len(presets))
+	for _, preset := range presets {
+		if _, ok := available[preset.ModelID]; !ok {
+			continue
+		}
+		if !reasoningSupported[preset.ModelID] {
+			continue
+		}
+		effort, ok := normalizeReasoningEffort(preset.Effort)
+		if !ok {
+			continue
+		}
+		key := preset.ModelID + "|" + preset.Mode
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		filtered = append(filtered, reasoningPresetResponse{
+			ModelID: preset.ModelID,
+			Mode:    preset.Mode,
+			Effort:  effort,
+		})
+	}
+	return filtered
+}
+
+func normalizeReasoningEffort(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "low":
+		return "low", true
+	case "medium":
+		return "medium", true
+	case "high":
+		return "high", true
+	default:
+		return "", false
+	}
+}
+
+func (h Handler) defaultReasoningEffortForMode(mode string) string {
+	if mode == "deep_research" {
+		effort, ok := normalizeReasoningEffort(h.cfg.DefaultDeepReasoningEffort)
+		if ok {
+			return effort
+		}
+		return "high"
+	}
+
+	effort, ok := normalizeReasoningEffort(h.cfg.DefaultChatReasoningEffort)
+	if ok {
+		return effort
+	}
+	return "medium"
+}
+
+func openRouterReasoningConfig(effort string) *openrouter.ReasoningConfig {
+	normalized, ok := normalizeReasoningEffort(effort)
+	if !ok {
+		return nil
+	}
+	return &openrouter.ReasoningConfig{Effort: normalized}
 }
 
 func nullableString(raw string) sql.NullString {

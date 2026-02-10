@@ -34,6 +34,12 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.OpenRouterBaseURL != "https://openrouter.ai/api/v1" {
 		t.Fatalf("unexpected openrouter base url: %s", cfg.OpenRouterBaseURL)
 	}
+	if cfg.DefaultChatReasoningEffort != "medium" {
+		t.Fatalf("unexpected default chat reasoning effort: %s", cfg.DefaultChatReasoningEffort)
+	}
+	if cfg.DefaultDeepReasoningEffort != "high" {
+		t.Fatalf("unexpected default deep research reasoning effort: %s", cfg.DefaultDeepReasoningEffort)
+	}
 
 	if cfg.BraveBaseURL != "https://api.search.brave.com/res/v1" {
 		t.Fatalf("unexpected brave base url: %s", cfg.BraveBaseURL)
@@ -97,6 +103,18 @@ func TestLoadReadsModelSyncBearerToken(t *testing.T) {
 
 	if cfg.ModelSyncBearerToken != "sync-token-123" {
 		t.Fatalf("unexpected model sync bearer token: %q", cfg.ModelSyncBearerToken)
+	}
+}
+
+func TestLoadRejectsInvalidReasoningEffort(t *testing.T) {
+	t.Setenv("TURSO_DATABASE_URL", "file:local.db")
+	t.Setenv("GOOGLE_CLIENT_ID", "client-id")
+	t.Setenv("AUTH_INSECURE_SKIP_GOOGLE_VERIFY", "false")
+	t.Setenv("DEFAULT_CHAT_REASONING_EFFORT", "max")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("expected error for invalid DEFAULT_CHAT_REASONING_EFFORT")
 	}
 }
 

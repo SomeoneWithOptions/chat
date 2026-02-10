@@ -13,6 +13,7 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - `POST /v1/models/sync`
 - `PUT /v1/models/preferences`
 - `PUT /v1/models/favorites`
+- `PUT /v1/models/reasoning-presets`
 - `POST /v1/files` (multipart upload for `.txt`, `.md`, `.pdf`, `.csv`, `.json`, max 25 MB)
 - `POST /v1/conversations`
 - `GET /v1/conversations`
@@ -39,6 +40,8 @@ cp backend/.env.example backend/.env
 - `BRAVE_API_KEY` (required for grounding citations in chat responses)
 - `GCS_UPLOAD_BUCKET` (required for attachment uploads)
 - `MODEL_SYNC_BEARER_TOKEN` (required for `POST /v1/models/sync`)
+- `DEFAULT_CHAT_REASONING_EFFORT` (optional: `low`, `medium`, `high`; default `medium`)
+- `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional: `low`, `medium`, `high`; default `high`)
 
 Auth sequencing:
 
@@ -64,7 +67,9 @@ For temporary anonymous testing, set:
 - Email allowlist is env-configurable (`ALLOWED_GOOGLE_EMAILS`).
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
 - `GET /v1/models` returns cached models from the local `models` table (no provider sync in request path).
+- `GET /v1/models` returns model capability metadata (`supportsReasoning`) and user reasoning presets.
 - `POST /v1/models/sync` performs an on-demand OpenRouter sync into the local `models` cache and returns the synced row count.
   - Requires `Authorization: Bearer <MODEL_SYNC_BEARER_TOKEN>`.
+- `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat` or `deep_research`.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

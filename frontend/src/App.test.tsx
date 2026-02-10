@@ -11,6 +11,7 @@ const logoutMock = vi.fn();
 const listModelsMock = vi.fn();
 const updateModelPreferenceMock = vi.fn();
 const updateModelFavoriteMock = vi.fn();
+const updateModelReasoningPresetMock = vi.fn();
 const createConversationMock = vi.fn();
 const listConversationsMock = vi.fn();
 const listConversationMessagesMock = vi.fn();
@@ -28,6 +29,7 @@ beforeEach(() => {
   listModelsMock.mockReset();
   updateModelPreferenceMock.mockReset();
   updateModelFavoriteMock.mockReset();
+  updateModelReasoningPresetMock.mockReset();
   createConversationMock.mockReset();
   listConversationsMock.mockReset();
   listConversationMessagesMock.mockReset();
@@ -46,6 +48,7 @@ beforeEach(() => {
         contextWindow: 128000,
         promptPriceMicrosUsd: 0,
         outputPriceMicrosUsd: 0,
+        supportsReasoning: true,
         curated: true,
       },
     ],
@@ -57,10 +60,15 @@ beforeEach(() => {
         contextWindow: 128000,
         promptPriceMicrosUsd: 0,
         outputPriceMicrosUsd: 0,
+        supportsReasoning: true,
         curated: true,
       },
     ],
     favorites: [],
+    reasoningPresets: [
+      { modelId: 'openrouter/free', mode: 'chat', effort: 'medium' },
+      { modelId: 'openrouter/free', mode: 'deep_research', effort: 'high' },
+    ],
     preferences: {
       lastUsedModelId: 'openrouter/free',
       lastUsedDeepResearchModelId: 'openrouter/free',
@@ -71,6 +79,10 @@ beforeEach(() => {
     lastUsedDeepResearchModelId: 'openrouter/free',
   });
   updateModelFavoriteMock.mockResolvedValue([]);
+  updateModelReasoningPresetMock.mockImplementation(async (_modelId: string, mode: api.ReasoningMode, effort: api.ReasoningEffort) => [
+    { modelId: 'openrouter/free', mode, effort },
+    { modelId: 'openrouter/free', mode: mode === 'chat' ? 'deep_research' : 'chat', effort: mode === 'chat' ? 'high' : 'medium' },
+  ]);
   createConversationMock.mockResolvedValue({
     id: 'conv-1',
     title: 'New Chat',
@@ -98,6 +110,7 @@ beforeEach(() => {
   vi.spyOn(api, 'listModels').mockImplementation(listModelsMock);
   vi.spyOn(api, 'updateModelPreference').mockImplementation(updateModelPreferenceMock);
   vi.spyOn(api, 'updateModelFavorite').mockImplementation(updateModelFavoriteMock);
+  vi.spyOn(api, 'updateModelReasoningPreset').mockImplementation(updateModelReasoningPresetMock);
   vi.spyOn(api, 'createConversation').mockImplementation(createConversationMock);
   vi.spyOn(api, 'listConversations').mockImplementation(listConversationsMock);
   vi.spyOn(api, 'listConversationMessages').mockImplementation(listConversationMessagesMock);
@@ -243,6 +256,29 @@ describe('Deep research streaming UX', () => {
     });
 
     expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
+  });
+
+  it('includes selected reasoning effort in chat requests when model supports reasoning', async () => {
+    streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
+      onEvent({ type: 'done' });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+    await user.selectOptions(screen.getByLabelText('Thinking effort'), 'high');
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Use higher effort');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(streamMessageMock.mock.calls[0][0]).toMatchObject({
+      reasoningEffort: 'high',
+    });
   });
 });
 

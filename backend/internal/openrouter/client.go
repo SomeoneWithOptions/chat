@@ -32,17 +32,25 @@ type Model struct {
 	ContextWindow            int
 	PromptPriceMicrosUSD     int
 	CompletionPriceMicrosUSD int
+	SupportedParameters      []string
+	SupportsReasoning        bool
+}
+
+type ReasoningConfig struct {
+	Effort string `json:"effort,omitempty"`
 }
 
 type StreamRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
+	Model     string           `json:"model"`
+	Messages  []Message        `json:"messages"`
+	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
 }
 
 type streamAPIRequest struct {
-	Model    string    `json:"model"`
-	Messages []Message `json:"messages"`
-	Stream   bool      `json:"stream"`
+	Model     string           `json:"model"`
+	Messages  []Message        `json:"messages"`
+	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
+	Stream    bool             `json:"stream"`
 }
 
 type streamAPIResponse struct {
@@ -61,10 +69,11 @@ type listModelsAPIResponse struct {
 }
 
 type listModelsAPIModel struct {
-	ID            string `json:"id"`
-	Name          string `json:"name"`
-	ContextLength int    `json:"context_length"`
-	Pricing       struct {
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	ContextLength       int      `json:"context_length"`
+	SupportedParameters []string `json:"supported_parameters"`
+	Pricing             struct {
 		Prompt     json.RawMessage `json:"prompt"`
 		Completion json.RawMessage `json:"completion"`
 	} `json:"pricing"`
@@ -106,10 +115,19 @@ func (c Client) StreamChatCompletion(
 		return errors.New("messages are required")
 	}
 
+	var reasoning *ReasoningConfig
+	if req.Reasoning != nil {
+		effort := strings.TrimSpace(req.Reasoning.Effort)
+		if effort != "" {
+			reasoning = &ReasoningConfig{Effort: effort}
+		}
+	}
+
 	payload, err := json.Marshal(streamAPIRequest{
-		Model:    strings.TrimSpace(req.Model),
-		Messages: req.Messages,
-		Stream:   true,
+		Model:     strings.TrimSpace(req.Model),
+		Messages:  req.Messages,
+		Reasoning: reasoning,
+		Stream:    true,
 	})
 	if err != nil {
 		return fmt.Errorf("marshal openrouter request: %w", err)
@@ -229,12 +247,16 @@ func (c Client) ListModels(ctx context.Context) ([]Model, error) {
 			contextWindow = model.TopProvider.ContextLength
 		}
 
+		supportedParameters := normalizeSupportedParameters(model.SupportedParameters)
+
 		models = append(models, Model{
 			ID:                       id,
 			Name:                     name,
 			ContextWindow:            contextWindow,
 			PromptPriceMicrosUSD:     parsePriceMicros(model.Pricing.Prompt),
 			CompletionPriceMicrosUSD: parsePriceMicros(model.Pricing.Completion),
+			SupportedParameters:      supportedParameters,
+			SupportsReasoning:        supportsReasoningParameter(supportedParameters),
 		})
 	}
 
@@ -261,6 +283,37 @@ func parsePriceMicros(raw json.RawMessage) int {
 	}
 
 	return 0
+}
+
+func normalizeSupportedParameters(raw []string) []string {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0, len(raw))
+	seen := make(map[string]struct{}, len(raw))
+	for _, parameter := range raw {
+		normalized := strings.ToLower(strings.TrimSpace(parameter))
+		if normalized == "" {
+			continue
+		}
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		out = append(out, normalized)
+	}
+	return out
+}
+
+func supportsReasoningParameter(supported []string) bool {
+	for _, parameter := range supported {
+		switch parameter {
+		case "reasoning", "reasoning_effort":
+			return true
+		}
+	}
+	return false
 }
 
 func priceStringToMicros(raw string) int {
