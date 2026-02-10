@@ -18,7 +18,7 @@ import (
 
 const (
 	maxDeepResearchCitations = 10
-	maxNormalCitations       = 8
+	maxNormalCitations       = 10
 	braveFreeTierSpacing     = 1100 * time.Millisecond
 )
 

@@ -33,6 +33,14 @@ type ChatMessageProps = {
 function citationLabel(citation: Citation, index: number): string {
   const trimmedTitle = citation.title?.trim();
   if (trimmedTitle) return trimmedTitle;
+
+  const trimmedSnippet = citation.snippet?.trim();
+  if (trimmedSnippet) {
+    const preview = trimmedSnippet.replace(/\s+/g, ' ');
+    if (preview.length <= 96) return preview;
+    return `${preview.slice(0, 93).trimEnd()}...`;
+  }
+
   try {
     const parsed = new URL(citation.url);
     return parsed.hostname.replace(/^www\./, '');
@@ -313,9 +321,6 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
                   <span className="citation-number">{index + 1}</span>
                   {citationLabel(citation, index)}
                 </a>
-                {citation.snippet && (
-                  <p className="citation-snippet">{citation.snippet}</p>
-                )}
               </li>
             ))}
           </ol>

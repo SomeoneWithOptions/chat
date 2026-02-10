@@ -8,9 +8,9 @@
 
 ## Normal Chat (Grounded)
 
-- Uses a single grounding pass with up to 6 Brave results.
+- Uses a single grounding pass with up to 10 Brave results.
 - Includes grounded context in system prompt when available.
-- Persists up to 8 citations on the assistant message.
+- Persists up to 10 citations on the assistant message.
 - On grounding errors, streams a warning event and continues response generation.
 
 ## Deep Research (Implemented)
