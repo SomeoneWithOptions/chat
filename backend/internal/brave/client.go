@@ -14,8 +14,18 @@ import (
 )
 
 const maxErrorBodyBytes = 8 * 1024
+const maxQueryWords = 50
 
 var ErrMissingAPIKey = errors.New("brave api key is not configured")
+
+type APIError struct {
+	StatusCode int
+	Body       string
+}
+
+func (e APIError) Error() string {
+	return fmt.Sprintf("brave returned %d: %s", e.StatusCode, e.Body)
+}
 
 type SearchResult struct {
 	URL     string
@@ -64,6 +74,7 @@ func (c Client) Search(ctx context.Context, query string, count int) ([]SearchRe
 	if trimmedQuery == "" {
 		return nil, nil
 	}
+	trimmedQuery = trimToWordLimit(trimmedQuery, maxQueryWords)
 
 	if count <= 0 {
 		count = 5
@@ -96,7 +107,10 @@ func (c Client) Search(ctx context.Context, query string, count int) ([]SearchRe
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		return nil, fmt.Errorf("brave returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, APIError{
+			StatusCode: resp.StatusCode,
+			Body:       strings.TrimSpace(string(body)),
+		}
 	}
 
 	var parsed searchAPIResponse
@@ -146,4 +160,15 @@ func (c Client) Search(ctx context.Context, query string, count int) ([]SearchRe
 	}
 
 	return results, nil
+}
+
+func trimToWordLimit(input string, maxWords int) string {
+	if maxWords <= 0 {
+		return ""
+	}
+	words := strings.Fields(strings.TrimSpace(input))
+	if len(words) <= maxWords {
+		return strings.Join(words, " ")
+	}
+	return strings.Join(words[:maxWords], " ")
 }

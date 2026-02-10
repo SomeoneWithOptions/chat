@@ -19,7 +19,7 @@ const (
 	defaultFrontendOrigin      = "https://chat.sanetomore.com"
 	defaultUploadDir           = "/tmp/chat-uploads"
 	defaultGCSUploadPrefix     = "chat-uploads"
-	defaultResearchTimeoutSecs = 120
+	defaultResearchTimeoutSecs = 150
 )
 
 type Config struct {

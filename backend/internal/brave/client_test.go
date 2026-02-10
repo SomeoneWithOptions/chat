@@ -99,3 +99,33 @@ func TestSearchReturnsUpstreamError(t *testing.T) {
 		t.Fatalf("expected status in error, got %v", err)
 	}
 }
+
+func TestSearchTrimsQueryToWordLimit(t *testing.T) {
+	var receivedQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		receivedQuery = r.URL.Query().Get("q")
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"web":{"results":[]}}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(config.Config{
+		BraveAPIKey:  "brave-key",
+		BraveBaseURL: server.URL,
+	}, server.Client())
+
+	_, err := client.Search(context.Background(),
+		"one two three four five six seven eight nine ten eleven twelve thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty "+
+			"twentyone twentytwo twentythree twentyfour twentyfive twentysix twentyseven twentyeight twentynine thirty thirtyone thirtytwo thirtythree thirtyfour thirtyfive "+
+			"thirtysix thirtyseven thirtyeight thirtynine forty fortyone fortytwo fortythree fortyfour fortyfive fortysix fortyseven fortyeight fortynine fifty fiftyone fiftytwo",
+		6,
+	)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+
+	if got := len(strings.Fields(receivedQuery)); got != 50 {
+		t.Fatalf("expected query to be trimmed to 50 words, got %d query=%q", got, receivedQuery)
+	}
+}

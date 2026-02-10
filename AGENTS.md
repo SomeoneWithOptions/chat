@@ -38,7 +38,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
   - `obzen.black@gmail.com`
 - Session TTL: 7 days.
 - Grounding defaults to ON for every message.
-- Deep research timeout target: 120 seconds.
+- Deep research timeout target: 150 seconds.
 - Deep research model is user-selectable.
 - Default model behavior:
   - normal chat uses last-used model

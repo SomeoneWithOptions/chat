@@ -33,7 +33,7 @@ Set at minimum:
 - `OPENROUTER_API_KEY` (required to stream chat responses)
 - `BRAVE_API_KEY` (required for grounding citations; requests still run without it)
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
-- `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `120`; applies to deep-research requests only)
+- `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `150`; applies to deep-research requests only)
 
 Auth sequencing:
 

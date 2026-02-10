@@ -813,7 +813,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if _, err := h.insertUserMessageWithFiles(
+	userMessageID, err := h.insertUserMessageWithFiles(
 		r.Context(),
 		user.ID,
 		conversationID,
@@ -822,7 +822,8 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		grounding,
 		deepResearch,
 		normalizedFileIDs,
-	); err != nil {
+	)
+	if err != nil {
 		if errors.Is(err, errInvalidFileIDs) {
 			writeError(w, http.StatusBadRequest, "invalid_request", err.Error())
 			return
@@ -836,11 +837,13 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	if deepResearch {
 		h.streamDeepResearchResponse(r.Context(), w, flusher, deepResearchStreamInput{
 			UserID:         user.ID,
+			UserMessageID:  userMessageID,
 			ConversationID: conversationID,
 			ModelID:        modelID,
 			Message:        req.Message,
 			Prompt:         userPrompt,
 			Grounding:      grounding,
+			IsAnonymous:    user.GoogleSub == "anonymous",
 			History:        historyMessages,
 		})
 		return

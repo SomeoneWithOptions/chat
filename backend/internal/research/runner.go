@@ -21,6 +21,7 @@ const (
 	defaultResultsPerPass          = 6
 	defaultMaxCitations            = 10
 	defaultHighConfidenceThreshold = 0.58
+	defaultRateLimitRetryDelay     = 1200 * time.Millisecond
 )
 
 type Phase string
@@ -65,6 +66,7 @@ type Config struct {
 	ResultsPerPass          int
 	MaxCitations            int
 	HighConfidenceThreshold float64
+	MinSearchInterval       time.Duration
 }
 
 type Runner struct {
@@ -109,6 +111,9 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 	if cfg.HighConfidenceThreshold <= 0 || cfg.HighConfidenceThreshold > 1 {
 		cfg.HighConfidenceThreshold = defaultHighConfidenceThreshold
 	}
+	if cfg.MinSearchInterval < 0 {
+		cfg.MinSearchInterval = 0
+	}
 
 	baseQuestion := strings.TrimSpace(question)
 	if baseQuestion == "" {
@@ -127,6 +132,7 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 	candidates := make(map[string]Citation, len(queries)*cfg.ResultsPerPass)
 	searchErrors := 0
 	missingAPIKey := false
+	lastSearchAttemptAt := time.Time{}
 
 	for i, query := range queries {
 		if onProgress != nil {
@@ -138,7 +144,25 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 			})
 		}
 
+		if err := waitBeforeSearchAttempt(ctx, &lastSearchAttemptAt, cfg.MinSearchInterval); err != nil {
+			return Result{}, err
+		}
 		results, err := r.searcher.Search(ctx, query, cfg.ResultsPerPass)
+		lastSearchAttemptAt = time.Now()
+		if err != nil && isBraveRateLimitError(err) {
+			retryDelay := cfg.MinSearchInterval
+			if retryDelay <= 0 {
+				retryDelay = defaultRateLimitRetryDelay
+			}
+			if waitErr := waitForRetry(ctx, retryDelay); waitErr != nil {
+				return Result{}, waitErr
+			}
+			if err := waitBeforeSearchAttempt(ctx, &lastSearchAttemptAt, cfg.MinSearchInterval); err != nil {
+				return Result{}, err
+			}
+			results, err = r.searcher.Search(ctx, query, cfg.ResultsPerPass)
+			lastSearchAttemptAt = time.Now()
+		}
 		if err != nil {
 			if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return Result{}, ctx.Err()
@@ -232,6 +256,32 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 	}
 	result.Citations = highConfidence
 	return result, nil
+}
+
+func waitBeforeSearchAttempt(ctx context.Context, lastAttempt *time.Time, interval time.Duration) error {
+	if lastAttempt == nil || interval <= 0 || lastAttempt.IsZero() {
+		return nil
+	}
+	return waitForRetry(ctx, time.Until(lastAttempt.Add(interval)))
+}
+
+func isBraveRateLimitError(err error) bool {
+	var apiErr brave.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == 429
+}
+
+func waitForRetry(ctx context.Context, delay time.Duration) error {
+	if delay <= 0 {
+		return nil
+	}
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func buildPassQueries(question string, timeSensitive bool, minPasses, maxPasses int) []string {

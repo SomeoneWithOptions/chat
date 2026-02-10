@@ -42,6 +42,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.GCSUploadPrefix != "chat-uploads" {
 		t.Fatalf("unexpected gcs upload prefix: %s", cfg.GCSUploadPrefix)
 	}
+
+	if cfg.DeepResearchTimeoutSeconds != 150 {
+		t.Fatalf("unexpected deep research timeout default: %d", cfg.DeepResearchTimeoutSeconds)
+	}
 }
 
 func TestLoadRequiresGoogleClientIDWhenVerificationEnabled(t *testing.T) {

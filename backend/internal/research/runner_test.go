@@ -78,6 +78,22 @@ func TestRunnerHonorsContextTimeout(t *testing.T) {
 	}
 }
 
+func TestRunnerRetriesOnRateLimit(t *testing.T) {
+	searcher := &rateLimitThenSuccessSearcher{}
+	runner := NewRunner(searcher, Config{MinPasses: 1, MaxPasses: 1})
+
+	result, err := runner.Run(context.Background(), "rate limit test", false, nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if len(result.Citations) == 0 {
+		t.Fatal("expected citations after retry")
+	}
+	if searcher.calls != 2 {
+		t.Fatalf("expected 2 search attempts, got %d", searcher.calls)
+	}
+}
+
 type stubSearcher struct {
 	responses map[string][]brave.SearchResult
 }
@@ -94,4 +110,18 @@ type blockingSearcher struct{}
 func (blockingSearcher) Search(ctx context.Context, _ string, _ int) ([]brave.SearchResult, error) {
 	<-ctx.Done()
 	return nil, ctx.Err()
+}
+
+type rateLimitThenSuccessSearcher struct {
+	calls int
+}
+
+func (s *rateLimitThenSuccessSearcher) Search(_ context.Context, _ string, _ int) ([]brave.SearchResult, error) {
+	s.calls++
+	if s.calls == 1 {
+		return nil, brave.APIError{StatusCode: 429, Body: `{"error":"rate limit"}`}
+	}
+	return []brave.SearchResult{
+		{URL: "https://example.com/recovered", Title: "Recovered source", Snippet: "Detailed evidence after retry."},
+	}, nil
 }

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"regexp"
 	"sort"
@@ -18,28 +19,45 @@ import (
 const (
 	maxDeepResearchCitations = 10
 	maxNormalCitations       = 8
+	braveFreeTierSpacing     = 1100 * time.Millisecond
 )
 
 var citationIndexPattern = regexp.MustCompile(`\[(\d{1,2})\]`)
 
 type deepResearchStreamInput struct {
 	UserID         string
+	UserMessageID  string
 	ConversationID string
 	ModelID        string
 	Message        string
 	Prompt         string
 	Grounding      bool
+	IsAnonymous    bool
 	History        []openrouter.Message
 }
 
 func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input deepResearchStreamInput) {
 	timeoutSeconds := h.cfg.DeepResearchTimeoutSeconds
 	if timeoutSeconds <= 0 {
-		timeoutSeconds = 120
+		timeoutSeconds = 150
 	}
 
 	researchCtx, cancel := context.WithTimeout(ctx, time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
+	startedAt := time.Now()
+
+	log.Printf(
+		"deep research start: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s model_id=%s grounding=%t timeout_seconds=%d message_chars=%d history_messages=%d",
+		input.UserID,
+		input.IsAnonymous,
+		input.ConversationID,
+		input.UserMessageID,
+		input.ModelID,
+		input.Grounding,
+		timeoutSeconds,
+		len([]rune(input.Message)),
+		len(input.History),
+	)
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -59,13 +77,20 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	searchWarning := ""
 
 	runner := research.NewRunner(h.grounding, research.Config{
-		MinPasses:      3,
-		MaxPasses:      6,
-		ResultsPerPass: maxGroundingResults,
-		MaxCitations:   maxDeepResearchCitations,
+		MinPasses:         3,
+		MaxPasses:         6,
+		ResultsPerPass:    maxGroundingResults,
+		MaxCitations:      maxDeepResearchCitations,
+		MinSearchInterval: braveFreeTierSpacing,
 	})
 
 	if !input.Grounding {
+		log.Printf(
+			"deep research search skipped: user_id=%s conversation_id=%s user_message_id=%s reason=grounding_disabled",
+			input.UserID,
+			input.ConversationID,
+			input.UserMessageID,
+		)
 		_ = writeSSEEvent(w, map[string]any{
 			"type":        "progress",
 			"phase":       research.PhasePlanning,
@@ -80,6 +105,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		})
 		flusher.Flush()
 	} else {
+		searchStartedAt := time.Now()
 		researchResult, err := runner.Run(researchCtx, input.Message, timeSensitive, func(progress research.Progress) {
 			_ = writeSSEEvent(w, map[string]any{
 				"type":        "progress",
@@ -97,12 +123,31 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			} else if errors.Is(err, context.Canceled) {
 				message = "deep research request canceled"
 			}
+			log.Printf(
+				"deep research search failed: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s err=%v elapsed_ms=%d",
+				input.UserID,
+				input.IsAnonymous,
+				input.ConversationID,
+				input.UserMessageID,
+				err,
+				time.Since(searchStartedAt).Milliseconds(),
+			)
 			_ = writeSSEEvent(w, map[string]any{"type": "error", "message": message})
 			_ = writeSSEEvent(w, map[string]any{"type": "done"})
 			flusher.Flush()
 			return
 		}
 		searchWarning = strings.TrimSpace(researchResult.Warning)
+		log.Printf(
+			"deep research search completed: user_id=%s conversation_id=%s user_message_id=%s passes=%d citations=%d warning_present=%t elapsed_ms=%d",
+			input.UserID,
+			input.ConversationID,
+			input.UserMessageID,
+			researchResult.Passes,
+			len(researchResult.Citations),
+			searchWarning != "",
+			time.Since(searchStartedAt).Milliseconds(),
+		)
 		for _, item := range researchResult.Citations {
 			citations = append(citations, citationResponse{
 				URL:            item.URL,
@@ -114,6 +159,13 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	}
 
 	if searchWarning != "" {
+		log.Printf(
+			"deep research warning: user_id=%s conversation_id=%s user_message_id=%s warning=%q",
+			input.UserID,
+			input.ConversationID,
+			input.UserMessageID,
+			searchWarning,
+		)
 		_ = writeSSEEvent(w, map[string]any{
 			"type":    "warning",
 			"scope":   "research",
@@ -181,6 +233,16 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			orderedCitations,
 		)
 		if err != nil {
+			log.Printf(
+				"deep research persist failed: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s err=%v content_chars=%d citations=%d",
+				input.UserID,
+				input.IsAnonymous,
+				input.ConversationID,
+				input.UserMessageID,
+				err,
+				assistantContent.Len(),
+				len(orderedCitations),
+			)
 			_ = writeSSEEvent(w, map[string]any{
 				"type":    "error",
 				"message": "failed to persist assistant response",
@@ -203,9 +265,31 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		case errors.Is(streamErr, context.Canceled), errors.Is(researchCtx.Err(), context.Canceled):
 			message = "deep research request canceled"
 		}
+		log.Printf(
+			"deep research stream error: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s err=%v response_chars=%d citations=%d total_elapsed_ms=%d",
+			input.UserID,
+			input.IsAnonymous,
+			input.ConversationID,
+			input.UserMessageID,
+			streamErr,
+			assistantContent.Len(),
+			len(orderedCitations),
+			time.Since(startedAt).Milliseconds(),
+		)
 		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": message})
 		flusher.Flush()
 	}
+
+	log.Printf(
+		"deep research completed: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s response_chars=%d citations=%d total_elapsed_ms=%d",
+		input.UserID,
+		input.IsAnonymous,
+		input.ConversationID,
+		input.UserMessageID,
+		assistantContent.Len(),
+		len(orderedCitations),
+		time.Since(startedAt).Milliseconds(),
+	)
 
 	_ = writeSSEEvent(w, map[string]any{"type": "done"})
 	flusher.Flush()
