@@ -35,6 +35,8 @@ Each env has isolated API keys and DB tokens.
   - `SESSION_COOKIE_SECURE=true`
   - `SESSION_TTL_HOURS=168`
   - `OPENROUTER_FREE_TIER_DEFAULT_MODEL=openrouter/free`
+  - `DEFAULT_CHAT_REASONING_EFFORT=medium`
+  - `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT=high`
   - `CORS_ALLOWED_ORIGINS`
   - `LOCAL_UPLOAD_DIR`
   - `APP_ENV`
@@ -72,6 +74,7 @@ Each env has isolated API keys and DB tokens.
    - unit tests
    - build checks
    - chat/attachments integration tests
+   - reasoning-capability + preset API tests
 2. On merge to main:
    - deploy backend to Cloud Run
    - deploy frontend to Vercel
@@ -86,3 +89,4 @@ Each env has isolated API keys and DB tokens.
 - Secrets only from platform secret stores
 - Rollback path documented for frontend and backend
 - Final rollout gate: auth config supports the two initial allowed emails and future expansion without code changes
+- Reasoning default env vars are configured and consistent across `dev`, `staging`, and `prod`

@@ -30,5 +30,11 @@
 ## Ownership and Boundaries
 
 - Backend owns OpenRouter, Brave, DB writes, and final-rollout auth verification.
-- Frontend owns UX, model/mode controls, and streaming rendering.
+- Frontend owns UX, model/mode controls, reasoning-effort controls, and streaming rendering.
 - DB folder is the single source of truth for schema/SQL changes.
+
+## Reasoning Presets Scope (Cross-Cutting)
+
+- Backend adds model capability sync for reasoning support and enforces request-time reasoning parameter safety.
+- Frontend adds per-model reasoning-effort preset UX and per-message override selection.
+- DB adds persistence for per-user + per-model + per-mode reasoning presets.

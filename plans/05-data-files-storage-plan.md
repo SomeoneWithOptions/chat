@@ -75,6 +75,20 @@ Session policy: 7-day TTL.
 - `last_deep_research_model_id` (text nullable)
 - `updated_at` (datetime)
 
+### `models` (Capability Additions)
+
+- `supported_parameters_json` (text nullable, raw provider-supported parameters snapshot)
+- `supports_reasoning` (bool, derived from provider metadata)
+
+### `user_model_reasoning_presets`
+
+- `user_id` (text fk)
+- `model_id` (text fk)
+- `mode` (`chat` | `deep_research`)
+- `effort` (`none` | `low` | `medium` | `high`)
+- `updated_at` (datetime)
+- Primary key: (`user_id`, `model_id`, `mode`)
+
 ## File Handling Strategy
 
 1. Small files MVP path:
@@ -104,6 +118,7 @@ Session policy: 7-day TTL.
 - Max file size: 25 MB
 - Max files per message: 5
 - Max extracted text per file into prompt context: configurable cap
+- Reasoning presets are validated against model capability metadata before persistence
 
 ## Acceptance Criteria
 
@@ -112,3 +127,4 @@ Session policy: 7-day TTL.
 - File extraction failures are surfaced without crashing chat request
 - Attachments can be referenced in grounded/deep-research outputs
 - User can delete one conversation or delete all conversations
+- Per-model reasoning presets are persisted per mode and survive app reloads

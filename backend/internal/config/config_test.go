@@ -46,6 +46,10 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DeepResearchTimeoutSeconds != 150 {
 		t.Fatalf("unexpected deep research timeout default: %d", cfg.DeepResearchTimeoutSeconds)
 	}
+
+	if cfg.ModelSyncBearerToken != "" {
+		t.Fatalf("expected empty model sync bearer token by default")
+	}
 }
 
 func TestLoadRequiresGoogleClientIDWhenVerificationEnabled(t *testing.T) {
@@ -77,6 +81,22 @@ func TestLoadAllowsMissingGoogleClientIDWhenAuthDisabled(t *testing.T) {
 
 	if _, err := Load(); err != nil {
 		t.Fatalf("expected auth-disabled mode to load without GOOGLE_CLIENT_ID: %v", err)
+	}
+}
+
+func TestLoadReadsModelSyncBearerToken(t *testing.T) {
+	t.Setenv("TURSO_DATABASE_URL", "file:local.db")
+	t.Setenv("GOOGLE_CLIENT_ID", "client-id")
+	t.Setenv("AUTH_INSECURE_SKIP_GOOGLE_VERIFY", "false")
+	t.Setenv("MODEL_SYNC_BEARER_TOKEN", "sync-token-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.ModelSyncBearerToken != "sync-token-123" {
+		t.Fatalf("unexpected model sync bearer token: %q", cfg.ModelSyncBearerToken)
 	}
 }
 

@@ -7,6 +7,10 @@
 - Unit tests for core UI logic/components
 - Integration tests for chat send/stream/render flow
 - E2E smoke test for full chat lifecycle
+- UI tests for reasoning-effort selector behavior:
+  - hidden/disabled when model lacks reasoning support
+  - persists per model + mode
+  - included in chat request payload
 - Final rollout auth suite: auth guard + login bootstrap
 
 ### Backend
@@ -15,6 +19,8 @@
 - API tests for request validation and error envelopes
 - Deletion tests for hard-delete behavior and GCS object cleanup paths
 - Provider integration tests (mock + optional live sanity checks)
+- Model sync tests for reasoning capability metadata ingestion
+- Reasoning preset API tests (`PUT /v1/models/reasoning-presets`) and request-resolution precedence tests
 - Final rollout auth suite: Google token verification and allowlist enforcement
 
 ## Security Baseline
@@ -37,6 +43,7 @@
   - OpenRouter call duration/errors
   - Brave call duration/errors
   - token estimates and cost buckets
+  - reasoning-effort usage distribution by mode/model
 
 ## Operational Alerts
 
@@ -53,3 +60,4 @@
 - Basic abuse and input protections are in place before launch
 - Delete-one/delete-all operations remove DB rows and cleanup GCS attachments when applicable
 - Final rollout gate: authenticated access control is enforced across all API routes, including 7-day session expiry verification
+- Reasoning-effort controls are reliable under unsupported-model, malformed-effort, and provider-error scenarios

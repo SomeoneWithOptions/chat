@@ -26,3 +26,9 @@ Core stack assumptions used in these plans:
 - LLM provider gateway: OpenRouter
 - Web grounding: Brave Search API (Data for AI)
 - File storage: local processing path in MVP, GCS later for durable storage
+
+Additional implementation scope now included across all plan files:
+
+- Per-model reasoning-effort presets (thinking-level presets) for both `chat` and `deep_research`
+- User-selectable reasoning effort on each response with persistence by model + mode
+- Model capability sync from OpenRouter (`supported_parameters`) to gate reasoning controls in UI

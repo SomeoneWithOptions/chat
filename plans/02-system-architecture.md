@@ -29,6 +29,7 @@ Implementation timing note:
    - conversation id
    - user message
    - model id
+   - optional reasoning effort override
    - flags (`grounding=true`, `deep_research=false`)
    - attached file ids
 2. Go backend validates payload and resolves context.
@@ -38,21 +39,31 @@ Implementation timing note:
    - recent conversation
    - grounded snippets (if enabled)
    - file extracted text context
+   - reasoning config (only when selected model supports it)
 5. Backend streams tokens to frontend via SSE.
 6. Backend persists final assistant message and metadata.
 
 ## Data Flow (Deep Research)
 
 1. Request enters research orchestrator with selected deep-research model (default: user's last normal-chat model).
-2. Orchestrator runs multiple query-expansion + search passes.
-3. Builds evidence set with deduped citations.
-4. Runs synthesis prompt to produce a structured answer.
-5. Streams periodic progress events + final output.
+2. Backend resolves reasoning effort preset by `(user, model, mode)` unless request includes explicit override.
+3. Orchestrator runs multiple query-expansion + search passes.
+4. Builds evidence set with deduped citations.
+5. Runs synthesis prompt to produce a structured answer.
+6. Streams periodic progress events + final output.
+
+## Model Capability and Preset Flow
+
+1. Backend syncs models from OpenRouter and stores `supported_parameters` capability metadata.
+2. Backend derives reasoning capability flags from provider metadata.
+3. Frontend fetches model catalog + per-model reasoning presets in one bootstrap response.
+4. On send, frontend includes selected effort; backend validates against model capability and applies safe fallback.
+5. On effort change, backend persists the preset keyed by `user_id + model_id + mode`.
 
 ## Service Boundaries
 
 - Frontend handles UI state, sign-in UX, and streaming rendering.
-- Backend owns provider logic, web search logic, prompts, citations, cost controls, and final-rollout auth verification/session management.
+- Backend owns provider logic, model capability sync, reasoning-effort mapping, web search logic, prompts, citations, cost controls, and final-rollout auth verification/session management.
 - DB stores canonical state and indexes.
 - Storage layer handles temporary local file processing and extracted text persistence.
 - Deletion workflow performs hard delete in DB and removes GCS objects when storage provider is `gcs`.

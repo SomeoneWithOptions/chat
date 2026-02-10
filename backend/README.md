@@ -38,6 +38,7 @@ cp backend/.env.example backend/.env
 - `OPENROUTER_API_KEY` (required for `POST /v1/chat/messages` streaming)
 - `BRAVE_API_KEY` (required for grounding citations in chat responses)
 - `GCS_UPLOAD_BUCKET` (required for attachment uploads)
+- `MODEL_SYNC_BEARER_TOKEN` (required for `POST /v1/models/sync`)
 
 Auth sequencing:
 
@@ -64,5 +65,6 @@ For temporary anonymous testing, set:
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
 - `GET /v1/models` returns cached models from the local `models` table (no provider sync in request path).
 - `POST /v1/models/sync` performs an on-demand OpenRouter sync into the local `models` cache and returns the synced row count.
+  - Requires `Authorization: Bearer <MODEL_SYNC_BEARER_TOKEN>`.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

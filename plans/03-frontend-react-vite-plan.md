@@ -14,6 +14,7 @@
 - `src/features/auth/` Google sign-in and session bootstrap (final rollout phase)
 - `src/features/chat/` chat thread, composer, message list
 - `src/features/models/` model selector
+- `src/features/reasoning/` thinking-level selector and preset state
 - `src/features/files/` attachment uploader and chips
 - `src/features/search/` mode toggles and search activity UI
 
@@ -25,6 +26,7 @@
 2. Top bar:
    - User/account menu (sign out)
    - Model selector
+   - Thinking-level selector (reasoning effort) for selected model
    - Pricing and context-window visibility for selected model
    - Grounding toggle (default ON)
    - Deep research toggle
@@ -54,8 +56,12 @@
 10. Render citations and tool activity timeline
 11. Add optimistic conversation updates and retries
 12. Add chat deletion UX: delete single conversation and delete all
-13. Final rollout: integrate Google Identity Services sign-in page
-14. Final rollout: add auth bootstrap (`/v1/auth/me`) and guarded routes
+13. Add reasoning-effort control UX:
+   - model-aware enable/disable using capability metadata
+   - persisted per-model + per-mode presets
+   - per-send override in request payload
+14. Final rollout: integrate Google Identity Services sign-in page
+15. Final rollout: add auth bootstrap (`/v1/auth/me`) and guarded routes
 
 ## UI/Design Direction
 
@@ -68,7 +74,9 @@
 
 - New conversation can be created and persisted
 - Model can be changed before sending a message
+- Reasoning effort can be changed before sending a message
 - Model metadata (pricing/context) is visible
+- Reasoning control is only shown/enabled when selected model supports reasoning parameters
 - Curated list can be empty while "show all models" still works
 - Responses stream without UI freezes
 - Files can be attached and included in request payload

@@ -18,14 +18,15 @@
 
 1. `GET /healthz`
 2. `GET /v1/models`
-3. `POST /v1/files` (upload metadata/start)
-4. `POST /v1/chat/messages` (streaming)
-5. `GET /v1/conversations`
-6. `POST /v1/conversations`
-7. `GET /v1/conversations/{id}/messages`
-8. `DELETE /v1/conversations/{id}` (delete one chat)
-9. `DELETE /v1/conversations` (delete all chats for current user)
-10. Final rollout auth endpoints:
+3. `PUT /v1/models/reasoning-presets`
+4. `POST /v1/files` (upload metadata/start)
+5. `POST /v1/chat/messages` (streaming)
+6. `GET /v1/conversations`
+7. `POST /v1/conversations`
+8. `GET /v1/conversations/{id}/messages`
+9. `DELETE /v1/conversations/{id}` (delete one chat)
+10. `DELETE /v1/conversations` (delete all chats for current user)
+11. Final rollout auth endpoints:
     - `POST /v1/auth/google` (exchange Google ID token -> session)
     - `GET /v1/auth/me` (session check)
     - `POST /v1/auth/logout`
@@ -46,6 +47,7 @@
 - Use OpenRouter chat completion endpoint with streaming mode.
 - Sync available models from OpenRouter:
   - Primary: cache models from OpenRouter API
+  - Persist model capability metadata from `supported_parameters` (at minimum whether reasoning controls are supported)
   - UI behavior: curated list first, optional show-all list
   - Fallback: manual curated list via env/file can be empty initially
   - First-run default model: `openrouter/free`
@@ -55,6 +57,10 @@
   - favorite models
   - last-used normal-chat model
   - last-used deep-research model
+  - reasoning effort preset per `(user_id, model_id, mode)`
+- Request payload to OpenRouter:
+  - include `reasoning.effort` when model supports reasoning and an effort value is selected/resolved
+  - omit reasoning fields for models without reasoning support
 
 ## Request Orchestration
 
@@ -67,8 +73,11 @@
 7. Resolve model for mode:
    - normal: last-used model, else `openrouter/free`
    - deep research: user-selected or default to last-used normal model
-8. Call OpenRouter and stream response chunks
-9. Persist assistant output and citations
+8. Resolve reasoning effort:
+   - explicit request override, else per-model+mode preset, else backend default
+   - validate against supported model capability and normalize value
+9. Call OpenRouter and stream response chunks
+10. Persist assistant output and citations
 
 ## Deletion Semantics
 
@@ -90,7 +99,9 @@
 - Streaming response works reliably via Cloud Run
 - Model list endpoint returns usable options from OpenRouter
 - Manual model fallback works when provider list fetch fails
-- Deep research respects 120s timeout and model-selection behavior
+- Reasoning preset endpoint persists and returns per-model + per-mode values
+- Chat/deep-research requests apply reasoning effort correctly when model supports it
+- Deep research respects 150s timeout and model-selection behavior
 - Chat deletion fully removes DB records and cleans up GCS-backed attachments
 - Errors return consistent JSON envelope
 - Final rollout gate: invalid or non-allowlisted Google accounts cannot access chat APIs

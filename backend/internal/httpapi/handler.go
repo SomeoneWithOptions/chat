@@ -231,11 +231,6 @@ func (h Handler) ListModels(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h Handler) SyncModels(w http.ResponseWriter, r *http.Request) {
-	if _, ok := sessionUserFromContext(r.Context()); !ok {
-		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
-		return
-	}
-
 	synced, err := h.syncModelsFromProvider(r.Context())
 	if err != nil {
 		writeError(w, http.StatusBadGateway, "sync_failed", "failed to sync models from provider")
@@ -1060,6 +1055,24 @@ func (h Handler) RequireSession(next http.Handler) http.Handler {
 	})
 }
 
+func (h Handler) RequireModelSyncToken(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		expected := strings.TrimSpace(h.cfg.ModelSyncBearerToken)
+		if expected == "" {
+			writeError(w, http.StatusServiceUnavailable, "sync_auth_not_configured", "model sync token is not configured")
+			return
+		}
+
+		actual, err := readBearerToken(r)
+		if err != nil || actual != expected {
+			writeError(w, http.StatusUnauthorized, "unauthorized", "missing or invalid bearer token")
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (h Handler) identityFromRequest(ctx context.Context, r *http.Request, idToken string) (auth.GoogleIdentity, error) {
 	if !h.cfg.InsecureSkipGoogleVerify {
 		return h.verifier.Verify(ctx, idToken)
@@ -1502,6 +1515,20 @@ func readSessionCookie(r *http.Request, name string) (string, error) {
 		return "", errors.New("empty session cookie")
 	}
 	return cookie.Value, nil
+}
+
+func readBearerToken(r *http.Request) (string, error) {
+	authorization := strings.TrimSpace(r.Header.Get("Authorization"))
+	if authorization == "" {
+		return "", errors.New("missing authorization header")
+	}
+
+	parts := strings.Fields(authorization)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || strings.TrimSpace(parts[1]) == "" {
+		return "", errors.New("invalid authorization header")
+	}
+
+	return parts[1], nil
 }
 
 func sessionUserFromContext(ctx context.Context) (session.User, bool) {

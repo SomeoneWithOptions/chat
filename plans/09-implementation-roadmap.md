@@ -32,16 +32,32 @@ Exit criteria:
 ## Phase 2: Model Catalog and Persistence
 
 1. Integrate OpenRouter model fetch and cache
-2. Add curated list + show-all behavior (curated can start empty)
-3. Add favorites and per-user model preferences
-4. Persist conversations and history UI
+2. Persist model capability metadata from provider (`supported_parameters`)
+3. Add curated list + show-all behavior (curated can start empty)
+4. Add favorites and per-user model preferences
+5. Persist conversations and history UI
 
 Exit criteria:
 
 - Models selectable and stable even when provider list is unavailable
 - Pricing and context-window metadata visible in UI
 
-## Phase 3: File Attachments
+## Phase 3: Reasoning Presets (Per Model + Mode)
+
+1. Add DB schema for user model reasoning presets
+2. Add backend API to persist presets (`PUT /v1/models/reasoning-presets`)
+3. Extend model catalog response with reasoning capability flags and stored presets
+4. Add frontend thinking-level selector for selected model
+5. Include effort override in `POST /v1/chat/messages`
+6. Resolve and apply reasoning effort for both normal chat and deep research
+
+Exit criteria:
+
+- User can set and persist reasoning effort per model for both modes
+- Reasoning selector state follows selected model and mode correctly
+- Backend sends reasoning parameters only for compatible models
+
+## Phase 4: File Attachments
 
 1. Upload endpoint + file metadata
 2. Text extraction for MVP file types
@@ -54,7 +70,7 @@ Exit criteria:
 - 25 MB file limit enforced
 - Delete operations hard-delete DB data; GCS files are removed when storage backend is GCS
 
-## Phase 4: Grounding (Default ON)
+## Phase 5: Grounding (Default ON)
 
 1. Brave API integration
 2. Citation storage/rendering
@@ -64,7 +80,7 @@ Exit criteria:
 
 - Grounded results with citations are default behavior
 
-## Phase 5: Deep Research Mode
+## Phase 6: Deep Research Mode
 
 1. Multi-pass search orchestration
 2. Deep research prompt templates + structured outputs
@@ -78,7 +94,7 @@ Exit criteria:
 - Deep research mode reliably provides richer analysis than normal mode
 - Deep research requests fail gracefully within configured timeout bounds
 
-## Phase 6: Production Hardening
+## Phase 7: Production Hardening
 
 1. Observability and alerts
 2. Security/rate limits
@@ -89,7 +105,7 @@ Exit criteria:
 
 - Stable production deployment on Vercel + Cloud Run
 
-## Phase 7: Authentication Final Rollout (Last)
+## Phase 8: Authentication Final Rollout (Last)
 
 1. Configure Google OAuth app + email allowlist (`acastesol@gmail.com`, `obzen.black@gmail.com`)
 2. Configure and enforce 7-day session TTL

@@ -33,6 +33,7 @@ Set at minimum:
 - `OPENROUTER_API_KEY` (required to stream chat responses)
 - `BRAVE_API_KEY` (required for grounding citations; requests still run without it)
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
+- `MODEL_SYNC_BEARER_TOKEN` (required for `POST /v1/models/sync`; send it as `Authorization: Bearer <token>`)
 - `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `150`; applies to deep-research requests only)
 
 Auth sequencing:

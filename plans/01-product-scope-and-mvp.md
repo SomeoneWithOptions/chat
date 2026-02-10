@@ -27,7 +27,8 @@ Implementation sequencing note:
 8. Message citations for web-grounded responses
 9. Persisted chat history in Turso
 10. Delete controls: single chat and delete-all chats
-11. Final rollout gate: Google sign-in (allowlisted emails, starting with 2 users)
+11. Per-model reasoning-effort presets (thinking level presets) for `chat` and `deep_research`
+12. Final rollout gate: Google sign-in (allowlisted emails, starting with 2 users)
 
 ## Post-MVP Features
 
@@ -56,11 +57,17 @@ Implementation sequencing note:
   - if first use, default to `openrouter/free`
   - deep research model is selectable and defaults to last-used normal model
   - curated model list can start empty with "show all" available
+- Thinking-level behavior:
+  - user can choose reasoning effort before sending a message
+  - reasoning effort persists per model + mode (`chat` vs `deep_research`)
+  - if selected model does not support reasoning controls, disable/hide the effort selector
+  - message-level explicit choice overrides preset for that send and updates the preset
 
 ## Success Criteria
 
 - End-to-end chat response under 5s p50 (excluding deep research mode)
-- Deep research completion under 120s timeout for standard queries
+- Deep research completion under 150s timeout for standard queries
 - File attachment success rate > 99% for allowed types
+- Reasoning presets persist and apply correctly across model switches and mode switches
 - Final rollout gate: authenticated session restoration works after browser refresh
 - No unhandled backend errors for core chat flow in staged testing

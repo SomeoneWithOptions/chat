@@ -28,6 +28,7 @@ type Config struct {
 	FrontendOrigin             string
 	AllowedOrigins             []string
 	AuthRequired               bool
+	ModelSyncBearerToken       string
 	CookieSecure               bool
 	SessionCookieName          string
 	SessionTTL                 time.Duration
@@ -57,6 +58,7 @@ func Load() (Config, error) {
 		Environment:                envOrDefault("APP_ENV", "development"),
 		FrontendOrigin:             envOrDefault("FRONTEND_ORIGIN", defaultFrontendOrigin),
 		AuthRequired:               boolOrDefault("AUTH_REQUIRED", true),
+		ModelSyncBearerToken:       strings.TrimSpace(os.Getenv("MODEL_SYNC_BEARER_TOKEN")),
 		CookieSecure:               boolOrDefault("COOKIE_SECURE", false),
 		SessionCookieName:          envOrDefault("SESSION_COOKIE_NAME", defaultSessionCookieName),
 		GoogleClientID:             strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
