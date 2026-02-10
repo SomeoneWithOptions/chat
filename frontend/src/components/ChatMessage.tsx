@@ -1,4 +1,6 @@
 import { type Citation } from '../lib/api';
+import ReactMarkdown, { type Components } from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 type MessageData = {
   id: string;
@@ -23,8 +25,15 @@ function citationLabel(citation: Citation, index: number): string {
   }
 }
 
+const markdownComponents: Components = {
+  a: ({ node: _node, ...props }) => (
+    <a {...props} target="_blank" rel="noreferrer" />
+  ),
+};
+
 export default function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const isUser = message.role === 'user';
+  const renderMarkdown = !isUser;
   const isAssistant = message.role === 'assistant';
   const showStreamingIndicator = isStreaming && isAssistant && !message.content;
 
@@ -37,8 +46,20 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
           </div>
         )}
 
-        <div className="message-content">
-          {message.content || ''}
+        <div className={`message-content ${renderMarkdown ? 'markdown' : 'plain'}`}>
+          {renderMarkdown ? (
+            <div className="message-markdown">
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                skipHtml
+                components={markdownComponents}
+              >
+                {message.content || ''}
+              </ReactMarkdown>
+            </div>
+          ) : (
+            message.content || ''
+          )}
           {showStreamingIndicator && (
             <span className="message-streaming-indicator">
               <span />
