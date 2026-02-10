@@ -14,6 +14,7 @@ IMAGE_TAG="${IMAGE_TAG:-}"
 ALLOW_UNAUTHENTICATED="${ALLOW_UNAUTHENTICATED:-true}"
 PLATFORM="${PLATFORM:-linux/amd64}"
 DRY_RUN=false
+SCRIPT_START_EPOCH="$(date +%s)"
 
 usage() {
   cat <<EOF
@@ -249,3 +250,10 @@ deployed_image="$(
 printf "Deployed %s to %s\n" "${SERVICE_NAME}" "${service_url}"
 printf "Active image: %s\n" "${deployed_image}"
 printf "Cloud Run compatibility: built with --platform=%s\n" "${PLATFORM}"
+
+elapsed_seconds="$(( $(date +%s) - SCRIPT_START_EPOCH ))"
+elapsed_hours="$(( elapsed_seconds / 3600 ))"
+elapsed_minutes="$(( (elapsed_seconds % 3600) / 60 ))"
+elapsed_remainder_seconds="$(( elapsed_seconds % 60 ))"
+printf "Total runtime: %02d:%02d:%02d (%ss)\n" \
+  "${elapsed_hours}" "${elapsed_minutes}" "${elapsed_remainder_seconds}" "${elapsed_seconds}"
