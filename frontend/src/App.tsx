@@ -325,6 +325,7 @@ export default function App() {
             id: m.id,
             role: m.role,
             content: m.content,
+            reasoningContent: m.reasoningContent ?? '',
             citations: m.citations ?? [],
           })),
         );
@@ -643,12 +644,14 @@ export default function App() {
       id: crypto.randomUUID(),
       role: 'user',
       content: prompt.trim(),
+      reasoningContent: '',
       citations: [],
     };
     const assistantMessage: MessageData = {
       id: crypto.randomUUID(),
       role: 'assistant',
       content: '',
+      reasoningContent: '',
       citations: [],
     };
 
@@ -775,6 +778,14 @@ export default function App() {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === assistantMessage.id ? { ...m, content: `${m.content}${eventData.delta}` } : m,
+              ),
+            );
+            return;
+          }
+          if (eventData.type === 'reasoning') {
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === assistantMessage.id ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${eventData.delta}` } : m,
               ),
             );
           }

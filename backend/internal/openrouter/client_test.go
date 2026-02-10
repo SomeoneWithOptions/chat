@@ -69,6 +69,7 @@ func TestStreamChatCompletionStreamsDeltas(t *testing.T) {
 			out.WriteString(delta)
 			return nil
 		},
+		nil, // onReasoning
 	)
 	if err != nil {
 		t.Fatalf("stream chat completion: %v", err)
@@ -117,6 +118,7 @@ func TestStreamChatCompletionIncludesReasoningEffortWhenProvided(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil, // onReasoning
 	)
 	if err != nil {
 		t.Fatalf("stream chat completion: %v", err)
@@ -146,6 +148,7 @@ func TestStreamChatCompletionReturnsUpstreamError(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil, // onReasoning
 	)
 	if err == nil {
 		t.Fatal("expected upstream error")
@@ -173,6 +176,7 @@ func TestStreamChatCompletionReturnsMissingKeyError(t *testing.T) {
 		},
 		nil,
 		nil,
+		nil, // onReasoning
 	)
 	if err == nil {
 		t.Fatal("expected missing api key error")

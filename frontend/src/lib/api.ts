@@ -50,6 +50,7 @@ export type ConversationMessage = {
   conversationId: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  reasoningContent?: string | null;
   modelId?: string | null;
   groundingEnabled: boolean;
   deepResearchEnabled: boolean;
@@ -90,6 +91,7 @@ export type StreamEvent =
   | { type: 'warning'; scope: string; message: string }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'token'; delta: string }
+  | { type: 'reasoning'; delta: string }
   | { type: 'error'; message: string }
   | { type: 'done' };
 

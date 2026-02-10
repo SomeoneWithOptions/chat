@@ -199,6 +199,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	promptMessages = append(promptMessages, openrouter.Message{Role: "user", Content: input.Prompt})
 
 	var assistantContent strings.Builder
+	var reasoningContent strings.Builder
 	streamErr := h.openrouter.StreamChatCompletion(
 		researchCtx,
 		openrouter.StreamRequest{
@@ -210,6 +211,14 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		func(delta string) error {
 			assistantContent.WriteString(delta)
 			if err := writeSSEEvent(w, map[string]any{"type": "token", "delta": delta}); err != nil {
+				return err
+			}
+			flusher.Flush()
+			return nil
+		},
+		func(reasoning string) error {
+			reasoningContent.WriteString(reasoning)
+			if err := writeSSEEvent(w, map[string]any{"type": "reasoning", "delta": reasoning}); err != nil {
 				return err
 			}
 			flusher.Flush()
@@ -236,6 +245,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			input.ConversationID,
 			"assistant",
 			assistantContent.String(),
+			reasoningContent.String(),
 			input.ModelID,
 			input.Grounding,
 			true,

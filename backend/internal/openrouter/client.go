@@ -53,10 +53,16 @@ type streamAPIRequest struct {
 	Stream    bool             `json:"stream"`
 }
 
+type reasoningDetail struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
 type streamAPIResponse struct {
 	Choices []struct {
 		Delta struct {
-			Content string `json:"content"`
+			Content          string            `json:"content"`
+			ReasoningDetails []reasoningDetail `json:"reasoning_details"`
 		} `json:"delta"`
 	} `json:"choices"`
 	Error *struct {
@@ -104,6 +110,7 @@ func (c Client) StreamChatCompletion(
 	req StreamRequest,
 	onStart func() error,
 	onDelta func(string) error,
+	onReasoning func(string) error,
 ) error {
 	if strings.TrimSpace(c.apiKey) == "" {
 		return ErrMissingAPIKey
@@ -184,6 +191,18 @@ func (c Client) StreamChatCompletion(
 		}
 
 		for _, choice := range parsed.Choices {
+			// Handle reasoning tokens first (they typically arrive before content)
+			for _, detail := range choice.Delta.ReasoningDetails {
+				if detail.Type == "reasoning.text" && detail.Text != "" {
+					if onReasoning != nil {
+						if err := onReasoning(detail.Text); err != nil {
+							return err
+						}
+					}
+				}
+			}
+
+			// Handle content tokens
 			delta := choice.Delta.Content
 			if delta == "" {
 				continue

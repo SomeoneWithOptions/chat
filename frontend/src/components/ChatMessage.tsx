@@ -7,6 +7,7 @@ type MessageData = {
   id: string;
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
+  reasoningContent?: string;
   citations: Citation[];
 };
 
@@ -127,12 +128,35 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   const isAssistant = message.role === 'assistant';
   const showStreamingIndicator = isStreaming && isAssistant && !message.content;
   const [traceExpanded, setTraceExpanded] = useState(false);
+  const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const showThinkingTrace = isAssistant && !!thinkingTrace && thinkingTrace.steps.length > 0;
   const tracePanelID = `${message.id}-thinking-trace`;
+  const reasoningPanelID = `${message.id}-reasoning`;
+  
+  // Show reasoning panel if there's reasoning content (either persisted or streaming)
+  const hasReasoningContent = isAssistant && !!message.reasoningContent && message.reasoningContent.length > 0;
+  // Auto-expand reasoning during streaming when no content yet, auto-collapse when content starts
+  const isReasoningStreaming = isStreaming && isAssistant && hasReasoningContent && !message.content;
 
   useEffect(() => {
     setTraceExpanded(false);
+    setReasoningExpanded(false);
   }, [message.id]);
+
+  // Auto-expand reasoning panel during streaming when reasoning arrives but content hasn't started
+  useEffect(() => {
+    if (isReasoningStreaming) {
+      setReasoningExpanded(true);
+    } else if (isStreaming && message.content) {
+      // Auto-collapse when content starts arriving
+      setReasoningExpanded(false);
+    }
+  }, [isReasoningStreaming, isStreaming, message.content]);
+
+  // Generate a preview of reasoning content (first ~100 chars)
+  const reasoningPreview = message.reasoningContent
+    ? message.reasoningContent.slice(0, 100).replace(/\n/g, ' ').trim() + (message.reasoningContent.length > 100 ? '...' : '')
+    : '';
 
   return (
     <div className={`message ${message.role}`}>
@@ -186,6 +210,68 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
                   ))}
                 </ol>
               )}
+            </div>
+          )}
+
+          {hasReasoningContent && (
+            <div className={`reasoning-trace ${isReasoningStreaming ? 'streaming' : ''}`}>
+              <button
+                type="button"
+                className="reasoning-trace-toggle"
+                onClick={() => setReasoningExpanded((open) => !open)}
+                aria-expanded={reasoningExpanded}
+                aria-controls={reasoningPanelID}
+              >
+                <span className="reasoning-trace-heading">
+                  <svg
+                    className="reasoning-trace-icon"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
+                    <path d="M9 21h6" />
+                    <path d="M9 18h6" />
+                  </svg>
+                  <span className="reasoning-trace-title">
+                    {isReasoningStreaming ? 'Reasoning' : 'Model Reasoning'}
+                  </span>
+                  {!reasoningExpanded && (
+                    <span className="reasoning-trace-preview">{reasoningPreview}</span>
+                  )}
+                </span>
+                <svg
+                  className={`reasoning-trace-chevron ${reasoningExpanded ? 'open' : ''}`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </button>
+
+              <div
+                id={reasoningPanelID}
+                className={`reasoning-trace-content ${reasoningExpanded ? 'expanded' : 'collapsed'}`}
+              >
+                <div className="reasoning-trace-markdown">
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    skipHtml
+                    components={markdownComponents}
+                  >
+                    {message.reasoningContent || ''}
+                  </ReactMarkdown>
+                </div>
+              </div>
             </div>
           )}
 

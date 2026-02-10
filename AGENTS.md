@@ -24,6 +24,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 - Package manager/runtime: Bun.
 - Backend: Go 1.22+.
 - Database: Turso (LibSQL/SQLite).
+- Local DB operations: Use `turso` CLI (already authenticated on this machine).
 - LLM gateway: OpenRouter.
 - Web grounding: Brave Data for AI.
 - Frontend domain: `https://chat.sanetomore.com`.
@@ -90,6 +91,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 ## Delivery Standards
 
 - Keep changes scoped to the relevant folder ownership.
+- Use the frontend-design skill at `/SKILL.md` for any frontend work.
 - Prefer simple, explicit implementations over framework-heavy abstractions.
 - Keep planning and docs synchronized with code changes:
   - update `/plans` when scope, architecture, or implementation order changes

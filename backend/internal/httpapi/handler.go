@@ -38,7 +38,7 @@ type Handler struct {
 }
 
 type chatStreamer interface {
-	StreamChatCompletion(ctx context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error
+	StreamChatCompletion(ctx context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error) error
 }
 
 type modelCataloger interface {
@@ -523,6 +523,7 @@ type messageResponse struct {
 	ConversationID      string             `json:"conversationId"`
 	Role                string             `json:"role"`
 	Content             string             `json:"content"`
+	ReasoningContent    *string            `json:"reasoningContent,omitempty"`
 	ModelID             *string            `json:"modelId,omitempty"`
 	GroundingEnabled    bool               `json:"groundingEnabled"`
 	DeepResearchEnabled bool               `json:"deepResearchEnabled"`
@@ -629,7 +630,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.model_id, m.grounding_enabled, m.deep_research_enabled, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.grounding_enabled, m.deep_research_enabled, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -644,6 +645,7 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 	messages := make([]messageResponse, 0, 32)
 	for rows.Next() {
 		var message messageResponse
+		var reasoningContent sql.NullString
 		var modelID sql.NullString
 		var groundingEnabled int
 		var deepResearchEnabled int
@@ -653,6 +655,7 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&message.ConversationID,
 			&message.Role,
 			&message.Content,
+			&reasoningContent,
 			&modelID,
 			&groundingEnabled,
 			&deepResearchEnabled,
@@ -662,6 +665,7 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			return
 		}
 
+		message.ReasoningContent = nullableStringPointer(reasoningContent)
 		message.ModelID = nullableStringPointer(modelID)
 		message.GroundingEnabled = groundingEnabled == 1
 		message.DeepResearchEnabled = deepResearchEnabled == 1
@@ -968,6 +972,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	started := false
 	var assistantContent strings.Builder
+	var reasoningContent strings.Builder
 
 	streamErr := h.openrouter.StreamChatCompletion(
 		r.Context(),
@@ -1019,6 +1024,18 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			return nil
 		},
+		func(reasoning string) error {
+			reasoningContent.WriteString(reasoning)
+
+			if err := writeSSEEvent(w, map[string]any{
+				"type":  "reasoning",
+				"delta": reasoning,
+			}); err != nil {
+				return err
+			}
+			flusher.Flush()
+			return nil
+		},
 	)
 
 	var persistedCitations []citationResponse
@@ -1033,6 +1050,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			conversationID,
 			"assistant",
 			assistantContent.String(),
+			reasoningContent.String(),
 			modelID,
 			grounding,
 			deepResearch,
@@ -1346,6 +1364,7 @@ func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role
 		conversationID,
 		role,
 		content,
+		"", // no reasoning content for user messages
 		modelID,
 		groundingEnabled,
 		deepResearchEnabled,
@@ -1356,7 +1375,7 @@ func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role
 
 func (h Handler) insertMessageWithCitations(
 	ctx context.Context,
-	userID, conversationID, role, content, modelID string,
+	userID, conversationID, role, content, reasoningContent, modelID string,
 	groundingEnabled, deepResearchEnabled bool,
 	citations []citationResponse,
 ) (string, error) {
@@ -1379,12 +1398,13 @@ INSERT INTO messages (
   user_id,
   role,
   content,
+  reasoning_content,
   model_id,
   grounding_enabled,
   deep_research_enabled
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
 		return "", err
 	}
 

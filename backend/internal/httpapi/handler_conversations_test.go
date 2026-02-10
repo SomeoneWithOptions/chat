@@ -1623,11 +1623,12 @@ func assertContainsPhaseInOrder(t *testing.T, phases []string, phase string, aft
 }
 
 type stubStreamer struct {
-	tokens     []string
-	err        error
-	catalog    []openrouter.Model
-	catalogErr error
-	onRequest  func(openrouter.StreamRequest)
+	tokens          []string
+	reasoningTokens []string
+	err             error
+	catalog         []openrouter.Model
+	catalogErr      error
+	onRequest       func(openrouter.StreamRequest)
 }
 
 type stubGrounder struct {
@@ -1647,13 +1648,21 @@ func (s stubGrounder) Search(ctx context.Context, _ string, _ int) ([]brave.Sear
 	return s.results, nil
 }
 
-func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error) error {
+func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error) error {
 	if s.onRequest != nil {
 		s.onRequest(req)
 	}
 	if onStart != nil {
 		if err := onStart(); err != nil {
 			return err
+		}
+	}
+	// Send reasoning tokens first (like the real API does)
+	for _, reasoning := range s.reasoningTokens {
+		if onReasoning != nil {
+			if err := onReasoning(reasoning); err != nil {
+				return err
+			}
 		}
 	}
 	for _, token := range s.tokens {
@@ -1767,6 +1776,7 @@ CREATE TABLE messages (
   user_id TEXT NOT NULL,
   role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
   content TEXT NOT NULL,
+  reasoning_content TEXT,
   model_id TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
