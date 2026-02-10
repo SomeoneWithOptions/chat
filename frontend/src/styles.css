@@ -337,7 +337,6 @@ code {
   border-radius: var(--radius-sm);
   cursor: pointer;
   transition: background var(--duration-fast) ease;
-  group: true;
   border: none;
   background: none;
   width: 100%;
