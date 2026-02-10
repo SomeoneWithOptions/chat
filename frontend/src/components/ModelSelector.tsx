@@ -94,15 +94,19 @@ export default function ModelSelector({
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
               />
-              <label className="model-dropdown-toggle" onClick={() => onToggleShowAll(!showAllModels)}>
-                <div
-                  className={`toggle-track ${showAllModels ? 'active' : ''}`}
-                  style={{ width: '28px', height: '16px' }}
-                >
-                  <div className="toggle-thumb" style={{ width: '12px', height: '12px' }} />
-                </div>
-                All
-              </label>
+              <button
+                type="button"
+                className={`model-dropdown-toggle ${showAllModels ? 'active' : ''}`}
+                onClick={() => onToggleShowAll(!showAllModels)}
+                role="switch"
+                aria-checked={showAllModels}
+                aria-label="Show all models"
+              >
+                <span className={`toggle-track ${showAllModels ? 'active' : ''}`} aria-hidden="true">
+                  <span className="toggle-thumb" />
+                </span>
+                <span className="model-dropdown-toggle-label">All</span>
+              </button>
             </div>
 
             <div className="model-dropdown-list">
