@@ -48,7 +48,6 @@ export default function Sidebar({
         <div
           className="mobile-overlay"
           onClick={onToggleCollapsed}
-          style={{ display: 'none' }}
         />
       )}
 

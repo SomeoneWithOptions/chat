@@ -75,7 +75,7 @@ export default function App() {
   const [pendingAttachments, setPendingAttachments] = useState<UploadedFile[]>([]);
 
   // ─── UI State ─────────────────────────────────
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
