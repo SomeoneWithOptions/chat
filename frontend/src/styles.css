@@ -1380,6 +1380,8 @@ code {
   .model-selector-dropdown {
     width: calc(100vw - 48px);
     max-width: 400px;
+    left: 50% !important;
+    transform: translateX(-50%);
   }
 
   .header {
@@ -1387,24 +1389,41 @@ code {
     min-height: auto;
     padding: 12px 16px;
     flex-direction: column;
-    align-items: stretch;
+    align-items: center;
     gap: 16px;
   }
 
   .header-left {
     width: 100%;
+    position: relative;
+    justify-content: center;
+  }
+
+  .btn-sidebar-toggle {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+  }
+
+  .model-selector-wrapper {
+    width: 100%;
+    display: flex;
+    justify-content: center;
   }
 
   .model-selector-trigger {
-    flex: 1;
-    max-width: none;
+    width: 260px;
+    max-width: 100%;
     justify-content: space-between;
   }
 
   .header-right {
     width: 100%;
-    justify-content: space-between;
-    padding: 0 4px;
+    justify-content: center;
+    gap: 16px;
+    padding: 0;
   }
 
   .messages-container {
