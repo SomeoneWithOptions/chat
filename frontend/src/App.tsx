@@ -2,7 +2,6 @@ import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useSta
 import {
   APIError,
   authWithGoogle,
-  createConversation,
   deleteAllConversations,
   deleteConversation,
   getMe,
@@ -422,18 +421,8 @@ export default function App() {
   async function handleNewConversation() {
     if (isStreaming || !conversationAPISupported || deletingConversationId !== null || isDeletingAll) return;
     setError(null);
+    setActiveConversationId(null);
     setMessages([]);
-    try {
-      const conversation = await createConversation();
-      setConversations((existing) => [conversation, ...existing.filter((c) => c.id !== conversation.id)]);
-      setActiveConversationId(conversation.id);
-    } catch (err) {
-      if (isNotFoundError(err)) {
-        setConversationAPISupported(false);
-        return;
-      }
-      setError((err as Error).message);
-    }
   }
 
   async function handleDeleteConversation(conversationId: string) {
@@ -550,6 +539,7 @@ export default function App() {
     let resolvedConversationID = activeConversationId;
     const abortController = new AbortController();
     streamAbortControllerRef.current = abortController;
+    let refreshedConversationListForStream = false;
 
     try {
       await streamMessage(
@@ -566,6 +556,10 @@ export default function App() {
             if (eventData.conversationId) {
               resolvedConversationID = eventData.conversationId;
               setActiveConversationId(eventData.conversationId);
+              if (!refreshedConversationListForStream && conversationAPISupported) {
+                refreshedConversationListForStream = true;
+                void refreshConversations(eventData.conversationId, { fallbackToFirstConversation: false });
+              }
             }
             return;
           }

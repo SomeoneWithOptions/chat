@@ -112,6 +112,53 @@ afterEach(() => {
 });
 
 describe('Deep research streaming UX', () => {
+  it('adds a conversation only after first send starts streaming', async () => {
+    const createdConversation: api.Conversation = {
+      id: 'conv-new',
+      title: 'New Chat',
+      createdAt: '2026-02-10T00:00:00Z',
+      updatedAt: '2026-02-10T00:00:00Z',
+    };
+
+    let listCalls = 0;
+    listConversationsMock.mockImplementation(async () => {
+      listCalls += 1;
+      if (listCalls === 1) return [];
+      return [createdConversation];
+    });
+
+    streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-new' });
+      onEvent({ type: 'token', delta: 'Assistant reply' });
+      onEvent({ type: 'done' });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('No conversations yet');
+
+    await user.click(screen.getByRole('button', { name: /new conversation/i }));
+
+    expect(createConversationMock).not.toHaveBeenCalled();
+    await screen.findByText('No conversations yet');
+
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Start now');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+    expect(streamMessageMock.mock.calls[0][0]).toMatchObject({
+      message: 'Start now',
+      conversationId: undefined,
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('New Chat')).toBeInTheDocument();
+    });
+  });
+
   it('renders research phases and completion state from progress events', async () => {
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: true, modelId: 'openrouter/free', conversationId: 'conv-1' });
