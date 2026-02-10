@@ -272,14 +272,33 @@ export default function App() {
   const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
 
   const visibleModels = useMemo(() => {
-    const base = showAllModels || curatedModels.length === 0 ? models : curatedModels;
+    let base: Model[];
+
+    if (showAllModels) {
+      base = models;
+    } else {
+      const byID = new Map(models.map((model) => [model.id, model] as const));
+      const merged = new Map<string, Model>();
+
+      const include = (model: Model | undefined) => {
+        if (!model) return;
+        merged.set(model.id, model);
+      };
+
+      include(byID.get('openrouter/free'));
+      for (const modelId of favoriteModelIds) include(byID.get(modelId));
+      for (const model of curatedModels) include(model);
+
+      base = merged.size > 0 ? [...merged.values()] : models;
+    }
+
     return [...base].sort((a, b) => {
       const aFav = favoriteModelIdSet.has(a.id) ? 1 : 0;
       const bFav = favoriteModelIdSet.has(b.id) ? 1 : 0;
       if (aFav !== bFav) return bFav - aFav;
       return a.name.localeCompare(b.name);
     });
-  }, [curatedModels, favoriteModelIdSet, models, showAllModels]);
+  }, [curatedModels, favoriteModelIdSet, favoriteModelIds, models, showAllModels]);
 
   const selectableModels = useMemo(() => {
     const byID = new Map<string, Model>();

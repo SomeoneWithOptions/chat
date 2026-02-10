@@ -165,3 +165,79 @@ describe('Deep research streaming UX', () => {
     expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
   });
 });
+
+describe('Model selector filtering', () => {
+  it('keeps free + favorites visible when All is off and shows the rest when toggled on', async () => {
+    listModelsMock.mockResolvedValueOnce({
+      models: [
+        {
+          id: 'openrouter/free',
+          name: 'OpenRouter Free',
+          provider: 'openrouter',
+          contextWindow: 128000,
+          promptPriceMicrosUsd: 0,
+          outputPriceMicrosUsd: 0,
+          curated: true,
+        },
+        {
+          id: 'openrouter/latest-used',
+          name: 'Latest Used Model',
+          provider: 'openrouter',
+          contextWindow: 128000,
+          promptPriceMicrosUsd: 25,
+          outputPriceMicrosUsd: 30,
+          curated: false,
+        },
+        {
+          id: 'openrouter/favorite-model',
+          name: 'Favorite Model',
+          provider: 'openrouter',
+          contextWindow: 200000,
+          promptPriceMicrosUsd: 35,
+          outputPriceMicrosUsd: 45,
+          curated: false,
+        },
+        {
+          id: 'openrouter/other-model',
+          name: 'Other Model',
+          provider: 'openrouter',
+          contextWindow: 64000,
+          promptPriceMicrosUsd: 10,
+          outputPriceMicrosUsd: 12,
+          curated: false,
+        },
+      ],
+      curatedModels: [
+        {
+          id: 'openrouter/free',
+          name: 'OpenRouter Free',
+          provider: 'openrouter',
+          contextWindow: 128000,
+          promptPriceMicrosUsd: 0,
+          outputPriceMicrosUsd: 0,
+          curated: true,
+        },
+      ],
+      favorites: ['openrouter/favorite-model'],
+      preferences: {
+        lastUsedModelId: 'openrouter/latest-used',
+        lastUsedDeepResearchModelId: 'openrouter/latest-used',
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    await user.click(screen.getByRole('button', { name: 'Latest Used Model' }));
+
+    expect(screen.getByText('OpenRouter Free')).toBeInTheDocument();
+    expect(screen.getByText('Favorite Model')).toBeInTheDocument();
+    expect(screen.queryByText('Other Model')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('switch', { name: /show all models/i }));
+
+    expect(screen.getByText('Other Model')).toBeInTheDocument();
+  });
+});
