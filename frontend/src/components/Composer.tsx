@@ -5,6 +5,7 @@ type ComposerProps = {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSend: (e: FormEvent<HTMLFormElement>) => void;
+  onStop: () => void;
   isStreaming: boolean;
   uploadingAttachments: boolean;
   pendingAttachments: UploadedFile[];
@@ -26,6 +27,7 @@ export default function Composer({
   prompt,
   onPromptChange,
   onSend,
+  onStop,
   isStreaming,
   uploadingAttachments,
   pendingAttachments,
@@ -112,14 +114,20 @@ export default function Composer({
           </div>
 
           <div className="composer-toolbar-right">
-            <button
-              type="submit"
-              className="btn-send"
-              disabled={!canSend}
-            >
-              {isStreaming ? (
-                'Streaming...'
-              ) : (
+            {isStreaming ? (
+              <button
+                type="button"
+                className="btn-send btn-stop"
+                onClick={onStop}
+              >
+                Stop
+              </button>
+            ) : (
+              <button
+                type="submit"
+                className="btn-send"
+                disabled={!canSend}
+              >
                 <>
                   Send
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
@@ -127,8 +135,8 @@ export default function Composer({
                     <polygon points="22 2 15 22 11 13 2 9 22 2" />
                   </svg>
                 </>
-              )}
-            </button>
+              </button>
+            )}
           </div>
         </div>
       </form>

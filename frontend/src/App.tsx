@@ -78,6 +78,7 @@ export default function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const streamAbortControllerRef = useRef<AbortController | null>(null);
 
   // ─── Helpers ──────────────────────────────────
 
@@ -87,6 +88,10 @@ export default function App() {
 
   function isConversationNotFoundError(err: unknown): err is APIError {
     return err instanceof APIError && err.status === 404 && err.code === 'conversation_not_found';
+  }
+
+  function isAbortError(err: unknown): boolean {
+    return err instanceof DOMException && err.name === 'AbortError';
   }
 
   // ─── Auth Effects ─────────────────────────────
@@ -438,6 +443,10 @@ export default function App() {
     setPendingAttachments((existing) => existing.filter((a) => a.id !== fileId));
   }
 
+  function handleStopStreaming() {
+    streamAbortControllerRef.current?.abort();
+  }
+
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!prompt.trim() || isStreaming || uploadingAttachments) return;
@@ -463,6 +472,8 @@ export default function App() {
     setError(null);
 
     let resolvedConversationID = activeConversationId;
+    const abortController = new AbortController();
+    streamAbortControllerRef.current = abortController;
 
     try {
       await streamMessage(
@@ -498,14 +509,22 @@ export default function App() {
             );
           }
         },
+        { signal: abortController.signal },
       );
       if (resolvedConversationID && conversationAPISupported) {
         await refreshConversations(resolvedConversationID);
       }
       setPendingAttachments([]);
     } catch (err) {
+      if (isAbortError(err)) {
+        setStreamWarning('Response stopped.');
+        return;
+      }
       setError((err as Error).message);
     } finally {
+      if (streamAbortControllerRef.current === abortController) {
+        streamAbortControllerRef.current = null;
+      }
       setIsStreaming(false);
     }
   }
@@ -696,6 +715,7 @@ export default function App() {
           prompt={prompt}
           onPromptChange={setPrompt}
           onSend={handleSend}
+          onStop={handleStopStreaming}
           isStreaming={isStreaming}
           uploadingAttachments={uploadingAttachments}
           pendingAttachments={pendingAttachments}

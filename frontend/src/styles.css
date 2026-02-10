@@ -1095,6 +1095,18 @@ code {
   height: 14px;
 }
 
+.btn-stop {
+  background: rgba(196, 92, 92, 0.2);
+  color: #f6d6d6;
+  border: 1px solid rgba(196, 92, 92, 0.45);
+}
+
+.btn-stop:hover {
+  background: rgba(196, 92, 92, 0.28);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(196, 92, 92, 0.2);
+}
+
 .composer-notice {
   padding: 0 14px 8px;
 }

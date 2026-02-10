@@ -225,10 +225,12 @@ export async function uploadFile(file: File): Promise<UploadedFile> {
 export async function streamMessage(
   request: ChatRequest,
   onEvent: (event: StreamEvent) => void,
+  options?: { signal?: AbortSignal },
 ): Promise<void> {
   const response = await fetch(`${apiBase}/v1/chat/messages`, {
     method: 'POST',
     credentials: 'include',
+    signal: options?.signal,
     headers: {
       'Content-Type': 'application/json',
       Accept: 'text/event-stream',
