@@ -205,6 +205,21 @@ describe('Deep research streaming UX', () => {
     });
   });
 
+  it('collapses sidebar when starting a new conversation', async () => {
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    const sidebar = container.querySelector('aside.sidebar');
+    expect(sidebar).not.toBeNull();
+    expect(sidebar).not.toHaveClass('collapsed');
+
+    await user.click(screen.getByRole('button', { name: /new conversation/i }));
+
+    expect(sidebar).toHaveClass('collapsed');
+  });
+
   it('renders research phases and completion state from progress events', async () => {
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: true, modelId: 'openrouter/free', conversationId: 'conv-1' });

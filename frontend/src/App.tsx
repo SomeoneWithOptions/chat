@@ -543,6 +543,7 @@ export default function App() {
   async function handleNewConversation() {
     if (isStreaming || !conversationAPISupported || deletingConversationId !== null || isDeletingAll) return;
     setError(null);
+    setSidebarCollapsed(true);
     setActiveConversationId(null);
     setMessages([]);
     setThinkingTrace(null);
