@@ -2245,15 +2245,15 @@ code {
     max-height: 100px;
   }
 
-  html[data-keyboard-open] .header {
+  html[data-composer-focused] .header {
     display: none;
   }
 
-  html[data-keyboard-open] .model-info-bar {
+  html[data-composer-focused] .model-info-bar {
     display: none;
   }
 
-  html[data-keyboard-open] .research-panel {
+  html[data-composer-focused] .research-panel {
     display: none;
   }
 }
