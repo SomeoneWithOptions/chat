@@ -186,7 +186,7 @@ code {
 
 .sidebar {
   width: var(--sidebar-width);
-  height: 100vh;
+  height: var(--app-height, 100dvh);
   background: var(--bg-surface);
   border-right: 1px solid var(--border);
   display: flex;
@@ -2146,8 +2146,13 @@ code {
     position: fixed;
     left: 0;
     top: 0;
+    height: var(--app-height, 100dvh);
     z-index: 100;
     box-shadow: var(--shadow-lg);
+  }
+
+  .sidebar-footer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .sidebar.collapsed {
