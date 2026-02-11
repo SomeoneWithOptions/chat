@@ -1376,11 +1376,99 @@ code {
   animation-delay: 0.32s;
 }
 
-/* Citations */
-.citations {
+/* Grounding Sources (collapsible bubble) */
+.grounding-sources {
   margin-top: 12px;
-  padding-top: 10px;
+  border: 1px solid var(--border);
+  border-left: 3px solid rgba(212, 175, 55, 0.4);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.015);
+  overflow: hidden;
+}
+
+.grounding-sources-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.grounding-sources-toggle:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.grounding-sources-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  flex: 1;
+}
+
+.grounding-sources-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--accent);
+  flex-shrink: 0;
+  opacity: 0.8;
+}
+
+.grounding-sources-title {
+  font-size: 11px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+
+.grounding-sources-count {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  font-style: italic;
+  white-space: nowrap;
+  margin-left: 8px;
+}
+
+.grounding-sources-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.grounding-sources-chevron.open {
+  transform: rotate(180deg);
+}
+
+.grounding-sources-content {
   border-top: 1px solid var(--border-subtle);
+  overflow: hidden;
+  transition: max-height var(--duration-normal) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
+}
+
+.grounding-sources-content.collapsed {
+  max-height: 0;
+  opacity: 0;
+  border-top-color: transparent;
+}
+
+.grounding-sources-content.expanded {
+  max-height: 2000px;
+  opacity: 1;
+}
+
+.grounding-sources-list {
+  padding: 10px 12px;
   list-style: none;
   display: flex;
   flex-direction: column;
@@ -1857,18 +1945,38 @@ code {
 
 .research-panel {
   margin: 12px 24px 0;
-  padding: 12px 14px;
+  padding: 0;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   background: linear-gradient(180deg, rgba(212, 175, 55, 0.06), rgba(255, 255, 255, 0.02));
   animation: slideUp 220ms var(--ease-out);
+  overflow: hidden;
 }
 
 .research-panel-header {
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 10px;
+  gap: 10px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  padding: 10px 14px;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-body);
+}
+
+.research-panel-header:hover {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.research-panel-header-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .research-panel-title {
@@ -1891,11 +1999,56 @@ code {
   color: var(--success);
 }
 
+.research-panel-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.research-panel-chevron.open {
+  transform: rotate(180deg);
+}
+
+.research-active-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 0 14px 10px;
+}
+
+.research-active-step .research-step-marker {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  margin-top: 4px;
+  flex-shrink: 0;
+}
+
+.research-active-step .research-step-marker.pending {
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.research-active-step .research-step-marker.active {
+  border: 1px solid rgba(212, 175, 55, 0.35);
+  background: var(--accent);
+  box-shadow: 0 0 0 4px rgba(212, 175, 55, 0.12);
+}
+
+.research-active-step .research-step-marker.done {
+  border: 1px solid rgba(92, 168, 108, 0.3);
+  background: var(--success);
+}
+
 .research-timeline {
   list-style: none;
   display: flex;
   flex-direction: column;
   gap: 8px;
+  border-top: 1px solid var(--border-subtle);
+  padding: 10px 14px;
 }
 
 .research-step {

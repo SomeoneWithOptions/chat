@@ -162,6 +162,7 @@ export default function App() {
   const [error, setError] = useState<string | null>(null);
   const [researchActivity, setResearchActivity] = useState<ResearchActivity[]>([]);
   const [researchCompleted, setResearchCompleted] = useState(false);
+  const [researchPanelExpanded, setResearchPanelExpanded] = useState(false);
   const [thinkingTrace, setThinkingTrace] = useState<ThinkingTrace | null>(null);
   const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<string | null>(null);
 
@@ -1007,39 +1008,90 @@ export default function App() {
         )}
 
         {(deepResearch || researchActivity.length > 0) && (
-          <section className="research-panel" data-testid="research-timeline">
-            <div className="research-panel-header">
+          <section className={`research-panel ${researchPanelExpanded ? 'expanded' : 'collapsed'}`} data-testid="research-timeline">
+            <button
+              type="button"
+              className="research-panel-header"
+              onClick={() => setResearchPanelExpanded((open) => !open)}
+              aria-expanded={researchPanelExpanded}
+            >
               <span className="research-panel-title">Research Activity</span>
-              <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
-                {researchStatus}
+              <span className="research-panel-header-right">
+                <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
+                  {researchStatus}
+                </span>
+                <svg
+                  className={`research-panel-chevron ${researchPanelExpanded ? 'open' : ''}`}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
               </span>
-            </div>
-            <ol className="research-timeline">
-              {researchPhases.map((phase, index) => {
-                const latest = latestResearchByPhase.get(phase);
-                let state: 'pending' | 'active' | 'done' = 'pending';
-                if (index < latestResearchPhaseIndex) state = 'done';
-                if (index === latestResearchPhaseIndex) state = researchCompleted ? 'done' : 'active';
-                if (!isStreaming && researchCompleted && index <= latestResearchPhaseIndex) state = 'done';
+            </button>
 
-                return (
-                  <li key={phase} className={`research-step ${state}`}>
-                    <span className="research-step-marker" />
-                    <div className="research-step-content">
-                      <div className="research-step-row">
-                        <span className="research-step-title">{researchPhaseLabels[phase]}</span>
-                        {latest?.pass && latest.totalPasses ? (
-                          <span className="research-step-pass">
-                            {latest.pass}/{latest.totalPasses}
-                          </span>
-                        ) : null}
-                      </div>
-                      <p className="research-step-message">{latest?.message ?? researchPhaseDefaults[phase]}</p>
+            {/* Collapsed: show only the active (or last completed) step */}
+            {!researchPanelExpanded && (() => {
+              const activeIndex = latestResearchPhaseIndex >= 0 ? latestResearchPhaseIndex : 0;
+              const activePhase = researchPhases[activeIndex];
+              const latest = latestResearchByPhase.get(activePhase);
+              let state: 'pending' | 'active' | 'done' = 'pending';
+              if (researchActivity.length > 0) {
+                state = researchCompleted ? 'done' : 'active';
+              }
+
+              return (
+                <div className="research-active-step">
+                  <span className={`research-step-marker ${state}`} />
+                  <div className="research-step-content">
+                    <div className="research-step-row">
+                      <span className="research-step-title">{researchPhaseLabels[activePhase]}</span>
+                      {latest?.pass && latest.totalPasses ? (
+                        <span className="research-step-pass">
+                          {latest.pass}/{latest.totalPasses}
+                        </span>
+                      ) : null}
                     </div>
-                  </li>
-                );
-              })}
-            </ol>
+                    <p className="research-step-message">{latest?.message ?? researchPhaseDefaults[activePhase]}</p>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Expanded: show all phases */}
+            {researchPanelExpanded && (
+              <ol className="research-timeline">
+                {researchPhases.map((phase, index) => {
+                  const latest = latestResearchByPhase.get(phase);
+                  let state: 'pending' | 'active' | 'done' = 'pending';
+                  if (index < latestResearchPhaseIndex) state = 'done';
+                  if (index === latestResearchPhaseIndex) state = researchCompleted ? 'done' : 'active';
+                  if (!isStreaming && researchCompleted && index <= latestResearchPhaseIndex) state = 'done';
+
+                  return (
+                    <li key={phase} className={`research-step ${state}`}>
+                      <span className="research-step-marker" />
+                      <div className="research-step-content">
+                        <div className="research-step-row">
+                          <span className="research-step-title">{researchPhaseLabels[phase]}</span>
+                          {latest?.pass && latest.totalPasses ? (
+                            <span className="research-step-pass">
+                              {latest.pass}/{latest.totalPasses}
+                            </span>
+                          ) : null}
+                        </div>
+                        <p className="research-step-message">{latest?.message ?? researchPhaseDefaults[phase]}</p>
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
           </section>
         )}
 

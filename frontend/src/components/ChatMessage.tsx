@@ -137,9 +137,11 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   const showStreamingIndicator = isStreaming && isAssistant && !message.content;
   const [traceExpanded, setTraceExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const showThinkingTrace = isAssistant && !!thinkingTrace && thinkingTrace.steps.length > 0;
   const tracePanelID = `${message.id}-thinking-trace`;
   const reasoningPanelID = `${message.id}-reasoning`;
+  const sourcesPanelID = `${message.id}-sources`;
   
   // Show reasoning panel if there's reasoning content (either persisted or streaming)
   const hasReasoningContent = isAssistant && !!message.reasoningContent && message.reasoningContent.length > 0;
@@ -149,6 +151,7 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   useEffect(() => {
     setTraceExpanded(false);
     setReasoningExpanded(false);
+    setSourcesExpanded(false);
   }, [message.id]);
 
   // Auto-expand reasoning panel during streaming when reasoning arrives but content hasn't started
@@ -309,21 +312,71 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
         </div>
 
         {message.citations.length > 0 && (
-          <ol className="citations">
-            {message.citations.map((citation, index) => (
-              <li key={`${message.id}-cit-${index}`} className="citation-item">
-                <a
-                  href={citation.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="citation-link"
+          <div className="grounding-sources">
+            <button
+              type="button"
+              className="grounding-sources-toggle"
+              onClick={() => setSourcesExpanded((open) => !open)}
+              aria-expanded={sourcesExpanded}
+              aria-controls={sourcesPanelID}
+            >
+              <span className="grounding-sources-heading">
+                <svg
+                  className="grounding-sources-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
                 >
-                  <span className="citation-number">{index + 1}</span>
-                  {citationLabel(citation, index)}
-                </a>
-              </li>
-            ))}
-          </ol>
+                  <circle cx="12" cy="12" r="10" />
+                  <path d="M2 12h20" />
+                  <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
+                </svg>
+                <span className="grounding-sources-title">Sources</span>
+                {!sourcesExpanded && (
+                  <span className="grounding-sources-count">
+                    {message.citations.length} {message.citations.length === 1 ? 'source' : 'sources'}
+                  </span>
+                )}
+              </span>
+              <svg
+                className={`grounding-sources-chevron ${sourcesExpanded ? 'open' : ''}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+
+            <div
+              id={sourcesPanelID}
+              className={`grounding-sources-content ${sourcesExpanded ? 'expanded' : 'collapsed'}`}
+            >
+              <ol className="grounding-sources-list">
+                {message.citations.map((citation, index) => (
+                  <li key={`${message.id}-cit-${index}`} className="citation-item">
+                    <a
+                      href={citation.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="citation-link"
+                    >
+                      <span className="citation-number">{index + 1}</span>
+                      {citationLabel(citation, index)}
+                    </a>
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
         )}
       </div>
     </div>

@@ -229,12 +229,19 @@ describe('Deep research streaming UX', () => {
       expect(streamMessageMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(await screen.findByTestId('research-timeline')).toBeInTheDocument();
+    // Panel is visible and collapsed by default — shows only the active step
+    const panel = await screen.findByTestId('research-timeline');
+    expect(panel).toBeInTheDocument();
+    expect(screen.getByText('Finalizing')).toBeInTheDocument();
+    expect(screen.getByText('Complete')).toBeInTheDocument();
+
+    // Expand the panel to see all phases
+    await user.click(screen.getByRole('button', { name: /research activity/i }));
+
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByText('Searching')).toBeInTheDocument();
     expect(screen.getByText('Synthesizing')).toBeInTheDocument();
     expect(screen.getByText('Finalizing')).toBeInTheDocument();
-    expect(screen.getByText('Complete')).toBeInTheDocument();
   });
 
   it('ignores progress rendering for non-deep-research sends', async () => {
