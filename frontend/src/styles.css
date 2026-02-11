@@ -178,9 +178,8 @@ code {
 
 .app-layout {
   display: flex;
-  height: calc(100dvh - var(--keyboard-offset, 0px));
+  height: var(--app-height, 100dvh);
   overflow: hidden;
-  transition: height 0.1s ease-out;
 }
 
 /* ─── Sidebar ────────────────────────────────── */
@@ -2232,9 +2231,8 @@ code {
 }
 
 /* ─── Virtual Keyboard Adjustments ───────────── */
-/* When the keyboard is open, --keyboard-offset > 0px and [data-keyboard-open]
-   is set on <html>.  Tighten spacing so the composer and visible messages
-   get as much room as possible above the on-screen keyboard. */
+/* When the keyboard is open ([data-keyboard-open]), tighten composer spacing
+   to maximize visible message space on small screens. */
 
 @media (max-width: 768px) {
   html[data-keyboard-open] .composer-wrapper {
@@ -2243,17 +2241,5 @@ code {
 
   html[data-keyboard-open] .composer-textarea {
     max-height: 100px;
-  }
-
-  html[data-composer-focused] .header {
-    display: none;
-  }
-
-  html[data-composer-focused] .model-info-bar {
-    display: none;
-  }
-
-  html[data-composer-focused] .research-panel {
-    display: none;
   }
 }

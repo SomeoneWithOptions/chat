@@ -1,43 +1,46 @@
 import { useEffect } from 'react';
 
 /**
- * Detects when the mobile virtual keyboard opens/closes and sets a CSS custom
- * property `--keyboard-offset` on <html> equal to the pixel height consumed by
- * the keyboard.  The app layout can then subtract that offset so the composer
- * stays visible above the keyboard.
+ * Keeps CSS vars in sync with the visible viewport on touch devices:
+ * - `--app-height`: pixel height currently visible to the user.
+ * - `--keyboard-offset`: estimated keyboard height when an editable is focused.
  *
- * Strategy
- * --------
- * 1. **Primary – `visualViewport` API** (Safari 13+, Chrome Android 62+):
- *    Listen for `resize` events on `window.visualViewport`. When the visual
- *    viewport shrinks below the layout viewport, the difference is the keyboard
- *    height.
- *
- * 2. **Fallback – `resize` + `focusin`/`focusout`** (older browsers):
- *    On `focusin` of an editable element, record `window.innerHeight`. On
- *    subsequent `resize` events, compare the new innerHeight to decide if a
- *    keyboard appeared.
- *
- * Both paths write to the same CSS variable so the rest of the app is agnostic
- * to the detection method.
+ * This avoids brittle UI hiding rules and keeps the composer visible without
+ * unmounting header controls.
  */
 export default function useVirtualKeyboard() {
   useEffect(() => {
     const root = document.documentElement;
+    const KEYBOARD_THRESHOLD_PX = 120;
+    let isEditableFocused = false;
+    let baselineVisibleHeight = 0;
+    let blurTimeout: number | null = null;
 
-    // Only run on touch devices to avoid false positives on desktop resize
     function isTouchDevice(): boolean {
       return 'ontouchstart' in window || navigator.maxTouchPoints > 0;
     }
 
     if (!isTouchDevice()) return;
 
-    function setOffset(px: number) {
-      // Round to avoid sub-pixel jitter; clamp to 0
+    function isEditableElement(node: EventTarget | Element | null): node is HTMLElement {
+      if (!(node instanceof HTMLElement)) return false;
+      return node.tagName === 'TEXTAREA' || node.tagName === 'INPUT' || node.isContentEditable;
+    }
+
+    function getVisibleViewportHeight(): number {
+      if (!window.visualViewport) return window.innerHeight;
+      const vv = window.visualViewport;
+      return vv.height + vv.offsetTop;
+    }
+
+    function setAppHeight(px: number) {
+      const value = Math.max(0, Math.round(px));
+      root.style.setProperty('--app-height', `${value}px`);
+    }
+
+    function setKeyboardOffset(px: number) {
       const value = Math.max(0, Math.round(px));
       root.style.setProperty('--keyboard-offset', `${value}px`);
-
-      // Toggle a data attribute so CSS can style keyboard-open state
       if (value > 0) {
         root.setAttribute('data-keyboard-open', '');
       } else {
@@ -45,84 +48,72 @@ export default function useVirtualKeyboard() {
       }
     }
 
-    // ── Primary: visualViewport API ────────────────────────────────
-    if (window.visualViewport) {
-      const vv = window.visualViewport;
+    function syncViewport() {
+      const visibleHeight = getVisibleViewportHeight();
+      setAppHeight(visibleHeight);
 
-      // We use window.innerHeight (layout viewport height) as the baseline.
-      // When the keyboard opens, vv.height shrinks while innerHeight stays
-      // the same, so the delta gives us the keyboard height.
-      //
-      // We also account for vv.offsetTop which shifts on iOS when the
-      // address bar collapses/expands.
-      function onViewportResize() {
-        // On iOS Safari, window.innerHeight may or may not update depending
-        // on the interactive-widget viewport meta. Using the initial full
-        // height captured once is more reliable.
-        const offset = window.innerHeight - vv.height;
-        setOffset(offset);
+      if (!isEditableFocused) {
+        baselineVisibleHeight = visibleHeight;
+        setKeyboardOffset(0);
+        return;
       }
 
-      vv.addEventListener('resize', onViewportResize);
-
-      // Also listen for scroll — iOS shifts the viewport when the URL bar
-      // shows/hides, which fires scroll but not always resize.
-      vv.addEventListener('scroll', onViewportResize);
-
-      return () => {
-        vv.removeEventListener('resize', onViewportResize);
-        vv.removeEventListener('scroll', onViewportResize);
-        setOffset(0);
-        root.removeAttribute('data-keyboard-open');
-      };
+      const keyboardDelta = baselineVisibleHeight - visibleHeight;
+      setKeyboardOffset(keyboardDelta > KEYBOARD_THRESHOLD_PX ? keyboardDelta : 0);
     }
 
-    // ── Fallback: resize + focus tracking ──────────────────────────
-    let baseHeight = window.innerHeight;
-    let inputFocused = false;
+    function handleFocusIn(event: FocusEvent) {
+      if (!isEditableElement(event.target)) return;
+      isEditableFocused = true;
+      baselineVisibleHeight = getVisibleViewportHeight();
+      syncViewport();
+    }
 
-    function onFocusIn(e: FocusEvent) {
-      const target = e.target as HTMLElement | null;
-      if (
-        target &&
-        (target.tagName === 'TEXTAREA' ||
-          target.tagName === 'INPUT' ||
-          target.isContentEditable)
-      ) {
-        inputFocused = true;
-        baseHeight = window.innerHeight;
+    function handleFocusOut() {
+      isEditableFocused = false;
+      if (blurTimeout !== null) {
+        window.clearTimeout(blurTimeout);
+        blurTimeout = null;
       }
+      blurTimeout = window.setTimeout(() => {
+        if (!isEditableElement(document.activeElement)) {
+          syncViewport();
+        }
+      }, 80);
     }
 
-    function onFocusOut() {
-      inputFocused = false;
-      // Small delay to allow keyboard to fully dismiss
-      setTimeout(() => {
-        if (!inputFocused) setOffset(0);
-      }, 100);
+    function handleViewportChange() {
+      syncViewport();
     }
 
-    function onResize() {
-      if (!inputFocused) return;
-      const diff = baseHeight - window.innerHeight;
-      // Only treat it as a keyboard if the difference is significant
-      // (more than 150px — keyboards are at least ~250px tall)
-      if (diff > 150) {
-        setOffset(diff);
-      } else {
-        setOffset(0);
-      }
-    }
+    isEditableFocused = isEditableElement(document.activeElement);
+    baselineVisibleHeight = getVisibleViewportHeight();
+    syncViewport();
 
-    document.addEventListener('focusin', onFocusIn);
-    document.addEventListener('focusout', onFocusOut);
-    window.addEventListener('resize', onResize);
+    document.addEventListener('focusin', handleFocusIn);
+    document.addEventListener('focusout', handleFocusOut);
+    window.addEventListener('resize', handleViewportChange);
+
+    const vv = window.visualViewport;
+    if (vv) {
+      vv.addEventListener('resize', handleViewportChange);
+      vv.addEventListener('scroll', handleViewportChange);
+    }
 
     return () => {
-      document.removeEventListener('focusin', onFocusIn);
-      document.removeEventListener('focusout', onFocusOut);
-      window.removeEventListener('resize', onResize);
-      setOffset(0);
+      document.removeEventListener('focusin', handleFocusIn);
+      document.removeEventListener('focusout', handleFocusOut);
+      window.removeEventListener('resize', handleViewportChange);
+      if (vv) {
+        vv.removeEventListener('resize', handleViewportChange);
+        vv.removeEventListener('scroll', handleViewportChange);
+      }
+      if (blurTimeout !== null) {
+        window.clearTimeout(blurTimeout);
+      }
+
+      root.style.removeProperty('--app-height');
+      root.style.removeProperty('--keyboard-offset');
       root.removeAttribute('data-keyboard-open');
     };
   }, []);

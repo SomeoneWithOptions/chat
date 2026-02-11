@@ -74,8 +74,6 @@ export default function Composer({
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
           onKeyDown={handleKeyDown}
-          onFocus={() => document.documentElement.setAttribute('data-composer-focused', '')}
-          onBlur={() => document.documentElement.removeAttribute('data-composer-focused')}
           placeholder="Ask anything..."
           rows={2}
         />
