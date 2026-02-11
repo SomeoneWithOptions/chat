@@ -24,6 +24,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 - Package manager/runtime: Bun.
 - Backend: Go 1.22+.
 - Database: Turso (LibSQL/SQLite).
+- Database name: `chat` (production). We use the production database for local development.
 - Local DB operations: Use `turso` CLI (already authenticated on this machine).
 - GCP operations: Use the local `gcloud` CLI (already authenticated) to look up information, create resources, and manage deployments on GCP infrastructure.
 - LLM gateway: OpenRouter.
