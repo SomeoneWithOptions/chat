@@ -29,6 +29,7 @@ import Toggle from './components/Toggle';
 import ModelSelector from './components/ModelSelector';
 import ChatMessage, { type MessageData, type ThinkingTrace } from './components/ChatMessage';
 import Composer from './components/Composer';
+import useVirtualKeyboard from './hooks/useVirtualKeyboard';
 
 function formatPrice(micros: number): string {
   if (micros <= 0) return 'Free';
@@ -184,6 +185,9 @@ export default function App() {
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
+
+  // ─── Virtual keyboard handling (mobile) ─────
+  useVirtualKeyboard();
 
   // ─── Helpers ──────────────────────────────────
 

@@ -6,18 +6,15 @@
 - Bun 1.0+
 - Turso CLI (`turso`) authenticated with an account that can create DBs
 
-## 1) Create and migrate Turso database
+## 1) Turso database connection
 
-```bash
-./scripts/turso_create_db.sh chat-dev
-./scripts/turso_apply_migrations.sh chat-dev
-```
+We use the production database for local development.
 
 Get connection values:
 
 ```bash
-turso db show chat-dev --url
-turso db tokens create chat-dev
+turso db show chat --url
+turso db tokens create chat
 ```
 
 ## 2) Configure backend

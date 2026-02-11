@@ -3,12 +3,12 @@ package db
 import "testing"
 
 func TestBuildDSNForLibsqlAddsToken(t *testing.T) {
-	dsn, err := buildDSN("libsql://chat-dev.example.turso.io", "abc123")
+	dsn, err := buildDSN("libsql://chat.example.turso.io", "abc123")
 	if err != nil {
 		t.Fatalf("build dsn: %v", err)
 	}
 
-	if dsn != "libsql://chat-dev.example.turso.io?authToken=abc123" {
+	if dsn != "libsql://chat.example.turso.io?authToken=abc123" {
 		t.Fatalf("unexpected dsn: %s", dsn)
 	}
 }

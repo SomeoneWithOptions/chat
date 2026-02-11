@@ -12,19 +12,9 @@ Database schema and migration scripts for Turso (LibSQL).
 
 ## Turso CLI usage
 
-Create a DB (once):
+We use a single production database (`chat`). Migrations are applied to production.
 
-```bash
-./scripts/turso_create_db.sh chat-dev
-```
+Get backend env values:
 
-Apply migrations:
-
-```bash
-./scripts/turso_apply_migrations.sh chat-dev
-```
-
-Then set backend env values:
-
-- `TURSO_DATABASE_URL` from `turso db show chat-dev --url`
-- `TURSO_AUTH_TOKEN` from `turso db tokens create chat-dev`
+- `TURSO_DATABASE_URL` from `turso db show chat --url`
+- `TURSO_AUTH_TOKEN` from `turso db tokens create chat`
