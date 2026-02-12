@@ -1796,25 +1796,69 @@ code {
   gap: 20px;
 }
 
-.google-signin-host {
-  min-height: 44px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+.google-auth-wrapper {
+  position: relative;
+  width: 100%;
+  height: 48px;
   opacity: 0;
   animation: slideUp 400ms var(--ease-out) 300ms forwards;
 }
 
-.google-signin-host > div {
+.google-btn-visual {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
+  height: 100%;
   display: flex;
+  align-items: center;
   justify-content: center;
+  gap: 12px;
+  background: #1A1A1A; /* Slightly lighter than surface */
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  transition: all 0.2s ease;
+  z-index: 1;
+  font-family: var(--font-body);
+  font-weight: 500;
+  color: var(--text-primary);
+  font-size: 15px;
+  cursor: pointer;
 }
 
-/* Neutralise the white background Google's iframe injects */
-.google-signin-host iframe {
+.google-auth-wrapper:hover .google-btn-visual {
+  background: #222;
+  border-color: var(--border-focus);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.google-btn-visual svg {
+  display: block;
+}
+
+.google-signin-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.0001;
+  z-index: 10;
+  overflow: hidden;
+  border-radius: var(--radius-pill);
+}
+
+/* Force the Google button to fill the container */
+.google-signin-overlay > div {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.google-signin-overlay iframe {
+  width: 100% !important;
+  height: 100% !important;
   border-radius: var(--radius-pill) !important;
-  color-scheme: dark !important;
 }
 
 .google-signin-section > .auth-note {
