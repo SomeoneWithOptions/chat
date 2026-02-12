@@ -10,4 +10,7 @@ if [[ ! -d node_modules ]]; then
   bun install
 fi
 
+# Disable Google Sign-In to enable the Dev Login form
+export VITE_GOOGLE_CLIENT_ID=""
+
 bun run dev

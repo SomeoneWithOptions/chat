@@ -139,6 +139,16 @@ func (h Handler) AuthGoogle(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "invalid_google_token", err.Error())
 		return
 	}
+
+	// In dev mode, if the user exists by email, use their real Google Subject
+	// to avoid unique constraint violations on the email column.
+	if h.cfg.InsecureSkipGoogleVerify {
+		existing, err := h.sessions.GetUserByEmail(r.Context(), identity.Email)
+		if err == nil {
+			identity.GoogleSubject = existing.GoogleSub
+		}
+	}
+
 	if _, ok := h.cfg.AllowedGoogleEmails[strings.ToLower(identity.Email)]; !ok {
 		writeError(w, http.StatusForbidden, "email_not_allowlisted", "email is not allowed")
 		return

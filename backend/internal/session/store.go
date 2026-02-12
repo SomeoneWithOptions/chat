@@ -107,6 +107,32 @@ LIMIT 1;
 	return out, nil
 }
 
+func (s Store) GetUserByEmail(ctx context.Context, email string) (User, error) {
+	query := `
+SELECT id, google_sub, email, COALESCE(display_name, ''), COALESCE(avatar_url, ''), created_at, updated_at
+FROM users
+WHERE email = ?
+LIMIT 1;
+`
+	var out User
+	err := s.db.QueryRowContext(ctx, query, strings.ToLower(email)).Scan(
+		&out.ID,
+		&out.GoogleSub,
+		&out.Email,
+		&out.Name,
+		&out.AvatarURL,
+		&out.CreatedAt,
+		&out.UpdatedAt,
+	)
+	if errors.Is(err, sql.ErrNoRows) {
+		return User{}, ErrNotFound
+	}
+	if err != nil {
+		return User{}, fmt.Errorf("get user by email: %w", err)
+	}
+	return out, nil
+}
+
 func (s Store) DeleteSession(ctx context.Context, rawToken string) error {
 	if strings.TrimSpace(rawToken) == "" {
 		return nil
