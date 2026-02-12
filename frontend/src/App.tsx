@@ -1003,9 +1003,6 @@ export default function App() {
                 <div ref={googleButtonContainerRef} className="google-signin-overlay" />
               </div>
               {signingInWithGoogle && <div className="auth-inline-status">Signing in...</div>}
-              <div className="auth-note">
-                Access is restricted to allowlisted Google accounts.
-              </div>
             </div>
           ) : (
             <>
