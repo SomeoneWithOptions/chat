@@ -1756,8 +1756,8 @@ code {
 
 .auth-card {
   width: 100%;
-  max-width: 400px;
-  padding: 40px;
+  max-width: 420px;
+  padding: 48px 44px;
   background: var(--bg-surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
@@ -1781,7 +1781,7 @@ code {
 .auth-subtitle {
   font-size: 14px;
   color: var(--text-tertiary);
-  margin-bottom: 32px;
+  margin-bottom: 36px;
 }
 
 .auth-form {
@@ -1793,24 +1793,38 @@ code {
 .google-signin-section {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: 20px;
 }
 
 .google-signin-host {
-  min-height: 64px;
-  padding: 10px;
-  border-radius: 12px;
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  background: linear-gradient(155deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.012) 100%);
+  min-height: 44px;
   display: flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
+  animation: slideUp 400ms var(--ease-out) 300ms forwards;
 }
 
 .google-signin-host > div {
   width: 100%;
   display: flex;
   justify-content: center;
+}
+
+/* Neutralise the white background Google's iframe injects */
+.google-signin-host iframe {
+  border-radius: var(--radius-pill) !important;
+  color-scheme: dark !important;
+}
+
+.google-signin-section > .auth-note {
+  opacity: 0;
+  animation: fadeIn 500ms var(--ease-out) 550ms forwards;
+}
+
+.google-signin-section > .auth-inline-status {
+  opacity: 0;
+  animation: fadeIn 300ms var(--ease-out) 200ms forwards;
 }
 
 .auth-inline-status {
@@ -1873,13 +1887,15 @@ code {
 }
 
 .auth-note {
-  margin-top: 20px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.02);
-  border-radius: var(--radius-md);
-  font-size: 12px;
+  margin-top: 4px;
+  padding: 0;
+  background: none;
+  border-radius: 0;
+  font-size: 11px;
   color: var(--text-tertiary);
   line-height: 1.5;
+  text-align: center;
+  opacity: 0.7;
 }
 
 .auth-note code {
