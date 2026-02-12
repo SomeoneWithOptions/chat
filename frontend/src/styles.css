@@ -1793,11 +1793,24 @@ code {
 .google-signin-section {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 
 .google-signin-host {
-  min-height: 44px;
+  min-height: 64px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.035) 0%, rgba(255, 255, 255, 0.012) 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.google-signin-host > div {
+  width: 100%;
+  display: flex;
+  justify-content: center;
 }
 
 .auth-inline-status {

@@ -336,13 +336,14 @@ export default function App() {
         });
 
         container.replaceChildren();
+        const buttonWidth = Math.max(200, Math.min(320, Math.floor(container.clientWidth - 20)));
         google.accounts.id.renderButton(container, {
-          theme: 'outline',
+          theme: 'filled_black',
           size: 'large',
           text: 'continue_with',
           shape: 'pill',
           logo_alignment: 'left',
-          width: '320',
+          width: `${buttonWidth}`,
         });
       } catch (err) {
         if (!cancelled) {
