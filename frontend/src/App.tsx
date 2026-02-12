@@ -31,6 +31,79 @@ import ChatMessage, { type MessageData, type ThinkingTrace } from './components/
 import Composer from './components/Composer';
 import useVirtualKeyboard from './hooks/useVirtualKeyboard';
 
+const googleIdentityScriptSrc = 'https://accounts.google.com/gsi/client';
+
+type GoogleCredentialResponse = {
+  credential?: string;
+};
+
+type GoogleIdentityServices = {
+  accounts: {
+    id: {
+      initialize: (config: {
+        client_id: string;
+        callback: (response: GoogleCredentialResponse) => void;
+      }) => void;
+      renderButton: (
+        parent: HTMLElement,
+        options: {
+          theme?: 'outline' | 'filled_blue' | 'filled_black';
+          size?: 'large' | 'medium' | 'small';
+          text?: 'signin_with' | 'signup_with' | 'continue_with' | 'signin';
+          shape?: 'rectangular' | 'pill' | 'circle' | 'square';
+          logo_alignment?: 'left' | 'center';
+          width?: string;
+        },
+      ) => void;
+    };
+  };
+};
+
+let googleIdentityScriptLoadPromise: Promise<void> | null = null;
+
+function readGoogleIdentityServices(): GoogleIdentityServices | null {
+  const googleValue = (window as Window & { google?: unknown }).google;
+  if (!googleValue || typeof googleValue !== 'object') return null;
+
+  const google = googleValue as Partial<GoogleIdentityServices>;
+  if (!google.accounts?.id) return null;
+  return google as GoogleIdentityServices;
+}
+
+function loadGoogleIdentityScript(): Promise<void> {
+  if (readGoogleIdentityServices()) {
+    return Promise.resolve();
+  }
+
+  if (googleIdentityScriptLoadPromise) {
+    return googleIdentityScriptLoadPromise;
+  }
+
+  googleIdentityScriptLoadPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(`script[src="${googleIdentityScriptSrc}"]`);
+    if (existing) {
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity script')), { once: true });
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = googleIdentityScriptSrc;
+    script.async = true;
+    script.defer = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error('Failed to load Google Identity script'));
+    document.head.appendChild(script);
+  });
+
+  googleIdentityScriptLoadPromise = googleIdentityScriptLoadPromise.catch((err) => {
+    googleIdentityScriptLoadPromise = null;
+    throw err;
+  });
+
+  return googleIdentityScriptLoadPromise;
+}
+
 function formatPrice(micros: number): string {
   if (micros <= 0) return 'Free';
   const dollars = micros / 1_000_000;
@@ -134,10 +207,14 @@ function buildInitialThinkingTrace(options: { grounding: boolean; deepResearch: 
 
 export default function App() {
   // ─── Auth State ───────────────────────────────
+  const googleClientID = (import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '').trim();
+  const googleSignInEnabled = googleClientID !== '';
   const [user, setUser] = useState<User | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
+  const [signingInWithGoogle, setSigningInWithGoogle] = useState(false);
   const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
   const [devSub, setDevSub] = useState('dev-user-1');
+  const googleButtonContainerRef = useRef<HTMLDivElement | null>(null);
 
   // ─── Model State ──────────────────────────────
   const [models, setModels] = useState<Model[]>([]);
@@ -217,6 +294,67 @@ export default function App() {
       }
     })();
   }, []);
+
+  const authenticateWithGoogleToken = useCallback(async (idToken: string) => {
+    setSigningInWithGoogle(true);
+    setError(null);
+    try {
+      const authenticatedUser = await authWithGoogle(idToken);
+      setUser(authenticatedUser);
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setSigningInWithGoogle(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!googleSignInEnabled || loadingAuth || user) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        await loadGoogleIdentityScript();
+        if (cancelled) return;
+
+        const google = readGoogleIdentityServices();
+        const container = googleButtonContainerRef.current;
+        if (!google || !container) {
+          throw new Error('Google Identity Services is unavailable');
+        }
+
+        google.accounts.id.initialize({
+          client_id: googleClientID,
+          callback: (response) => {
+            const credential = response.credential?.trim();
+            if (!credential) {
+              setError('Google sign-in did not return a credential.');
+              return;
+            }
+            void authenticateWithGoogleToken(credential);
+          },
+        });
+
+        container.replaceChildren();
+        google.accounts.id.renderButton(container, {
+          theme: 'outline',
+          size: 'large',
+          text: 'continue_with',
+          shape: 'pill',
+          logo_alignment: 'left',
+          width: '320',
+        });
+      } catch (err) {
+        if (!cancelled) {
+          setError((err as Error).message);
+        }
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticateWithGoogleToken, googleClientID, googleSignInEnabled, loadingAuth, user]);
 
   // ─── Model Effects ────────────────────────────
 
@@ -845,37 +983,49 @@ export default function App() {
           </h1>
           <p className="auth-subtitle">Sign in to continue</p>
 
-          <form onSubmit={handleDevLogin} className="auth-form">
-            <div className="form-field">
-              <label className="form-label" htmlFor="dev-email">Email</label>
-              <input
-                id="dev-email"
-                className="form-input"
-                value={devEmail}
-                onChange={(e) => setDevEmail(e.target.value)}
-                type="email"
-                required
-              />
+          {googleSignInEnabled ? (
+            <div className="google-signin-section">
+              <div ref={googleButtonContainerRef} className="google-signin-host" />
+              {signingInWithGoogle && <div className="auth-inline-status">Signing in...</div>}
+              <div className="auth-note">
+                Access is restricted to allowlisted Google accounts.
+              </div>
             </div>
-            <div className="form-field">
-              <label className="form-label" htmlFor="dev-sub">Google Subject</label>
-              <input
-                id="dev-sub"
-                className="form-input"
-                value={devSub}
-                onChange={(e) => setDevSub(e.target.value)}
-                required
-              />
-            </div>
-            <button type="submit" className="btn-primary">
-              Sign In
-            </button>
-          </form>
+          ) : (
+            <>
+              <form onSubmit={handleDevLogin} className="auth-form">
+                <div className="form-field">
+                  <label className="form-label" htmlFor="dev-email">Email</label>
+                  <input
+                    id="dev-email"
+                    className="form-input"
+                    value={devEmail}
+                    onChange={(e) => setDevEmail(e.target.value)}
+                    type="email"
+                    required
+                  />
+                </div>
+                <div className="form-field">
+                  <label className="form-label" htmlFor="dev-sub">Google Subject</label>
+                  <input
+                    id="dev-sub"
+                    className="form-input"
+                    value={devSub}
+                    onChange={(e) => setDevSub(e.target.value)}
+                    required
+                  />
+                </div>
+                <button type="submit" className="btn-primary">
+                  Sign In
+                </button>
+              </form>
 
-          <div className="auth-note">
-            Production uses Google Identity Services. For local dev, enable{' '}
-            <code>AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true</code> on the backend.
-          </div>
+              <div className="auth-note">
+                Production uses Google Identity Services. For local dev, enable{' '}
+                <code>AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true</code> on the backend.
+              </div>
+            </>
+          )}
 
           {error && <div className="auth-error">{error}</div>}
         </div>

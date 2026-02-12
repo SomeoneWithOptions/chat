@@ -12,7 +12,7 @@ import (
 const (
 	defaultPort                = "8080"
 	defaultSessionCookieName   = "chat_session"
-	defaultSessionTTLHours     = 168
+	defaultSessionTTLHours     = 720
 	defaultDefaultModel        = "openrouter/free"
 	defaultChatReasoningEffort = "medium"
 	defaultDeepReasoningEffort = "high"

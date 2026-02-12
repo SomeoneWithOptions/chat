@@ -59,5 +59,5 @@
 - Logs and metrics are sufficient to debug production incidents
 - Basic abuse and input protections are in place before launch
 - Delete-one/delete-all operations remove DB rows and cleanup GCS attachments when applicable
-- Final rollout gate: authenticated access control is enforced across all API routes, including 7-day session expiry verification
+- Final rollout gate: authenticated access control is enforced across all API routes, including 30-day session expiry verification
 - Reasoning-effort controls are reliable under unsupported-model, malformed-effort, and provider-error scenarios

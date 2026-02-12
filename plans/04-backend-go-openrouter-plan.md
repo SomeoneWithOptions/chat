@@ -39,7 +39,7 @@
   - `acastesol@gmail.com`
   - `obzen.black@gmail.com`
 - Create/update local `users` row and issue secure HTTP-only session cookie.
-- Session TTL: 7 days (168 hours).
+- Session TTL: 30 days (720 hours).
 - Apply auth middleware to all non-auth routes in the final rollout phase.
 
 ## OpenRouter Integration

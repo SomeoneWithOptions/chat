@@ -63,7 +63,7 @@ For temporary anonymous testing, set:
 
 ## Notes
 
-- Session cookie defaults to 7 days (`SESSION_TTL_HOURS=168`).
+- Session cookie defaults to 30 days (`SESSION_TTL_HOURS=720`).
 - Email allowlist is env-configurable (`ALLOWED_GOOGLE_EMAILS`).
 - Cookie is HTTP-only and same-site constrained; set `COOKIE_SECURE=true` outside local HTTP.
 - `GET /v1/models` returns cached models from the local `models` table (no provider sync in request path).

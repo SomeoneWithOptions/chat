@@ -20,7 +20,7 @@ Implementation timing note:
 2. Frontend sends token to backend `POST /v1/auth/google`.
 3. Backend verifies token signature and claims.
 4. Backend enforces email allowlist (initially `acastesol@gmail.com` and `obzen.black@gmail.com`).
-5. Backend issues HTTP-only secure session cookie (7-day session).
+5. Backend issues HTTP-only secure session cookie (30-day session).
 6. All `/v1/*` application routes require valid session.
 
 ## Data Flow (Standard Chat)

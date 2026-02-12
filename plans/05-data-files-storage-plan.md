@@ -20,7 +20,7 @@
 - `created_at` (datetime)
 - `revoked_at` (datetime nullable)
 
-Session policy: 7-day TTL.
+Session policy: 30-day TTL.
 
 ### `conversations`
 

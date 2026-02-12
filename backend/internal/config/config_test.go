@@ -19,8 +19,8 @@ func TestLoadDefaults(t *testing.T) {
 		t.Fatalf("load config: %v", err)
 	}
 
-	if cfg.SessionTTL.Hours() != 168 {
-		t.Fatalf("expected default 168h session ttl, got %v", cfg.SessionTTL)
+	if cfg.SessionTTL.Hours() != 720 {
+		t.Fatalf("expected default 720h session ttl, got %v", cfg.SessionTTL)
 	}
 
 	if _, ok := cfg.AllowedGoogleEmails["acastesol@gmail.com"]; !ok {

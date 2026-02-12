@@ -34,6 +34,7 @@ Set at minimum:
 - `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `150`; applies to deep-research requests only)
 - `DEFAULT_CHAT_REASONING_EFFORT` (optional, default `medium`)
 - `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional, default `high`)
+- `SESSION_TTL_HOURS` (optional, default `720` for 30-day reauthentication)
 
 Auth sequencing:
 
@@ -53,6 +54,15 @@ For local dev-only login flow:
 ./scripts/dev_backend.sh
 ./scripts/dev_frontend.sh
 ```
+
+Frontend env setup:
+
+```bash
+cp frontend/.env.example frontend/.env
+```
+
+- Set `VITE_API_BASE_URL=http://localhost:8080`
+- Set `VITE_GOOGLE_CLIENT_ID=<google-client-id>` when testing real Google sign-in
 
 - Backend default: `http://localhost:8080`
 - Frontend default: `http://localhost:5173`

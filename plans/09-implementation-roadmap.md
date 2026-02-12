@@ -108,7 +108,7 @@ Exit criteria:
 ## Phase 8: Authentication Final Rollout (Last)
 
 1. Configure Google OAuth app + email allowlist (`acastesol@gmail.com`, `obzen.black@gmail.com`)
-2. Configure and enforce 7-day session TTL
+2. Configure and enforce 30-day session TTL
 3. Enable backend auth middleware and auth endpoints in production (`AUTH_REQUIRED=true`)
 4. Enable frontend auth gate and sign-in bootstrap for production
 5. Run auth-specific integration tests and production smoke checks

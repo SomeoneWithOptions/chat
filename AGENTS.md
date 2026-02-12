@@ -39,7 +39,7 @@ Implementation guidance for this repository. Keep this file stable and high-sign
 - Initial allowlist:
   - `acastesol@gmail.com`
   - `obzen.black@gmail.com`
-- Session TTL: 7 days.
+- Session TTL: 30 days.
 - Grounding defaults to ON for every message.
 - Deep research timeout target: 150 seconds.
 - Deep research model is user-selectable.
