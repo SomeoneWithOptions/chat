@@ -36,6 +36,14 @@ type Model struct {
 	SupportsReasoning        bool
 }
 
+type Usage struct {
+	PromptTokens     int  `json:"promptTokens"`
+	CompletionTokens int  `json:"completionTokens"`
+	TotalTokens      int  `json:"totalTokens"`
+	ReasoningTokens  *int `json:"reasoningTokens,omitempty"`
+	CostMicrosUSD    *int `json:"costMicrosUsd,omitempty"`
+}
+
 type ReasoningConfig struct {
 	Effort string `json:"effort,omitempty"`
 }
@@ -47,15 +55,32 @@ type StreamRequest struct {
 }
 
 type streamAPIRequest struct {
-	Model     string           `json:"model"`
-	Messages  []Message        `json:"messages"`
-	Reasoning *ReasoningConfig `json:"reasoning,omitempty"`
-	Stream    bool             `json:"stream"`
+	Model         string           `json:"model"`
+	Messages      []Message        `json:"messages"`
+	Reasoning     *ReasoningConfig `json:"reasoning,omitempty"`
+	Stream        bool             `json:"stream"`
+	StreamOptions *streamOptions   `json:"stream_options,omitempty"`
+}
+
+type streamOptions struct {
+	IncludeUsage bool `json:"include_usage"`
 }
 
 type reasoningDetail struct {
 	Type string `json:"type"`
 	Text string `json:"text"`
+}
+
+type completionTokensDetails struct {
+	ReasoningTokens int `json:"reasoning_tokens"`
+}
+
+type streamAPIUsage struct {
+	PromptTokens            int                      `json:"prompt_tokens"`
+	CompletionTokens        int                      `json:"completion_tokens"`
+	TotalTokens             int                      `json:"total_tokens"`
+	CompletionTokensDetails *completionTokensDetails `json:"completion_tokens_details"`
+	Cost                    json.RawMessage          `json:"cost"`
 }
 
 type streamAPIResponse struct {
@@ -65,6 +90,7 @@ type streamAPIResponse struct {
 			ReasoningDetails []reasoningDetail `json:"reasoning_details"`
 		} `json:"delta"`
 	} `json:"choices"`
+	Usage *streamAPIUsage `json:"usage,omitempty"`
 	Error *struct {
 		Message string `json:"message"`
 	} `json:"error,omitempty"`
@@ -120,6 +146,7 @@ func (c Client) StreamChatCompletion(
 	onStart func() error,
 	onDelta func(string) error,
 	onReasoning func(string) error,
+	onUsage func(Usage) error,
 ) error {
 	if strings.TrimSpace(c.apiKey) == "" {
 		return ErrMissingAPIKey
@@ -144,6 +171,9 @@ func (c Client) StreamChatCompletion(
 		Messages:  req.Messages,
 		Reasoning: reasoning,
 		Stream:    true,
+		StreamOptions: &streamOptions{
+			IncludeUsage: true,
+		},
 	})
 	if err != nil {
 		return fmt.Errorf("marshal openrouter request: %w", err)
@@ -195,6 +225,22 @@ func (c Client) StreamChatCompletion(
 			continue
 		}
 
+		if parsed.Usage != nil && onUsage != nil {
+			usage := Usage{
+				PromptTokens:     parsed.Usage.PromptTokens,
+				CompletionTokens: parsed.Usage.CompletionTokens,
+				TotalTokens:      parsed.Usage.TotalTokens,
+				CostMicrosUSD:    parseOptionalPriceMicros(parsed.Usage.Cost),
+			}
+			if parsed.Usage.CompletionTokensDetails != nil {
+				reasoningTokens := parsed.Usage.CompletionTokensDetails.ReasoningTokens
+				usage.ReasoningTokens = &reasoningTokens
+			}
+			if err := onUsage(usage); err != nil {
+				return err
+			}
+		}
+
 		if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
 			return errors.New(strings.TrimSpace(parsed.Error.Message))
 		}
@@ -228,6 +274,15 @@ func (c Client) StreamChatCompletion(
 		return fmt.Errorf("read openrouter stream: %w", err)
 	}
 	return nil
+}
+
+func parseOptionalPriceMicros(raw json.RawMessage) *int {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return nil
+	}
+	micros := parsePriceMicros(raw)
+	return &micros
 }
 
 func (c Client) ListModels(ctx context.Context) ([]Model, error) {

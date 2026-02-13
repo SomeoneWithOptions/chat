@@ -70,6 +70,7 @@ func TestStreamChatCompletionStreamsDeltas(t *testing.T) {
 			return nil
 		},
 		nil, // onReasoning
+		nil, // onUsage
 	)
 	if err != nil {
 		t.Fatalf("stream chat completion: %v", err)
@@ -119,9 +120,73 @@ func TestStreamChatCompletionIncludesReasoningEffortWhenProvided(t *testing.T) {
 		nil,
 		nil,
 		nil, // onReasoning
+		nil, // onUsage
 	)
 	if err != nil {
 		t.Fatalf("stream chat completion: %v", err)
+	}
+}
+
+func TestStreamChatCompletionEmitsUsage(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Fatalf("read body: %v", err)
+		}
+		rawBody := string(body)
+		if !strings.Contains(rawBody, `"stream_options":{"include_usage":true}`) {
+			t.Fatalf("request body missing stream_options.include_usage: %s", rawBody)
+		}
+
+		w.Header().Set("Content-Type", "text/event-stream")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\"}}\n\n"))
+		_, _ = w.Write([]byte("data: [DONE]\n\n"))
+	}))
+	defer server.Close()
+
+	client := NewClient(config.Config{
+		OpenRouterAPIKey:  "test-key",
+		OpenRouterBaseURL: server.URL,
+	}, server.Client())
+
+	var usage Usage
+	err := client.StreamChatCompletion(
+		context.Background(),
+		StreamRequest{
+			Model: "openrouter/free",
+			Messages: []Message{
+				{Role: "user", Content: "hi"},
+			},
+		},
+		nil,
+		nil,
+		nil,
+		func(next Usage) error {
+			usage = next
+			return nil
+		},
+	)
+	if err != nil {
+		t.Fatalf("stream chat completion: %v", err)
+	}
+
+	if usage.PromptTokens != 120 {
+		t.Fatalf("unexpected prompt token usage: %d", usage.PromptTokens)
+	}
+	if usage.CompletionTokens != 45 {
+		t.Fatalf("unexpected completion token usage: %d", usage.CompletionTokens)
+	}
+	if usage.TotalTokens != 165 {
+		t.Fatalf("unexpected total token usage: %d", usage.TotalTokens)
+	}
+	if usage.ReasoningTokens == nil || *usage.ReasoningTokens != 12 {
+		t.Fatalf("unexpected reasoning token usage: %+v", usage.ReasoningTokens)
+	}
+	if usage.CostMicrosUSD == nil || *usage.CostMicrosUSD != 420 {
+		t.Fatalf("unexpected cost micros usage: %+v", usage.CostMicrosUSD)
 	}
 }
 
@@ -149,6 +214,7 @@ func TestStreamChatCompletionReturnsUpstreamError(t *testing.T) {
 		nil,
 		nil,
 		nil, // onReasoning
+		nil, // onUsage
 	)
 	if err == nil {
 		t.Fatal("expected upstream error")
@@ -177,6 +243,7 @@ func TestStreamChatCompletionReturnsMissingKeyError(t *testing.T) {
 		nil,
 		nil,
 		nil, // onReasoning
+		nil, // onUsage
 	)
 	if err == nil {
 		t.Fatal("expected missing api key error")

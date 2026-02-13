@@ -38,7 +38,14 @@ type Handler struct {
 }
 
 type chatStreamer interface {
-	StreamChatCompletion(ctx context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error) error
+	StreamChatCompletion(
+		ctx context.Context,
+		req openrouter.StreamRequest,
+		onStart func() error,
+		onDelta func(string) error,
+		onReasoning func(string) error,
+		onUsage func(openrouter.Usage) error,
+	) error
 }
 
 type modelCataloger interface {
@@ -538,6 +545,14 @@ type citationResponse struct {
 	SourceProvider string `json:"sourceProvider,omitempty"`
 }
 
+type usageResponse struct {
+	PromptTokens     int  `json:"promptTokens"`
+	CompletionTokens int  `json:"completionTokens"`
+	TotalTokens      int  `json:"totalTokens"`
+	ReasoningTokens  *int `json:"reasoningTokens,omitempty"`
+	CostMicrosUSD    *int `json:"costMicrosUsd,omitempty"`
+}
+
 type messageResponse struct {
 	ID                  string             `json:"id"`
 	ConversationID      string             `json:"conversationId"`
@@ -545,6 +560,7 @@ type messageResponse struct {
 	Content             string             `json:"content"`
 	ReasoningContent    *string            `json:"reasoningContent,omitempty"`
 	ModelID             *string            `json:"modelId,omitempty"`
+	Usage               *usageResponse     `json:"usage,omitempty"`
 	GroundingEnabled    bool               `json:"groundingEnabled"`
 	DeepResearchEnabled bool               `json:"deepResearchEnabled"`
 	Citations           []citationResponse `json:"citations"`
@@ -650,7 +666,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.grounding_enabled, m.deep_research_enabled, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.grounding_enabled, m.deep_research_enabled, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -667,6 +683,11 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		var message messageResponse
 		var reasoningContent sql.NullString
 		var modelID sql.NullString
+		var promptTokens sql.NullInt64
+		var completionTokens sql.NullInt64
+		var totalTokens sql.NullInt64
+		var reasoningTokens sql.NullInt64
+		var costMicrosUSD sql.NullInt64
 		var groundingEnabled int
 		var deepResearchEnabled int
 
@@ -677,6 +698,11 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&message.Content,
 			&reasoningContent,
 			&modelID,
+			&promptTokens,
+			&completionTokens,
+			&totalTokens,
+			&reasoningTokens,
+			&costMicrosUSD,
 			&groundingEnabled,
 			&deepResearchEnabled,
 			&message.CreatedAt,
@@ -687,6 +713,15 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 
 		message.ReasoningContent = nullableStringPointer(reasoningContent)
 		message.ModelID = nullableStringPointer(modelID)
+		if promptTokens.Valid && completionTokens.Valid && totalTokens.Valid {
+			message.Usage = &usageResponse{
+				PromptTokens:     int(promptTokens.Int64),
+				CompletionTokens: int(completionTokens.Int64),
+				TotalTokens:      int(totalTokens.Int64),
+				ReasoningTokens:  nullableIntPointer(reasoningTokens),
+				CostMicrosUSD:    nullableIntPointer(costMicrosUSD),
+			}
+		}
 		message.GroundingEnabled = groundingEnabled == 1
 		message.DeepResearchEnabled = deepResearchEnabled == 1
 		message.Citations = make([]citationResponse, 0)
@@ -993,6 +1028,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	started := false
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
+	var assistantUsage *openrouter.Usage
 
 	streamErr := h.openrouter.StreamChatCompletion(
 		r.Context(),
@@ -1056,6 +1092,19 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 			return nil
 		},
+		func(usage openrouter.Usage) error {
+			copied := usage
+			assistantUsage = &copied
+
+			if err := writeSSEEvent(w, map[string]any{
+				"type":  "usage",
+				"usage": usageResponseFromOpenRouter(usage),
+			}); err != nil {
+				return err
+			}
+			flusher.Flush()
+			return nil
+		},
 	)
 
 	var persistedCitations []citationResponse
@@ -1075,6 +1124,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			grounding,
 			deepResearch,
 			persistedCitations,
+			messageUsageFromOpenRouter(assistantUsage),
 		)
 		if err != nil {
 			if !started {
@@ -1389,8 +1439,17 @@ func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role
 		groundingEnabled,
 		deepResearchEnabled,
 		nil,
+		nil,
 	)
 	return err
+}
+
+type messageUsage struct {
+	PromptTokens     int
+	CompletionTokens int
+	TotalTokens      int
+	ReasoningTokens  *int
+	CostMicrosUSD    *int
 }
 
 func (h Handler) insertMessageWithCitations(
@@ -1398,6 +1457,7 @@ func (h Handler) insertMessageWithCitations(
 	userID, conversationID, role, content, reasoningContent, modelID string,
 	groundingEnabled, deepResearchEnabled bool,
 	citations []citationResponse,
+	usage *messageUsage,
 ) (string, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1411,6 +1471,18 @@ func (h Handler) insertMessageWithCitations(
 	}
 
 	messageID := uuid.NewString()
+	var promptTokensValue any
+	var completionTokensValue any
+	var totalTokensValue any
+	var reasoningTokensValue any
+	var costMicrosUSDValue any
+	if usage != nil {
+		promptTokensValue = usage.PromptTokens
+		completionTokensValue = usage.CompletionTokens
+		totalTokensValue = usage.TotalTokens
+		reasoningTokensValue = usage.ReasoningTokens
+		costMicrosUSDValue = usage.CostMicrosUSD
+	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO messages (
   id,
@@ -1420,11 +1492,16 @@ INSERT INTO messages (
   content,
   reasoning_content,
   model_id,
+  prompt_tokens,
+  completion_tokens,
+  total_tokens,
+  reasoning_tokens,
+  cost_microusd,
   grounding_enabled,
   deep_research_enabled
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
 		return "", err
 	}
 
@@ -1986,6 +2063,29 @@ func openRouterReasoningConfig(effort string) *openrouter.ReasoningConfig {
 	return &openrouter.ReasoningConfig{Effort: normalized}
 }
 
+func usageResponseFromOpenRouter(usage openrouter.Usage) usageResponse {
+	return usageResponse{
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
+		CostMicrosUSD:    usage.CostMicrosUSD,
+	}
+}
+
+func messageUsageFromOpenRouter(usage *openrouter.Usage) *messageUsage {
+	if usage == nil {
+		return nil
+	}
+	return &messageUsage{
+		PromptTokens:     usage.PromptTokens,
+		CompletionTokens: usage.CompletionTokens,
+		TotalTokens:      usage.TotalTokens,
+		ReasoningTokens:  usage.ReasoningTokens,
+		CostMicrosUSD:    usage.CostMicrosUSD,
+	}
+}
+
 func nullableString(raw string) sql.NullString {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
@@ -2024,6 +2124,14 @@ func nullableStringPointer(value sql.NullString) *string {
 		return nil
 	}
 	out := value.String
+	return &out
+}
+
+func nullableIntPointer(value sql.NullInt64) *int {
+	if !value.Valid {
+		return nil
+	}
+	out := int(value.Int64)
 	return &out
 }
 

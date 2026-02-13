@@ -1,5 +1,5 @@
 import { isValidElement, type HTMLAttributes, type ReactNode, useEffect, useState } from 'react';
-import { type Citation } from '../lib/api';
+import { type Citation, type Usage } from '../lib/api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -8,6 +8,7 @@ type MessageData = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   reasoningContent?: string;
+  usage?: Usage | null;
   citations: Citation[];
 };
 
@@ -56,6 +57,12 @@ function extractNodeText(node: ReactNode): string {
     return extractNodeText(node.props.children);
   }
   return '';
+}
+
+function formatCostMicros(micros?: number): string {
+  if (micros === undefined) return 'Unavailable';
+  const dollars = micros / 1_000_000;
+  return `$${dollars.toFixed(6)}`;
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -138,20 +145,24 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   const [traceExpanded, setTraceExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [usageExpanded, setUsageExpanded] = useState(false);
   const showThinkingTrace = isAssistant && !!thinkingTrace && thinkingTrace.steps.length > 0;
   const tracePanelID = `${message.id}-thinking-trace`;
   const reasoningPanelID = `${message.id}-reasoning`;
   const sourcesPanelID = `${message.id}-sources`;
+  const usagePanelID = `${message.id}-usage`;
   
   // Show reasoning panel if there's reasoning content (either persisted or streaming)
   const hasReasoningContent = isAssistant && !!message.reasoningContent && message.reasoningContent.length > 0;
   // Auto-expand reasoning during streaming when no content yet, auto-collapse when content starts
   const isReasoningStreaming = isStreaming && isAssistant && hasReasoningContent && !message.content;
+  const hasUsage = isAssistant && !!message.usage;
 
   useEffect(() => {
     setTraceExpanded(false);
     setReasoningExpanded(false);
     setSourcesExpanded(false);
+    setUsageExpanded(false);
   }, [message.id]);
 
   // Auto-expand reasoning panel during streaming when reasoning arrives but content hasn't started
@@ -167,6 +178,9 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   // Generate a preview of reasoning content (first ~100 chars)
   const reasoningPreview = message.reasoningContent
     ? message.reasoningContent.slice(0, 100).replace(/\n/g, ' ').trim() + (message.reasoningContent.length > 100 ? '...' : '')
+    : '';
+  const usagePreview = message.usage
+    ? `${message.usage.promptTokens.toLocaleString()} in / ${message.usage.completionTokens.toLocaleString()} out`
     : '';
 
   return (
@@ -375,6 +389,82 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
                   </li>
                 ))}
               </ol>
+            </div>
+          </div>
+        )}
+
+        {hasUsage && message.usage && (
+          <div className="llm-usage">
+            <button
+              type="button"
+              className="llm-usage-toggle"
+              onClick={() => setUsageExpanded((open) => !open)}
+              aria-expanded={usageExpanded}
+              aria-controls={usagePanelID}
+            >
+              <span className="llm-usage-heading">
+                <svg
+                  className="llm-usage-icon"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden="true"
+                >
+                  <rect x="4" y="4" width="16" height="16" rx="2" />
+                  <path d="M9 9h6" />
+                  <path d="M9 13h6" />
+                  <path d="M9 17h4" />
+                </svg>
+                <span className="llm-usage-title">Usage</span>
+                {!usageExpanded && (
+                  <span className="llm-usage-preview">{usagePreview}</span>
+                )}
+              </span>
+              <svg
+                className={`llm-usage-chevron ${usageExpanded ? 'open' : ''}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+
+            <div
+              id={usagePanelID}
+              className={`llm-usage-content ${usageExpanded ? 'expanded' : 'collapsed'}`}
+            >
+              <dl className="llm-usage-grid">
+                <div className="llm-usage-row">
+                  <dt>Input tokens</dt>
+                  <dd>{message.usage.promptTokens.toLocaleString()}</dd>
+                </div>
+                <div className="llm-usage-row">
+                  <dt>Output tokens</dt>
+                  <dd>{message.usage.completionTokens.toLocaleString()}</dd>
+                </div>
+                <div className="llm-usage-row">
+                  <dt>Total tokens</dt>
+                  <dd>{message.usage.totalTokens.toLocaleString()}</dd>
+                </div>
+                {typeof message.usage.reasoningTokens === 'number' && (
+                  <div className="llm-usage-row">
+                    <dt>Reasoning tokens</dt>
+                    <dd>{message.usage.reasoningTokens.toLocaleString()}</dd>
+                  </div>
+                )}
+                <div className="llm-usage-row">
+                  <dt>Price (USD)</dt>
+                  <dd>{formatCostMicros(message.usage.costMicrosUsd)}</dd>
+                </div>
+              </dl>
             </div>
           </div>
         )}

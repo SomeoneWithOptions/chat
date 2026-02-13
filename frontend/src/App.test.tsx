@@ -261,6 +261,55 @@ describe('Deep research streaming UX', () => {
     expect(screen.getByText('Finalizing')).toBeInTheDocument();
   });
 
+  it('renders usage details after sources when usage events are streamed', async () => {
+    let releaseStream: (() => void) | undefined;
+    streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free' });
+      onEvent({ type: 'token', delta: 'Answer with source [1].' });
+      onEvent({
+        type: 'citations',
+        citations: [{ url: 'https://example.com/source', title: 'Example Source' }],
+      });
+      onEvent({
+        type: 'usage',
+        usage: {
+          promptTokens: 120,
+          completionTokens: 48,
+          totalTokens: 168,
+          costMicrosUsd: 420,
+        },
+      });
+      await new Promise<void>((resolve) => {
+        releaseStream = () => {
+          onEvent({ type: 'done' });
+          resolve();
+        };
+      });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Show usage');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    const sourcesButton = await screen.findByRole('button', { name: /sources/i });
+    const usageButton = await screen.findByRole('button', { name: /usage/i });
+    expect((sourcesButton.compareDocumentPosition(usageButton) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+
+    await user.click(usageButton);
+    expect(screen.getByText('Input tokens')).toBeInTheDocument();
+    expect(screen.getByText('120')).toBeInTheDocument();
+    expect(screen.getByText('$0.000420')).toBeInTheDocument();
+
+    if (releaseStream) releaseStream();
+  });
+
   it('ignores progress rendering for non-deep-research sends', async () => {
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });

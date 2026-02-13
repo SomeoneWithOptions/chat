@@ -52,6 +52,7 @@ export type ConversationMessage = {
   content: string;
   reasoningContent?: string | null;
   modelId?: string | null;
+  usage?: Usage | null;
   groundingEnabled: boolean;
   deepResearchEnabled: boolean;
   citations: Citation[];
@@ -63,6 +64,14 @@ export type Citation = {
   title?: string;
   snippet?: string;
   sourceProvider?: string;
+};
+
+export type Usage = {
+  promptTokens: number;
+  completionTokens: number;
+  totalTokens: number;
+  reasoningTokens?: number;
+  costMicrosUsd?: number;
 };
 
 export type UploadedFile = {
@@ -92,6 +101,7 @@ export type StreamEvent =
   | { type: 'citations'; citations: Citation[] }
   | { type: 'token'; delta: string }
   | { type: 'reasoning'; delta: string }
+  | { type: 'usage'; usage: Usage }
   | { type: 'error'; message: string }
   | { type: 'done' };
 

@@ -113,13 +113,6 @@ function loadGoogleIdentityScript(): Promise<void> {
   return googleIdentityScriptLoadPromise;
 }
 
-function formatPrice(micros: number): string {
-  if (micros <= 0) return 'Free';
-  const dollars = micros / 1_000_000;
-  if (dollars < 0.001) return `$${dollars.toFixed(6)}`;
-  return `$${dollars.toFixed(4)}`;
-}
-
 type ResearchActivity = {
   phase: ResearchPhase;
   message: string;
@@ -480,6 +473,7 @@ export default function App() {
             role: m.role,
             content: m.content,
             reasoningContent: m.reasoningContent ?? '',
+            usage: m.usage ?? null,
             citations: m.citations ?? [],
           })),
         );
@@ -828,6 +822,7 @@ export default function App() {
       role: 'user',
       content: prompt.trim(),
       reasoningContent: '',
+      usage: null,
       citations: [],
     };
     const assistantMessage: MessageData = {
@@ -835,6 +830,7 @@ export default function App() {
       role: 'assistant',
       content: '',
       reasoningContent: '',
+      usage: null,
       citations: [],
     };
 
@@ -971,6 +967,14 @@ export default function App() {
               existing.map((m) =>
                 m.id === assistantMessage.id ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${eventData.delta}` } : m,
               ),
+            );
+            return;
+          }
+          if (eventData.type === 'usage') {
+            setMessages((existing) =>
+              existing.map((m) => (
+                m.id === assistantMessage.id ? { ...m, usage: eventData.usage } : m
+              )),
             );
           }
         },
@@ -1122,7 +1126,7 @@ export default function App() {
               onToggleFavorite={(id) => void handleToggleFavorite(id)}
               showAllModels={showAllModels}
               onToggleShowAll={setShowAllModels}
-              disabled={models.length === 0}
+              disabled={models.length === 0 || updatingModelPreference}
             />
           </div>
 
@@ -1165,45 +1169,6 @@ export default function App() {
             />
           </div>
         </header>
-
-        {/* Model info bar */}
-        {currentModel && (
-          <div className="model-info-bar">
-            <span className={`mode-chip ${deepResearch ? 'deep' : 'chat'}`}>
-              {deepResearch ? 'Deep Research Mode' : 'Chat Mode'}
-            </span>
-            <div className="model-info-divider" />
-            <div className="model-info-item">
-              <span className="model-info-label">Context</span>
-              <span className="model-info-value">{currentModel.contextWindow.toLocaleString()}</span>
-            </div>
-            <div className="model-info-divider" />
-            <div className="model-info-item">
-              <span className="model-info-label">Prompt</span>
-              <span className="model-info-value">{formatPrice(currentModel.promptPriceMicrosUsd)}/tok</span>
-            </div>
-            <div className="model-info-divider" />
-            <div className="model-info-item">
-              <span className="model-info-label">Output</span>
-              <span className="model-info-value">{formatPrice(currentModel.outputPriceMicrosUsd)}/tok</span>
-            </div>
-            <div className="model-info-divider" />
-            <div className="model-info-item">
-              <span className="model-info-label">Thinking</span>
-              <span className="model-info-value">
-                {currentModelSupportsReasoning ? selectedReasoningEffort : 'N/A'}
-              </span>
-            </div>
-            {(updatingModelPreference || updatingReasoningPreset) && (
-              <>
-                <div className="model-info-divider" />
-                <span className="model-info-item" style={{ color: 'var(--accent)', fontStyle: 'italic' }}>
-                  Saving...
-                </span>
-              </>
-            )}
-          </div>
-        )}
 
         {(deepResearch || researchActivity.length > 0) && (
           <section className={`research-panel ${researchPanelExpanded ? 'expanded' : 'collapsed'}`} data-testid="research-timeline">

@@ -200,6 +200,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
+	var assistantUsage *openrouter.Usage
 	streamErr := h.openrouter.StreamChatCompletion(
 		researchCtx,
 		openrouter.StreamRequest{
@@ -219,6 +220,18 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		func(reasoning string) error {
 			reasoningContent.WriteString(reasoning)
 			if err := writeSSEEvent(w, map[string]any{"type": "reasoning", "delta": reasoning}); err != nil {
+				return err
+			}
+			flusher.Flush()
+			return nil
+		},
+		func(usage openrouter.Usage) error {
+			copied := usage
+			assistantUsage = &copied
+			if err := writeSSEEvent(w, map[string]any{
+				"type":  "usage",
+				"usage": usageResponseFromOpenRouter(usage),
+			}); err != nil {
 				return err
 			}
 			flusher.Flush()
@@ -250,6 +263,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			input.Grounding,
 			true,
 			orderedCitations,
+			messageUsageFromOpenRouter(assistantUsage),
 		)
 		if err != nil {
 			log.Printf(

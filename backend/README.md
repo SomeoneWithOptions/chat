@@ -20,7 +20,7 @@ Go API service for auth, chat orchestration, model metadata, and SSE streaming.
 - `DELETE /v1/conversations`
 - `DELETE /v1/conversations/{id}`
 - `GET /v1/conversations/{id}/messages`
-- `POST /v1/chat/messages` (SSE stream bridged from OpenRouter)
+- `POST /v1/chat/messages` (SSE stream bridged from OpenRouter, including usage metrics when available)
 
 OpenAPI 3.1 contract: `backend/openapi/openapi.yaml`.
 

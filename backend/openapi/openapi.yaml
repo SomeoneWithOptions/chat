@@ -341,7 +341,7 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `progress`, `warning`, `token`, `citations`, `error`, and `done`.
+                description: SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `progress`, `warning`, `token`, `reasoning`, `usage`, `citations`, `error`, and `done`.
         '400':
           $ref: '#/components/responses/Error'
         '401':
@@ -546,6 +546,8 @@ components:
         modelId:
           type: string
           nullable: true
+        usage:
+          $ref: '#/components/schemas/Usage'
         groundingEnabled:
           type: boolean
         deepResearchEnabled:
@@ -654,11 +656,31 @@ components:
         - $ref: '#/components/schemas/StreamEventProgress'
         - $ref: '#/components/schemas/StreamEventWarning'
         - $ref: '#/components/schemas/StreamEventToken'
+        - $ref: '#/components/schemas/StreamEventUsage'
         - $ref: '#/components/schemas/StreamEventCitations'
         - $ref: '#/components/schemas/StreamEventError'
         - $ref: '#/components/schemas/StreamEventDone'
       discriminator:
         propertyName: type
+    Usage:
+      type: object
+      required: [promptTokens, completionTokens, totalTokens]
+      properties:
+        promptTokens:
+          type: integer
+          minimum: 0
+        completionTokens:
+          type: integer
+          minimum: 0
+        totalTokens:
+          type: integer
+          minimum: 0
+        reasoningTokens:
+          type: integer
+          minimum: 0
+        costMicrosUsd:
+          type: integer
+          minimum: 0
     StreamEventMetadata:
       type: object
       required: [type, grounding, deepResearch, modelId]
@@ -714,6 +736,15 @@ components:
           enum: [token]
         delta:
           type: string
+    StreamEventUsage:
+      type: object
+      required: [type, usage]
+      properties:
+        type:
+          type: string
+          enum: [usage]
+        usage:
+          $ref: '#/components/schemas/Usage'
     StreamEventCitations:
       type: object
       required: [type, citations]

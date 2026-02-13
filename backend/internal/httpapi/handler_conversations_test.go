@@ -859,6 +859,69 @@ WHERE user_id = ?;
 	}
 }
 
+func TestChatMessagesStreamsAndPersistsUsage(t *testing.T) {
+	reasoningTokens := 8
+	costMicros := 77
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Usage", " tracked"},
+		usage: &openrouter.Usage{
+			PromptTokens:     12,
+			CompletionTokens: 20,
+			TotalTokens:      32,
+			ReasoningTokens:  &reasoningTokens,
+			CostMicrosUSD:    &costMicros,
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Track usage","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, resp.Code)
+	}
+	if !strings.Contains(resp.Body.String(), `"type":"usage"`) {
+		t.Fatalf("expected usage event in stream body: %s", resp.Body.String())
+	}
+
+	var promptTokens sql.NullInt64
+	var completionTokens sql.NullInt64
+	var totalTokens sql.NullInt64
+	var persistedReasoningTokens sql.NullInt64
+	var persistedCostMicros sql.NullInt64
+	if err := db.QueryRow(`
+SELECT prompt_tokens, completion_tokens, total_tokens, reasoning_tokens, cost_microusd
+FROM messages
+WHERE user_id = ? AND role = 'assistant'
+ORDER BY rowid DESC
+LIMIT 1;
+`, user.ID).Scan(&promptTokens, &completionTokens, &totalTokens, &persistedReasoningTokens, &persistedCostMicros); err != nil {
+		t.Fatalf("query assistant usage: %v", err)
+	}
+	if !promptTokens.Valid || promptTokens.Int64 != 12 {
+		t.Fatalf("unexpected prompt tokens: %+v", promptTokens)
+	}
+	if !completionTokens.Valid || completionTokens.Int64 != 20 {
+		t.Fatalf("unexpected completion tokens: %+v", completionTokens)
+	}
+	if !totalTokens.Valid || totalTokens.Int64 != 32 {
+		t.Fatalf("unexpected total tokens: %+v", totalTokens)
+	}
+	if !persistedReasoningTokens.Valid || persistedReasoningTokens.Int64 != 8 {
+		t.Fatalf("unexpected reasoning tokens: %+v", persistedReasoningTokens)
+	}
+	if !persistedCostMicros.Valid || persistedCostMicros.Int64 != 77 {
+		t.Fatalf("unexpected cost micros: %+v", persistedCostMicros)
+	}
+}
+
 func TestChatMessagesAppliesReasoningEffortOverrideAndPersistsPreset(t *testing.T) {
 	var capturedRequest openrouter.StreamRequest
 	handler, db := newTestHandler(t, stubStreamer{
@@ -1689,6 +1752,7 @@ func assertContainsPhaseInOrder(t *testing.T, phases []string, phase string, aft
 type stubStreamer struct {
 	tokens          []string
 	reasoningTokens []string
+	usage           *openrouter.Usage
 	err             error
 	catalog         []openrouter.Model
 	catalogErr      error
@@ -1712,7 +1776,7 @@ func (s stubGrounder) Search(ctx context.Context, _ string, _ int) ([]brave.Sear
 	return s.results, nil
 }
 
-func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error) error {
+func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error, onUsage func(openrouter.Usage) error) error {
 	if s.onRequest != nil {
 		s.onRequest(req)
 	}
@@ -1731,6 +1795,11 @@ func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.Str
 	}
 	for _, token := range s.tokens {
 		if err := onDelta(token); err != nil {
+			return err
+		}
+	}
+	if s.usage != nil && onUsage != nil {
+		if err := onUsage(*s.usage); err != nil {
 			return err
 		}
 	}
@@ -1842,6 +1911,11 @@ CREATE TABLE messages (
   content TEXT NOT NULL,
   reasoning_content TEXT,
   model_id TEXT,
+  prompt_tokens INTEGER,
+  completion_tokens INTEGER,
+  total_tokens INTEGER,
+  reasoning_tokens INTEGER,
+  cost_microusd INTEGER,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
