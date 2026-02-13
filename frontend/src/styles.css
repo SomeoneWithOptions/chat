@@ -2389,9 +2389,9 @@ code {
   }
 }
 
-@media (min-width: 1024px) {
+@media (min-width: 900px) {
   .composer-wrapper {
-    --composer-lane-max-width: 48rem;
+    --composer-lane-max-width: 44rem;
   }
 }
 
