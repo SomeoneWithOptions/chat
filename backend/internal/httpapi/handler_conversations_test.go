@@ -358,6 +358,13 @@ func TestListModelsIncludesCatalogFavoritesAndPreferences(t *testing.T) {
 				PromptPriceMicrosUSD:     150,
 				CompletionPriceMicrosUSD: 600,
 			},
+			{
+				ID:                       "anthropic/claude-3.5-haiku",
+				Name:                     "Claude Haiku",
+				ContextWindow:            200000,
+				PromptPriceMicrosUSD:     800,
+				CompletionPriceMicrosUSD: 1200,
+			},
 		},
 	})
 	t.Cleanup(func() { _ = db.Close() })
@@ -515,6 +522,63 @@ func TestSyncModelsReturnsSyncedCount(t *testing.T) {
 	decodeJSONBody(t, resp, &payload)
 	if payload.Synced != 2 {
 		t.Fatalf("expected 2 synced models, got %d", payload.Synced)
+	}
+}
+
+func TestSyncModelsDeactivatesStaleNonCuratedModels(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		catalog: []openrouter.Model{
+			{
+				ID:                       "openai/gpt-4o-mini",
+				Name:                     "GPT-4o mini",
+				ContextWindow:            128000,
+				PromptPriceMicrosUSD:     150,
+				CompletionPriceMicrosUSD: 600,
+			},
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+	if _, err := db.Exec(`
+INSERT INTO models (id, provider, display_name, context_window, prompt_price_microusd, completion_price_microusd, curated, is_active)
+VALUES ('openai/gpt-oss-20b:free', 'openrouter', 'OpenAI gpt-oss-20b (free)', 131072, 0, 0, 0, 1);
+`); err != nil {
+		t.Fatalf("seed stale model: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/models/sync", nil)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.SyncModels(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var payload syncModelsResponse
+	decodeJSONBody(t, resp, &payload)
+	if payload.Synced != 1 {
+		t.Fatalf("expected 1 synced model, got %d", payload.Synced)
+	}
+
+	var staleActive int
+	if err := db.QueryRow(`SELECT is_active FROM models WHERE id = 'openai/gpt-oss-20b:free';`).Scan(&staleActive); err != nil {
+		t.Fatalf("read stale model active flag: %v", err)
+	}
+	if staleActive != 0 {
+		t.Fatalf("expected stale model to be inactive, got %d", staleActive)
+	}
+
+	var curatedActive int
+	if err := db.QueryRow(`SELECT is_active FROM models WHERE id = 'openrouter/free';`).Scan(&curatedActive); err != nil {
+		t.Fatalf("read curated model active flag: %v", err)
+	}
+	if curatedActive != 1 {
+		t.Fatalf("expected curated model to remain active, got %d", curatedActive)
 	}
 }
 

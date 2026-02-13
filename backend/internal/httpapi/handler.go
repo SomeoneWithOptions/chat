@@ -322,6 +322,16 @@ func (h Handler) syncModelsFromProvider(ctx context.Context) (int, error) {
 	}
 	defer tx.Rollback()
 
+	if _, err := tx.ExecContext(ctx, `
+UPDATE models
+SET is_active = 0,
+    updated_at = CURRENT_TIMESTAMP
+WHERE provider = 'openrouter'
+  AND curated = 0;
+`); err != nil {
+		return 0, err
+	}
+
 	synced := 0
 	for _, model := range models {
 		if strings.TrimSpace(model.ID) == "" {

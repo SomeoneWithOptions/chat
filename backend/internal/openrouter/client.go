@@ -94,6 +94,15 @@ type Client struct {
 	httpClient *http.Client
 }
 
+type upstreamStatusError struct {
+	statusCode int
+	body       string
+}
+
+func (e upstreamStatusError) Error() string {
+	return fmt.Sprintf("openrouter models returned %d: %s", e.statusCode, e.body)
+}
+
 func NewClient(cfg config.Config, httpClient *http.Client) Client {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
@@ -226,7 +235,21 @@ func (c Client) ListModels(ctx context.Context) ([]Model, error) {
 		return nil, ErrMissingAPIKey
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/models", nil)
+	models, err := c.listModelsFromPath(ctx, "/models/user")
+	if err == nil {
+		return models, nil
+	}
+
+	var upstreamErr upstreamStatusError
+	if errors.As(err, &upstreamErr) && (upstreamErr.statusCode == http.StatusNotFound || upstreamErr.statusCode == http.StatusMethodNotAllowed) {
+		return c.listModelsFromPath(ctx, "/models")
+	}
+
+	return nil, err
+}
+
+func (c Client) listModelsFromPath(ctx context.Context, path string) ([]Model, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+path, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build openrouter models request: %w", err)
 	}
@@ -241,7 +264,10 @@ func (c Client) ListModels(ctx context.Context) ([]Model, error) {
 
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
-		return nil, fmt.Errorf("openrouter models returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+		return nil, upstreamStatusError{
+			statusCode: resp.StatusCode,
+			body:       strings.TrimSpace(string(body)),
+		}
 	}
 
 	var parsed listModelsAPIResponse

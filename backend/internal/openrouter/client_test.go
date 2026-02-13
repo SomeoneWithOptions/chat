@@ -193,7 +193,7 @@ func TestListModelsParsesCatalog(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("unexpected method: %s", r.Method)
 		}
-		if r.URL.Path != "/models" {
+		if r.URL.Path != "/models/user" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
@@ -258,6 +258,53 @@ func TestListModelsParsesCatalog(t *testing.T) {
 	}
 	if models[1].CompletionPriceMicrosUSD != 2 {
 		t.Fatalf("unexpected completion price micros: %d", models[1].CompletionPriceMicrosUSD)
+	}
+}
+
+func TestListModelsFallsBackWhenUserEndpointIsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	requestPaths := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestPaths = append(requestPaths, r.URL.Path)
+		switch r.URL.Path {
+		case "/models/user":
+			http.Error(w, `{"error":"not found"}`, http.StatusNotFound)
+		case "/models":
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{
+				"data":[
+					{
+						"id":"openrouter/free",
+						"name":"OpenRouter Free",
+						"context_length":131072,
+						"pricing":{"prompt":"0","completion":"0"}
+					}
+				]
+			}`))
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(config.Config{
+		OpenRouterAPIKey:  "test-key",
+		OpenRouterBaseURL: server.URL,
+	}, server.Client())
+
+	models, err := client.ListModels(context.Background())
+	if err != nil {
+		t.Fatalf("list models: %v", err)
+	}
+	if len(models) != 1 {
+		t.Fatalf("expected 1 model, got %d", len(models))
+	}
+	if models[0].ID != "openrouter/free" {
+		t.Fatalf("unexpected model id: %q", models[0].ID)
+	}
+	if len(requestPaths) != 2 || requestPaths[0] != "/models/user" || requestPaths[1] != "/models" {
+		t.Fatalf("unexpected request sequence: %+v", requestPaths)
 	}
 }
 
