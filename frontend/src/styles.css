@@ -1648,9 +1648,9 @@ code {
 
 .composer-textarea {
   width: 100%;
-  min-height: 56px;
+  min-height: 40px;
   max-height: 200px;
-  padding: 16px 18px 8px;
+  padding: 12px 18px 6px;
   background: transparent;
   border: none;
   color: var(--text-primary);

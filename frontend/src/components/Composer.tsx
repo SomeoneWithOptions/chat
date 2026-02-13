@@ -75,7 +75,7 @@ export default function Composer({
           onChange={(e) => onPromptChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask anything..."
-          rows={2}
+          rows={1}
         />
 
         {pendingAttachments.length > 0 && (
