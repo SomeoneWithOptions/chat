@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -151,7 +151,9 @@ describe('Deep research streaming UX', () => {
     expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0);
     expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument();
 
-    releaseStream?.();
+    if (typeof releaseStream === 'function') {
+      releaseStream();
+    }
 
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
@@ -300,6 +302,80 @@ describe('Deep research streaming UX', () => {
 
     expect(streamMessageMock.mock.calls[0][0]).toMatchObject({
       reasoningEffort: 'high',
+    });
+  });
+
+  it('stops auto-scrolling when user scrolls up while streaming', async () => {
+    let emitEvent: ((event: api.StreamEvent) => void) | null = null;
+    let releaseStream: (() => void) | undefined;
+
+    streamMessageMock.mockImplementation(
+      async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+        emitEvent = onEvent;
+        onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free' });
+        onEvent({ type: 'token', delta: 'hello' });
+        await new Promise<void>((resolve) => {
+          releaseStream = resolve;
+        });
+      },
+    );
+
+    const user = userEvent.setup();
+    const { container } = render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    const messagesContainer = container.querySelector<HTMLDivElement>('.messages-container');
+    expect(messagesContainer).not.toBeNull();
+    if (!messagesContainer) return;
+
+    Object.defineProperty(messagesContainer, 'scrollHeight', {
+      configurable: true,
+      value: 2000,
+    });
+    Object.defineProperty(messagesContainer, 'clientHeight', {
+      configurable: true,
+      value: 600,
+    });
+    Object.defineProperty(messagesContainer, 'scrollTop', {
+      configurable: true,
+      writable: true,
+      value: 1400,
+    });
+
+    const scrollToSpy = vi.spyOn(messagesContainer, 'scrollTo');
+
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Stream test');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    await waitFor(() => {
+      expect(scrollToSpy.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    const callsBeforeScrollUp = scrollToSpy.mock.calls.length;
+
+    messagesContainer.scrollTop = 700;
+    messagesContainer.dispatchEvent(new Event('scroll'));
+
+    act(() => {
+      emitEvent?.({ type: 'token', delta: ' world' });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('hello world')).toBeInTheDocument();
+    });
+
+    expect(scrollToSpy.mock.calls.length).toBe(callsBeforeScrollUp);
+
+    if (releaseStream) {
+      releaseStream();
+    }
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
     });
   });
 });

@@ -269,7 +269,8 @@ export default function App() {
   // ─── UI State ─────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => window.innerWidth < 768);
 
-  const messagesEndRef = useRef<HTMLDivElement>(null);
+  const messagesContainerRef = useRef<HTMLDivElement | null>(null);
+  const shouldAutoScrollRef = useRef(true);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
 
   // ─── Virtual keyboard handling (mobile) ─────
@@ -504,10 +505,38 @@ export default function App() {
     return () => { cancelled = true; };
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
 
-  // Auto-scroll on new messages
+  // Keep auto-scroll enabled only while user is near the bottom.
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    const container = messagesContainerRef.current;
+    if (!container) return;
+
+    const bottomThresholdPx = 96;
+    const updateAutoScroll = () => {
+      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      shouldAutoScrollRef.current = distanceFromBottom <= bottomThresholdPx;
+    };
+
+    updateAutoScroll();
+    container.addEventListener('scroll', updateAutoScroll, { passive: true });
+    return () => {
+      container.removeEventListener('scroll', updateAutoScroll);
+    };
+  }, [user]);
+
+  // Auto-scroll on new messages when the user is already following the stream.
+  useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || !shouldAutoScrollRef.current) return;
+
+    container.scrollTo({
+      top: container.scrollHeight,
+      behavior: isStreaming ? 'auto' : 'smooth',
+    });
+  }, [isStreaming, messages]);
+
+  useEffect(() => {
+    shouldAutoScrollRef.current = true;
+  }, [activeConversationId]);
 
   // ─── Computed ─────────────────────────────────
 
@@ -812,6 +841,7 @@ export default function App() {
     setMessages((existing) => [...existing, userMessage, assistantMessage]);
     setPrompt('');
     setIsStreaming(true);
+    shouldAutoScrollRef.current = true;
     setStreamWarning(null);
     setError(null);
     setResearchActivity([]);
@@ -1264,7 +1294,7 @@ export default function App() {
         )}
 
         {/* Messages */}
-        <div className="messages-container">
+        <div ref={messagesContainerRef} className="messages-container">
           {loadingMessages && (
             <div className="messages-empty">
               <span className="loading-text">Loading messages...</span>
@@ -1291,7 +1321,6 @@ export default function App() {
               />
             );
           })}
-          <div ref={messagesEndRef} />
         </div>
 
         {/* Composer */}

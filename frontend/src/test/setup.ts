@@ -19,3 +19,8 @@ Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
   value: vi.fn(),
   configurable: true,
 });
+
+Object.defineProperty(HTMLElement.prototype, 'scrollTo', {
+  value: vi.fn(),
+  configurable: true,
+});
