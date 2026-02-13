@@ -2417,6 +2417,24 @@ code {
   }
 }
 
+@media (max-width: 560px) {
+  .composer-toolbar {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    column-gap: 8px;
+  }
+
+  .composer-toolbar-left {
+    min-width: 0;
+  }
+
+  .composer-toolbar-right {
+    justify-self: end;
+    align-self: center;
+  }
+}
+
 @media (min-width: 900px) {
   .composer-wrapper {
     --composer-lane-max-width: 44rem;
