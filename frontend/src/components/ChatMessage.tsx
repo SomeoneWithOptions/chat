@@ -180,7 +180,7 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
     ? message.reasoningContent.slice(0, 100).replace(/\n/g, ' ').trim() + (message.reasoningContent.length > 100 ? '...' : '')
     : '';
   const usagePreview = message.usage
-    ? `${message.usage.promptTokens.toLocaleString()} in / ${message.usage.completionTokens.toLocaleString()} out`
+    ? `${message.usage.promptTokens.toLocaleString()} in / ${message.usage.completionTokens.toLocaleString()} out / ${formatCostMicros(message.usage.costMicrosUsd)}`
     : '';
 
   return (
