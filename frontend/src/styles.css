@@ -2430,8 +2430,15 @@ code {
   }
 
   .composer-toolbar-right {
+    display: flex;
+    align-self: stretch;
+    align-items: stretch;
     justify-self: end;
-    align-self: center;
+  }
+
+  .composer-toolbar-right .btn-send {
+    height: 100%;
+    min-height: 36px;
   }
 }
 
