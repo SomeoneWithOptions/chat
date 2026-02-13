@@ -1,11 +1,20 @@
 import { type ChangeEvent, type FormEvent, useRef } from 'react';
-import { type UploadedFile } from '../lib/api';
+import { type ReasoningEffort, type UploadedFile } from '../lib/api';
 
 type ComposerProps = {
   prompt: string;
   onPromptChange: (value: string) => void;
   onSend: (e: FormEvent<HTMLFormElement>) => void;
   onStop: () => void;
+  reasoningOptions: Array<{ value: ReasoningEffort; label: string }>;
+  reasoningEffort: ReasoningEffort;
+  supportsReasoning: boolean;
+  reasoningDisabled: boolean;
+  onReasoningEffortChange: (effort: ReasoningEffort) => void;
+  grounding: boolean;
+  deepResearch: boolean;
+  onToggleGrounding: () => void;
+  onToggleDeepResearch: () => void;
   isStreaming: boolean;
   uploadingAttachments: boolean;
   pendingAttachments: UploadedFile[];
@@ -28,6 +37,15 @@ export default function Composer({
   onPromptChange,
   onSend,
   onStop,
+  reasoningOptions,
+  reasoningEffort,
+  supportsReasoning,
+  reasoningDisabled,
+  onReasoningEffortChange,
+  grounding,
+  deepResearch,
+  onToggleGrounding,
+  onToggleDeepResearch,
   isStreaming,
   uploadingAttachments,
   pendingAttachments,
@@ -68,6 +86,27 @@ export default function Composer({
           onChange={onAttachmentChange}
           className="visually-hidden"
         />
+
+        <div className={`composer-reasoning-row ${supportsReasoning ? '' : 'disabled'}`}>
+          <span className="composer-reasoning-label">Thinking</span>
+          {supportsReasoning ? (
+            <select
+              className="reasoning-select"
+              value={reasoningEffort}
+              onChange={(event) => onReasoningEffortChange(event.target.value as ReasoningEffort)}
+              disabled={reasoningDisabled}
+              aria-label="Thinking effort"
+            >
+              {reasoningOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <span className="reasoning-unavailable">Unavailable</span>
+          )}
+        </div>
 
         <textarea
           className="composer-textarea"
@@ -111,6 +150,25 @@ export default function Composer({
               </svg>
               {uploadingAttachments ? 'Uploading...' : 'Attach'}
             </button>
+
+            <div className="composer-mode-buttons">
+              <button
+                type="button"
+                className={`composer-mode-button ${grounding ? 'active' : 'inactive'}`}
+                onClick={onToggleGrounding}
+                aria-pressed={grounding}
+              >
+                Grounding
+              </button>
+              <button
+                type="button"
+                className={`composer-mode-button ${deepResearch ? 'active' : 'inactive'}`}
+                onClick={onToggleDeepResearch}
+                aria-pressed={deepResearch}
+              >
+                Deep Research
+              </button>
+            </div>
           </div>
 
           <div className="composer-toolbar-right">

@@ -238,7 +238,7 @@ describe('Deep research streaming UX', () => {
 
     await screen.findByPlaceholderText('Ask anything...');
 
-    await user.click(screen.getAllByRole('switch')[1]);
+    await user.click(screen.getByRole('button', { name: /deep research/i }));
     await user.type(screen.getByPlaceholderText('Ask anything...'), 'Need deep research output');
     await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
 

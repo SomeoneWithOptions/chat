@@ -25,7 +25,6 @@ import {
   type User,
 } from './lib/api';
 import Sidebar from './components/Sidebar';
-import Toggle from './components/Toggle';
 import ModelSelector from './components/ModelSelector';
 import ChatMessage, { type MessageData, type ThinkingTrace } from './components/ChatMessage';
 import Composer from './components/Composer';
@@ -1130,44 +1129,6 @@ export default function App() {
             />
           </div>
 
-          <div className="header-right">
-            <div className={`reasoning-control ${currentModelSupportsReasoning ? '' : 'disabled'}`}>
-              <span className="reasoning-label">Thinking</span>
-              {currentModelSupportsReasoning ? (
-                <select
-                  className="reasoning-select"
-                  value={selectedReasoningEffort}
-                  onChange={(event) => void handleReasoningEffortChange(event.target.value as ReasoningEffort)}
-                  disabled={isStreaming || updatingReasoningPreset}
-                  aria-label="Thinking effort"
-                >
-                  {reasoningEffortOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <span className="reasoning-unavailable">Unavailable</span>
-              )}
-            </div>
-
-            <div className="header-divider" />
-
-            <Toggle
-              checked={grounding}
-              onChange={setGrounding}
-              label="Grounding"
-            />
-
-            <div className="header-divider" />
-
-            <Toggle
-              checked={deepResearch}
-              onChange={handleDeepResearchChange}
-              label="Deep Research"
-            />
-          </div>
         </header>
 
         {(deepResearch || researchActivity.length > 0) && (
@@ -1294,6 +1255,15 @@ export default function App() {
           onPromptChange={setPrompt}
           onSend={handleSend}
           onStop={handleStopStreaming}
+          reasoningOptions={reasoningEffortOptions}
+          reasoningEffort={selectedReasoningEffort}
+          supportsReasoning={currentModelSupportsReasoning}
+          reasoningDisabled={isStreaming || updatingReasoningPreset}
+          onReasoningEffortChange={(effort) => void handleReasoningEffortChange(effort)}
+          grounding={grounding}
+          deepResearch={deepResearch}
+          onToggleGrounding={() => setGrounding((enabled) => !enabled)}
+          onToggleDeepResearch={() => handleDeepResearchChange(!deepResearch)}
           isStreaming={isStreaming}
           uploadingAttachments={uploadingAttachments}
           pendingAttachments={pendingAttachments}
