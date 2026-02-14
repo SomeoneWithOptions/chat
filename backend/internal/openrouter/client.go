@@ -31,8 +31,8 @@ type Model struct {
 	ID                       string
 	Name                     string
 	ContextWindow            int
-	PromptPriceMicrosUSD     int
-	CompletionPriceMicrosUSD int
+	PromptPriceMicrosUSD     float64
+	CompletionPriceMicrosUSD float64
 	SupportedParameters      []string
 	SupportsReasoning        bool
 }
@@ -460,8 +460,8 @@ func (c Client) listModelsFromPath(ctx context.Context, path string) ([]Model, e
 			ID:                       id,
 			Name:                     name,
 			ContextWindow:            contextWindow,
-			PromptPriceMicrosUSD:     parsePriceMicros(model.Pricing.Prompt),
-			CompletionPriceMicrosUSD: parsePriceMicros(model.Pricing.Completion),
+			PromptPriceMicrosUSD:     parsePriceMicrosDecimal(model.Pricing.Prompt),
+			CompletionPriceMicrosUSD: parsePriceMicrosDecimal(model.Pricing.Completion),
 			SupportedParameters:      supportedParameters,
 			SupportsReasoning:        supportsReasoningParameter(supportedParameters),
 		})
@@ -487,6 +487,28 @@ func parsePriceMicros(raw json.RawMessage) int {
 			return 0
 		}
 		return int(math.Round(asNumber * 1_000_000))
+	}
+
+	return 0
+}
+
+func parsePriceMicrosDecimal(raw json.RawMessage) float64 {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return 0
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		return priceStringToMicrosDecimal(asString)
+	}
+
+	var asNumber float64
+	if err := json.Unmarshal(raw, &asNumber); err == nil {
+		if asNumber < 0 {
+			return 0
+		}
+		return asNumber * 1_000_000
 	}
 
 	return 0
@@ -612,4 +634,30 @@ func priceStringToMicros(raw string) int {
 	rat.Mul(rat, big.NewRat(1_000_000, 1))
 	value, _ := rat.Float64()
 	return int(math.Round(value))
+}
+
+func priceStringToMicrosDecimal(raw string) float64 {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return 0
+	}
+
+	if floatValue, err := strconv.ParseFloat(trimmed, 64); err == nil {
+		if floatValue < 0 {
+			return 0
+		}
+		return floatValue * 1_000_000
+	}
+
+	rat := new(big.Rat)
+	if _, ok := rat.SetString(trimmed); !ok {
+		return 0
+	}
+	if rat.Sign() < 0 {
+		return 0
+	}
+
+	rat.Mul(rat, big.NewRat(1_000_000, 1))
+	value, _ := rat.Float64()
+	return value
 }

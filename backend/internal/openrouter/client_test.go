@@ -3,6 +3,7 @@ package openrouter
 import (
 	"context"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -395,11 +396,11 @@ func TestListModelsParsesCatalog(t *testing.T) {
 	if models[1].ContextWindow != 32768 {
 		t.Fatalf("expected top provider context length, got %d", models[1].ContextWindow)
 	}
-	if models[1].PromptPriceMicrosUSD != 1 {
-		t.Fatalf("expected prompt price rounded to 1 micro, got %d", models[1].PromptPriceMicrosUSD)
+	if math.Abs(models[1].PromptPriceMicrosUSD-0.9) > 1e-9 {
+		t.Fatalf("expected prompt price to preserve decimals, got %f", models[1].PromptPriceMicrosUSD)
 	}
-	if models[1].CompletionPriceMicrosUSD != 2 {
-		t.Fatalf("unexpected completion price micros: %d", models[1].CompletionPriceMicrosUSD)
+	if math.Abs(models[1].CompletionPriceMicrosUSD-2) > 1e-9 {
+		t.Fatalf("unexpected completion price micros: %f", models[1].CompletionPriceMicrosUSD)
 	}
 }
 

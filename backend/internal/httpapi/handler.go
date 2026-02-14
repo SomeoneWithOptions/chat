@@ -89,14 +89,14 @@ type contextKey string
 const sessionUserContextKey contextKey = "session_user"
 
 type modelResponse struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	Provider          string `json:"provider"`
-	ContextWindow     int    `json:"contextWindow"`
-	PromptPriceMUSD   int    `json:"promptPriceMicrosUsd"`
-	OutputPriceMUSD   int    `json:"outputPriceMicrosUsd"`
-	SupportsReasoning bool   `json:"supportsReasoning"`
-	Curated           bool   `json:"curated"`
+	ID                string  `json:"id"`
+	Name              string  `json:"name"`
+	Provider          string  `json:"provider"`
+	ContextWindow     int     `json:"contextWindow"`
+	PromptPriceMUSD   float64 `json:"promptPriceMicrosUsd"`
+	OutputPriceMUSD   float64 `json:"outputPriceMicrosUsd"`
+	SupportsReasoning bool    `json:"supportsReasoning"`
+	Curated           bool    `json:"curated"`
 }
 
 type modelPreferencesResponse struct {

@@ -13,7 +13,7 @@ type ModelSelectorProps = {
 };
 
 function formatPrice(micros: number): string {
-  return `${micros.toLocaleString(undefined, { maximumFractionDigits: 2 })}$`;
+  return `${micros.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}$`;
 }
 
 function formatContextWindow(contextWindow: number): string {

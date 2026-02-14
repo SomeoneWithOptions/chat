@@ -407,9 +407,11 @@ components:
         contextWindow:
           type: integer
         promptPriceMicrosUsd:
-          type: integer
+          type: number
+          format: double
         outputPriceMicrosUsd:
-          type: integer
+          type: number
+          format: double
         supportsReasoning:
           type: boolean
         curated:

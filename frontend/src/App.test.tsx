@@ -571,10 +571,10 @@ describe('Model selector filtering', () => {
     await user.click(screen.getByRole('button', { name: 'Million Context Model' }));
 
     expect(
-      screen.getByText((content) => content.includes('1M ctx') && content.includes('25$ In - 30$ Out')),
+      screen.getByText((content) => content.includes('1M ctx') && content.includes('25.00$ In - 30.00$ Out')),
     ).toBeInTheDocument();
     expect(
-      screen.getByText((content) => content.includes('256K ctx') && content.includes('10$ In - 12$ Out')),
+      screen.getByText((content) => content.includes('256K ctx') && content.includes('10.00$ In - 12.00$ Out')),
     ).toBeInTheDocument();
   });
 });
