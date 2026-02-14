@@ -515,7 +515,7 @@ describe('Model selector filtering', () => {
     expect(screen.getByText('Other Model')).toBeInTheDocument();
   });
 
-  it('shows context and pricing metadata using compact ctx and per-million token pricing', async () => {
+  it('shows context and pricing metadata using compact ctx with input and output pricing', async () => {
     listModelsMock.mockResolvedValueOnce({
       models: [
         {
@@ -571,10 +571,10 @@ describe('Model selector filtering', () => {
     await user.click(screen.getByRole('button', { name: 'Million Context Model' }));
 
     expect(
-      screen.getByText((content) => content.includes('1M ctx') && content.includes('$25/1M tok')),
+      screen.getByText((content) => content.includes('1M ctx') && content.includes('25$ In - 30$ Out')),
     ).toBeInTheDocument();
     expect(
-      screen.getByText((content) => content.includes('256K ctx') && content.includes('$10/1M tok')),
+      screen.getByText((content) => content.includes('256K ctx') && content.includes('10$ In - 12$ Out')),
     ).toBeInTheDocument();
   });
 });

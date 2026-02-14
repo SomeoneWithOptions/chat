@@ -13,8 +13,7 @@ type ModelSelectorProps = {
 };
 
 function formatPrice(micros: number): string {
-  if (micros <= 0) return 'Free';
-  return `$${micros.toLocaleString()}`;
+  return `${micros.toLocaleString(undefined, { maximumFractionDigits: 2 })}$`;
 }
 
 function formatContextWindow(contextWindow: number): string {
@@ -143,7 +142,7 @@ export default function ModelSelector({
                       {model.name}
                     </div>
                     <div className="model-option-meta">
-                      {formatContextWindow(model.contextWindow)} ctx &middot; {formatPrice(model.promptPriceMicrosUsd)}/1M tok
+                      {formatContextWindow(model.contextWindow)} ctx &middot; {formatPrice(model.promptPriceMicrosUsd)} In - {formatPrice(model.outputPriceMicrosUsd)} Out
                     </div>
                   </div>
                   <button
