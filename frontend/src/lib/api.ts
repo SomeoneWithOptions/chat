@@ -74,6 +74,8 @@ export type Usage = {
   costMicrosUsd?: number;
   byokInferenceCostMicrosUsd?: number;
   tokensPerSecond?: number;
+  modelId?: string;
+  providerName?: string;
 };
 
 export type UploadedFile = {

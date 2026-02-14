@@ -8,6 +8,7 @@ type MessageData = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   reasoningContent?: string;
+  modelId?: string | null;
   usage?: Usage | null;
   citations: Citation[];
 };
@@ -192,6 +193,8 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   const usagePreview = message.usage
     ? `${formatTotalCostMicros(message.usage.costMicrosUsd, message.usage.byokInferenceCostMicrosUsd)} / ${formatTokensPerSecond(message.usage.tokensPerSecond)}`
     : '';
+  const usageModel = message.usage?.modelId ?? message.modelId ?? 'Unavailable';
+  const usageProvider = message.usage?.providerName ?? 'Unavailable';
 
   return (
     <div className={`message ${message.role}`}>
@@ -452,6 +455,14 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
               className={`llm-usage-content ${usageExpanded ? 'expanded' : 'collapsed'}`}
             >
               <dl className="llm-usage-grid">
+                <div className="llm-usage-row">
+                  <dt>Model</dt>
+                  <dd>{usageModel}</dd>
+                </div>
+                <div className="llm-usage-row">
+                  <dt>Provider</dt>
+                  <dd>{usageProvider}</dd>
+                </div>
                 <div className="llm-usage-row">
                   <dt>Input tokens</dt>
                   <dd>{message.usage.promptTokens.toLocaleString()}</dd>

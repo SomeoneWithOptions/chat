@@ -554,6 +554,8 @@ type usageResponse struct {
 	CostMicrosUSD              *int     `json:"costMicrosUsd,omitempty"`
 	ByokInferenceCostMicrosUSD *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
 	TokensPerSecond            *float64 `json:"tokensPerSecond,omitempty"`
+	ModelID                    string   `json:"modelId,omitempty"`
+	ProviderName               string   `json:"providerName,omitempty"`
 }
 
 type messageResponse struct {
@@ -669,7 +671,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.grounding_enabled, m.deep_research_enabled, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -693,6 +695,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		var costMicrosUSD sql.NullInt64
 		var byokInferenceCostMicrosUSD sql.NullInt64
 		var tokensPerSecond sql.NullFloat64
+		var usageModelID sql.NullString
+		var usageProviderName sql.NullString
 		var groundingEnabled int
 		var deepResearchEnabled int
 
@@ -710,6 +714,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&costMicrosUSD,
 			&byokInferenceCostMicrosUSD,
 			&tokensPerSecond,
+			&usageModelID,
+			&usageProviderName,
 			&groundingEnabled,
 			&deepResearchEnabled,
 			&message.CreatedAt,
@@ -729,6 +735,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 				CostMicrosUSD:              nullableIntPointer(costMicrosUSD),
 				ByokInferenceCostMicrosUSD: nullableIntPointer(byokInferenceCostMicrosUSD),
 				TokensPerSecond:            nullableFloatPointer(tokensPerSecond),
+				ModelID:                    strings.TrimSpace(usageModelID.String),
+				ProviderName:               strings.TrimSpace(usageProviderName.String),
 			}
 		}
 		message.GroundingEnabled = groundingEnabled == 1
@@ -1128,7 +1136,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if assistantUsage != nil {
-		enriched := h.usageWithOpenRouterMetrics(r.Context(), *assistantUsage, streamStartedAt, firstTokenAt)
+		enriched := h.usageWithOpenRouterMetrics(r.Context(), *assistantUsage, modelID, streamStartedAt, firstTokenAt)
 		assistantUsage = &enriched
 		if started {
 			_ = writeSSEEvent(w, map[string]any{
@@ -1484,6 +1492,8 @@ type messageUsage struct {
 	CostMicrosUSD              *int
 	ByokInferenceCostMicrosUSD *int
 	TokensPerSecond            *float64
+	ModelID                    string
+	ProviderName               string
 }
 
 func (h Handler) insertMessageWithCitations(
@@ -1512,6 +1522,8 @@ func (h Handler) insertMessageWithCitations(
 	var costMicrosUSDValue any
 	var byokInferenceCostMicrosUSDValue any
 	var tokensPerSecondValue any
+	var usageModelIDValue any
+	var usageProviderNameValue any
 	if usage != nil {
 		promptTokensValue = usage.PromptTokens
 		completionTokensValue = usage.CompletionTokens
@@ -1520,6 +1532,8 @@ func (h Handler) insertMessageWithCitations(
 		costMicrosUSDValue = usage.CostMicrosUSD
 		byokInferenceCostMicrosUSDValue = usage.ByokInferenceCostMicrosUSD
 		tokensPerSecondValue = usage.TokensPerSecond
+		usageModelIDValue = nullableString(usage.ModelID)
+		usageProviderNameValue = nullableString(usage.ProviderName)
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO messages (
@@ -1537,11 +1551,13 @@ INSERT INTO messages (
   cost_microusd,
   byok_inference_cost_microusd,
   tokens_per_second,
+  usage_model_id,
+  usage_provider_name,
   grounding_enabled,
   deep_research_enabled
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
 		return "", err
 	}
 
@@ -2103,12 +2119,26 @@ func openRouterReasoningConfig(effort string) *openrouter.ReasoningConfig {
 	return &openrouter.ReasoningConfig{Effort: normalized}
 }
 
-func (h Handler) usageWithOpenRouterMetrics(ctx context.Context, usage openrouter.Usage, streamStartedAt, firstTokenAt time.Time) openrouter.Usage {
+func (h Handler) usageWithOpenRouterMetrics(
+	ctx context.Context,
+	usage openrouter.Usage,
+	requestedModelID string,
+	streamStartedAt, firstTokenAt time.Time,
+) openrouter.Usage {
 	enriched := usage
+	if modelID := strings.TrimSpace(requestedModelID); modelID != "" {
+		enriched.ModelID = modelID
+	}
 
 	generationID := strings.TrimSpace(usage.GenerationID)
 	if generationID != "" {
 		if generation, err := h.getGenerationWithRetry(ctx, generationID); err == nil {
+			if modelID := strings.TrimSpace(generation.ModelID); modelID != "" {
+				enriched.ModelID = modelID
+			}
+			if providerName := strings.TrimSpace(generation.ProviderName); providerName != "" {
+				enriched.ProviderName = providerName
+			}
 			if generation.UpstreamInferenceCostMicros != nil {
 				enriched.ByokInferenceCostMicros = generation.UpstreamInferenceCostMicros
 			}
@@ -2214,6 +2244,8 @@ func usageResponseFromOpenRouter(usage openrouter.Usage) usageResponse {
 		CostMicrosUSD:              usage.CostMicrosUSD,
 		ByokInferenceCostMicrosUSD: usage.ByokInferenceCostMicros,
 		TokensPerSecond:            usage.TokensPerSecond,
+		ModelID:                    usage.ModelID,
+		ProviderName:               usage.ProviderName,
 	}
 }
 
@@ -2229,6 +2261,8 @@ func messageUsageFromOpenRouter(usage *openrouter.Usage) *messageUsage {
 		CostMicrosUSD:              usage.CostMicrosUSD,
 		ByokInferenceCostMicrosUSD: usage.ByokInferenceCostMicros,
 		TokensPerSecond:            usage.TokensPerSecond,
+		ModelID:                    usage.ModelID,
+		ProviderName:               usage.ProviderName,
 	}
 }
 

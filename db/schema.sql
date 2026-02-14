@@ -95,6 +95,8 @@ CREATE TABLE IF NOT EXISTS messages (
   cost_microusd INTEGER,
   byok_inference_cost_microusd INTEGER,
   tokens_per_second REAL,
+  usage_model_id TEXT,
+  usage_provider_name TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

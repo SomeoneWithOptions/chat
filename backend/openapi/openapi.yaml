@@ -687,6 +687,10 @@ components:
         tokensPerSecond:
           type: number
           minimum: 0
+        modelId:
+          type: string
+        providerName:
+          type: string
     StreamEventMetadata:
       type: object
       required: [type, grounding, deepResearch, modelId]

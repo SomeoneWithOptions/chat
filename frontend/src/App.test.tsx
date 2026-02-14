@@ -279,6 +279,8 @@ describe('Deep research streaming UX', () => {
           costMicrosUsd: 420,
           byokInferenceCostMicrosUsd: 111,
           tokensPerSecond: 24.5,
+          modelId: 'openai/gpt-4o-mini',
+          providerName: 'OpenAI',
         },
       });
       await new Promise<void>((resolve) => {
@@ -306,6 +308,10 @@ describe('Deep research streaming UX', () => {
     expect(screen.getByText('$0.000531 / 24.50 tok/s')).toBeInTheDocument();
 
     await user.click(usageButton);
+    expect(screen.getByText('Model')).toBeInTheDocument();
+    expect(screen.getByText('openai/gpt-4o-mini')).toBeInTheDocument();
+    expect(screen.getByText('Provider')).toBeInTheDocument();
+    expect(screen.getByText('OpenAI')).toBeInTheDocument();
     expect(screen.getByText('Input tokens')).toBeInTheDocument();
     expect(screen.getByText('120')).toBeInTheDocument();
     expect(screen.getByText('$0.000420')).toBeInTheDocument();
@@ -507,5 +513,68 @@ describe('Model selector filtering', () => {
     await user.click(screen.getByRole('switch', { name: /show all models/i }));
 
     expect(screen.getByText('Other Model')).toBeInTheDocument();
+  });
+
+  it('shows context and pricing metadata using compact ctx and per-million token pricing', async () => {
+    listModelsMock.mockResolvedValueOnce({
+      models: [
+        {
+          id: 'openrouter/million-context',
+          name: 'Million Context Model',
+          provider: 'openrouter',
+          contextWindow: 1_000_000,
+          promptPriceMicrosUsd: 25,
+          outputPriceMicrosUsd: 30,
+          curated: true,
+        },
+        {
+          id: 'openrouter/compact-context',
+          name: 'Compact Context Model',
+          provider: 'openrouter',
+          contextWindow: 256_000,
+          promptPriceMicrosUsd: 10,
+          outputPriceMicrosUsd: 12,
+          curated: true,
+        },
+      ],
+      curatedModels: [
+        {
+          id: 'openrouter/million-context',
+          name: 'Million Context Model',
+          provider: 'openrouter',
+          contextWindow: 1_000_000,
+          promptPriceMicrosUsd: 25,
+          outputPriceMicrosUsd: 30,
+          curated: true,
+        },
+        {
+          id: 'openrouter/compact-context',
+          name: 'Compact Context Model',
+          provider: 'openrouter',
+          contextWindow: 256_000,
+          promptPriceMicrosUsd: 10,
+          outputPriceMicrosUsd: 12,
+          curated: true,
+        },
+      ],
+      favorites: [],
+      preferences: {
+        lastUsedModelId: 'openrouter/million-context',
+        lastUsedDeepResearchModelId: 'openrouter/million-context',
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+    await user.click(screen.getByRole('button', { name: 'Million Context Model' }));
+
+    expect(
+      screen.getByText((content) => content.includes('1M ctx') && content.includes('$25/1M tok')),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText((content) => content.includes('256K ctx') && content.includes('$10/1M tok')),
+    ).toBeInTheDocument();
   });
 });

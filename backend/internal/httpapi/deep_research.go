@@ -253,7 +253,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	)
 
 	if assistantUsage != nil {
-		enriched := h.usageWithOpenRouterMetrics(researchCtx, *assistantUsage, streamStartedAt, firstTokenAt)
+		enriched := h.usageWithOpenRouterMetrics(researchCtx, *assistantUsage, input.ModelID, streamStartedAt, firstTokenAt)
 		assistantUsage = &enriched
 		_ = writeSSEEvent(w, map[string]any{
 			"type":  "usage",

@@ -45,11 +45,15 @@ type Usage struct {
 	CostMicrosUSD           *int     `json:"costMicrosUsd,omitempty"`
 	ByokInferenceCostMicros *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
 	TokensPerSecond         *float64 `json:"tokensPerSecond,omitempty"`
+	ModelID                 string   `json:"modelId,omitempty"`
+	ProviderName            string   `json:"providerName,omitempty"`
 	GenerationID            string   `json:"-"`
 }
 
 type Generation struct {
 	ID                          string
+	ModelID                     string
+	ProviderName                string
 	LatencyMs                   *float64
 	GenerationTimeMs            *float64
 	TokensCompletion            *int
@@ -125,6 +129,8 @@ type getGenerationAPIResponse struct {
 
 type getGenerationAPIData struct {
 	ID                     string          `json:"id"`
+	Model                  string          `json:"model"`
+	ProviderName           string          `json:"provider_name"`
 	Latency                json.RawMessage `json:"latency"`
 	GenerationTime         json.RawMessage `json:"generation_time"`
 	TokensCompletion       json.RawMessage `json:"tokens_completion"`
@@ -366,6 +372,8 @@ func (c Client) GetGeneration(ctx context.Context, generationID string) (Generat
 
 	return Generation{
 		ID:                          parsedID,
+		ModelID:                     strings.TrimSpace(parsed.Data.Model),
+		ProviderName:                strings.TrimSpace(parsed.Data.ProviderName),
 		LatencyMs:                   parseOptionalFloat(parsed.Data.Latency),
 		GenerationTimeMs:            parseOptionalFloat(parsed.Data.GenerationTime),
 		TokensCompletion:            parseOptionalInt(parsed.Data.TokensCompletion),

@@ -14,9 +14,19 @@ type ModelSelectorProps = {
 
 function formatPrice(micros: number): string {
   if (micros <= 0) return 'Free';
-  const dollars = micros / 1_000_000;
-  if (dollars < 0.001) return `$${dollars.toFixed(6)}`;
-  return `$${dollars.toFixed(4)}`;
+  return `$${micros.toLocaleString()}`;
+}
+
+function formatContextWindow(contextWindow: number): string {
+  if (contextWindow >= 1_000_000) {
+    const millions = contextWindow / 1_000_000;
+    return `${Number.isInteger(millions) ? millions.toFixed(0) : millions.toFixed(1)}M`;
+  }
+  if (contextWindow >= 1_000) {
+    const thousands = contextWindow / 1_000;
+    return `${Number.isInteger(thousands) ? thousands.toFixed(0) : thousands.toFixed(1)}K`;
+  }
+  return contextWindow.toLocaleString();
 }
 
 export default function ModelSelector({
@@ -133,7 +143,7 @@ export default function ModelSelector({
                       {model.name}
                     </div>
                     <div className="model-option-meta">
-                      {model.provider} &middot; {model.contextWindow.toLocaleString()} ctx &middot; {formatPrice(model.promptPriceMicrosUsd)}/tok
+                      {formatContextWindow(model.contextWindow)} ctx &middot; {formatPrice(model.promptPriceMicrosUsd)}/1M tok
                     </div>
                   </div>
                   <button

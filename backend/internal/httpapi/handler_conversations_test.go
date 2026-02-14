@@ -945,6 +945,8 @@ func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) 
 		generations: map[string]openrouter.Generation{
 			generationID: {
 				ID:                          generationID,
+				ModelID:                     "openai/gpt-4o-mini",
+				ProviderName:                "OpenAI",
 				GenerationTimeMs:            pointerToFloat64(6170),
 				NativeTokensCompletion:      pointerToInt(480),
 				UpstreamInferenceCostMicros: pointerToInt(8000),
@@ -984,6 +986,14 @@ func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) 
 	if !ok || int(byokMicros) != 8000 {
 		t.Fatalf("unexpected usage byokInferenceCostMicrosUsd: %+v", lastUsage["byokInferenceCostMicrosUsd"])
 	}
+	modelID, ok := lastUsage["modelId"].(string)
+	if !ok || modelID != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected usage modelId: %+v", lastUsage["modelId"])
+	}
+	providerName, ok := lastUsage["providerName"].(string)
+	if !ok || providerName != "OpenAI" {
+		t.Fatalf("unexpected usage providerName: %+v", lastUsage["providerName"])
+	}
 	tokensPerSecond, ok := lastUsage["tokensPerSecond"].(float64)
 	if !ok {
 		t.Fatalf("expected tokensPerSecond in usage event, got: %+v", lastUsage)
@@ -994,13 +1004,15 @@ func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) 
 
 	var persistedByokMicros sql.NullInt64
 	var persistedTokensPerSecond sql.NullFloat64
+	var persistedUsageModelID sql.NullString
+	var persistedUsageProviderName sql.NullString
 	if err := db.QueryRow(`
-SELECT byok_inference_cost_microusd, tokens_per_second
+SELECT byok_inference_cost_microusd, tokens_per_second, usage_model_id, usage_provider_name
 FROM messages
 WHERE user_id = ? AND role = 'assistant'
 ORDER BY rowid DESC
 LIMIT 1;
-`, user.ID).Scan(&persistedByokMicros, &persistedTokensPerSecond); err != nil {
+`, user.ID).Scan(&persistedByokMicros, &persistedTokensPerSecond, &persistedUsageModelID, &persistedUsageProviderName); err != nil {
 		t.Fatalf("query persisted usage metrics: %v", err)
 	}
 	if !persistedByokMicros.Valid || persistedByokMicros.Int64 != 8000 {
@@ -1008,6 +1020,41 @@ LIMIT 1;
 	}
 	if !persistedTokensPerSecond.Valid || persistedTokensPerSecond.Float64 < 77.7 || persistedTokensPerSecond.Float64 > 77.9 {
 		t.Fatalf("unexpected persisted tokens_per_second: %+v", persistedTokensPerSecond)
+	}
+	if !persistedUsageModelID.Valid || persistedUsageModelID.String != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected persisted usage_model_id: %+v", persistedUsageModelID)
+	}
+	if !persistedUsageProviderName.Valid || persistedUsageProviderName.String != "OpenAI" {
+		t.Fatalf("unexpected persisted usage_provider_name: %+v", persistedUsageProviderName)
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? ORDER BY rowid DESC LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation id: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+conversationID+"/messages", nil)
+	listReq = requestWithSessionUser(listReq, user)
+	listReq = requestWithConversationID(listReq, conversationID)
+	listResp := httptest.NewRecorder()
+	handler.ListConversationMessages(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d (%s)", http.StatusOK, listResp.Code, listResp.Body.String())
+	}
+
+	var payload struct {
+		Messages []messageResponse `json:"messages"`
+	}
+	decodeJSONBody(t, listResp, &payload)
+	if len(payload.Messages) != 2 || payload.Messages[1].Usage == nil {
+		t.Fatalf("expected assistant usage in list response, got %+v", payload.Messages)
+	}
+	if payload.Messages[1].Usage.ModelID != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected listed usage modelId: %+v", payload.Messages[1].Usage.ModelID)
+	}
+	if payload.Messages[1].Usage.ProviderName != "OpenAI" {
+		t.Fatalf("unexpected listed usage providerName: %+v", payload.Messages[1].Usage.ProviderName)
 	}
 }
 
@@ -2027,6 +2074,8 @@ CREATE TABLE messages (
   cost_microusd INTEGER,
   byok_inference_cost_microusd INTEGER,
   tokens_per_second REAL,
+  usage_model_id TEXT,
+  usage_provider_name TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

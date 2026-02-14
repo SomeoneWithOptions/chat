@@ -217,6 +217,8 @@ func TestGetGenerationParsesTimingAndUsage(t *testing.T) {
 		_, _ = w.Write([]byte(`{
 			"data": {
 				"id": "gen-abc",
+				"model": "openai/gpt-4o-mini",
+				"provider_name": "OpenAI",
 				"latency": 2670,
 				"generation_time": 6170,
 				"tokens_completion": 480,
@@ -239,6 +241,12 @@ func TestGetGenerationParsesTimingAndUsage(t *testing.T) {
 
 	if generation.ID != "gen-abc" {
 		t.Fatalf("unexpected generation id: %q", generation.ID)
+	}
+	if generation.ModelID != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected generation model id: %q", generation.ModelID)
+	}
+	if generation.ProviderName != "OpenAI" {
+		t.Fatalf("unexpected generation provider name: %q", generation.ProviderName)
 	}
 	if generation.LatencyMs == nil || *generation.LatencyMs != 2670 {
 		t.Fatalf("unexpected latency ms: %+v", generation.LatencyMs)

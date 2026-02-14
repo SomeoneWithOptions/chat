@@ -472,6 +472,7 @@ export default function App() {
             role: m.role,
             content: m.content,
             reasoningContent: m.reasoningContent ?? '',
+            modelId: m.modelId ?? null,
             usage: m.usage ?? null,
             citations: m.citations ?? [],
           })),
@@ -821,6 +822,7 @@ export default function App() {
       role: 'user',
       content: prompt.trim(),
       reasoningContent: '',
+      modelId: selectedModel,
       usage: null,
       citations: [],
     };
@@ -829,6 +831,7 @@ export default function App() {
       role: 'assistant',
       content: '',
       reasoningContent: '',
+      modelId: selectedModel,
       usage: null,
       citations: [],
     };
@@ -862,6 +865,11 @@ export default function App() {
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === assistantMessage.id ? { ...m, modelId: eventData.modelId } : m,
+              ),
+            );
             if (!isDeepResearchRequest) {
               setThinkingTrace((existing) => {
                 if (!existing) return existing;
