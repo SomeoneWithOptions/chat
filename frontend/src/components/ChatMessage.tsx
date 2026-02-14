@@ -65,6 +65,11 @@ function formatCostMicros(micros?: number): string {
   return `$${dollars.toFixed(6)}`;
 }
 
+function formatTotalCostMicros(costMicros?: number, byokCostMicros?: number): string {
+  if (costMicros === undefined && byokCostMicros === undefined) return 'Unavailable';
+  return formatCostMicros((costMicros ?? 0) + (byokCostMicros ?? 0));
+}
+
 function formatTokensPerSecond(tokensPerSecond?: number): string {
   if (tokensPerSecond === undefined) return 'Unavailable';
   return `${tokensPerSecond.toFixed(2)} tok/s`;
@@ -185,7 +190,7 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
     ? message.reasoningContent.slice(0, 100).replace(/\n/g, ' ').trim() + (message.reasoningContent.length > 100 ? '...' : '')
     : '';
   const usagePreview = message.usage
-    ? `${message.usage.promptTokens.toLocaleString()} in / ${message.usage.completionTokens.toLocaleString()} out / ${formatCostMicros(message.usage.costMicrosUsd)}`
+    ? `${formatTotalCostMicros(message.usage.costMicrosUsd, message.usage.byokInferenceCostMicrosUsd)} / ${formatTokensPerSecond(message.usage.tokensPerSecond)}`
     : '';
 
   return (

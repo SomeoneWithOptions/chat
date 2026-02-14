@@ -303,6 +303,7 @@ describe('Deep research streaming UX', () => {
     const sourcesButton = await screen.findByRole('button', { name: /sources/i });
     const usageButton = await screen.findByRole('button', { name: /usage/i });
     expect((sourcesButton.compareDocumentPosition(usageButton) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0).toBe(true);
+    expect(screen.getByText('$0.000531 / 24.50 tok/s')).toBeInTheDocument();
 
     await user.click(usageButton);
     expect(screen.getByText('Input tokens')).toBeInTheDocument();
