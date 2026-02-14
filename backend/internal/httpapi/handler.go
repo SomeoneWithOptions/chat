@@ -546,13 +546,13 @@ type citationResponse struct {
 }
 
 type usageResponse struct {
-	PromptTokens                 int      `json:"promptTokens"`
-	CompletionTokens             int      `json:"completionTokens"`
-	TotalTokens                  int      `json:"totalTokens"`
-	ReasoningTokens              *int     `json:"reasoningTokens,omitempty"`
-	CostMicrosUSD                *int     `json:"costMicrosUsd,omitempty"`
-	ByokInferenceCostMicrosUSD   *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
-	TokensPerSecond              *float64 `json:"tokensPerSecond,omitempty"`
+	PromptTokens               int      `json:"promptTokens"`
+	CompletionTokens           int      `json:"completionTokens"`
+	TotalTokens                int      `json:"totalTokens"`
+	ReasoningTokens            *int     `json:"reasoningTokens,omitempty"`
+	CostMicrosUSD              *int     `json:"costMicrosUsd,omitempty"`
+	ByokInferenceCostMicrosUSD *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
+	TokensPerSecond            *float64 `json:"tokensPerSecond,omitempty"`
 }
 
 type messageResponse struct {
@@ -721,13 +721,13 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		message.ModelID = nullableStringPointer(modelID)
 		if promptTokens.Valid && completionTokens.Valid && totalTokens.Valid {
 			message.Usage = &usageResponse{
-				PromptTokens:     int(promptTokens.Int64),
-				CompletionTokens: int(completionTokens.Int64),
-				TotalTokens:      int(totalTokens.Int64),
-				ReasoningTokens:  nullableIntPointer(reasoningTokens),
-				CostMicrosUSD:    nullableIntPointer(costMicrosUSD),
+				PromptTokens:               int(promptTokens.Int64),
+				CompletionTokens:           int(completionTokens.Int64),
+				TotalTokens:                int(totalTokens.Int64),
+				ReasoningTokens:            nullableIntPointer(reasoningTokens),
+				CostMicrosUSD:              nullableIntPointer(costMicrosUSD),
 				ByokInferenceCostMicrosUSD: nullableIntPointer(byokInferenceCostMicrosUSD),
-				TokensPerSecond: nullableFloatPointer(tokensPerSecond),
+				TokensPerSecond:            nullableFloatPointer(tokensPerSecond),
 			}
 		}
 		message.GroundingEnabled = groundingEnabled == 1
@@ -1037,6 +1037,14 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var assistantUsage *openrouter.Usage
+	var streamStartedAt time.Time
+	var firstTokenAt time.Time
+
+	markFirstTokenAt := func() {
+		if firstTokenAt.IsZero() {
+			firstTokenAt = time.Now()
+		}
+	}
 
 	streamErr := h.openrouter.StreamChatCompletion(
 		r.Context(),
@@ -1074,10 +1082,12 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 			started = true
+			streamStartedAt = time.Now()
 			return nil
 		},
 		func(delta string) error {
 			assistantContent.WriteString(delta)
+			markFirstTokenAt()
 
 			if err := writeSSEEvent(w, map[string]any{
 				"type":  "token",
@@ -1090,6 +1100,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		},
 		func(reasoning string) error {
 			reasoningContent.WriteString(reasoning)
+			markFirstTokenAt()
 
 			if err := writeSSEEvent(w, map[string]any{
 				"type":  "reasoning",
@@ -1101,12 +1112,12 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		func(usage openrouter.Usage) error {
-			copied := usage
+			copied := usageWithTokensPerSecond(usage, streamStartedAt, firstTokenAt)
 			assistantUsage = &copied
 
 			if err := writeSSEEvent(w, map[string]any{
 				"type":  "usage",
-				"usage": usageResponseFromOpenRouter(usage),
+				"usage": usageResponseFromOpenRouter(copied),
 			}); err != nil {
 				return err
 			}
@@ -2079,13 +2090,46 @@ func openRouterReasoningConfig(effort string) *openrouter.ReasoningConfig {
 	return &openrouter.ReasoningConfig{Effort: normalized}
 }
 
+func usageWithTokensPerSecond(usage openrouter.Usage, streamStartedAt, firstTokenAt time.Time) openrouter.Usage {
+	if usage.TokensPerSecond != nil {
+		return usage
+	}
+
+	if usage.CompletionTokens <= 0 {
+		return usage
+	}
+
+	startedAt := firstTokenAt
+	if startedAt.IsZero() {
+		startedAt = streamStartedAt
+	}
+	if startedAt.IsZero() {
+		return usage
+	}
+
+	elapsed := time.Since(startedAt).Seconds()
+	if elapsed <= 0 {
+		return usage
+	}
+
+	tokensPerSecond := float64(usage.CompletionTokens) / elapsed
+	if tokensPerSecond <= 0 {
+		return usage
+	}
+
+	usage.TokensPerSecond = &tokensPerSecond
+	return usage
+}
+
 func usageResponseFromOpenRouter(usage openrouter.Usage) usageResponse {
 	return usageResponse{
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		ReasoningTokens:  usage.ReasoningTokens,
-		CostMicrosUSD:    usage.CostMicrosUSD,
+		PromptTokens:               usage.PromptTokens,
+		CompletionTokens:           usage.CompletionTokens,
+		TotalTokens:                usage.TotalTokens,
+		ReasoningTokens:            usage.ReasoningTokens,
+		CostMicrosUSD:              usage.CostMicrosUSD,
+		ByokInferenceCostMicrosUSD: usage.ByokInferenceCostMicros,
+		TokensPerSecond:            usage.TokensPerSecond,
 	}
 }
 
@@ -2094,11 +2138,13 @@ func messageUsageFromOpenRouter(usage *openrouter.Usage) *messageUsage {
 		return nil
 	}
 	return &messageUsage{
-		PromptTokens:     usage.PromptTokens,
-		CompletionTokens: usage.CompletionTokens,
-		TotalTokens:      usage.TotalTokens,
-		ReasoningTokens:  usage.ReasoningTokens,
-		CostMicrosUSD:    usage.CostMicrosUSD,
+		PromptTokens:               usage.PromptTokens,
+		CompletionTokens:           usage.CompletionTokens,
+		TotalTokens:                usage.TotalTokens,
+		ReasoningTokens:            usage.ReasoningTokens,
+		CostMicrosUSD:              usage.CostMicrosUSD,
+		ByokInferenceCostMicrosUSD: usage.ByokInferenceCostMicros,
+		TokensPerSecond:            usage.TokensPerSecond,
 	}
 }
 
@@ -2148,6 +2194,14 @@ func nullableIntPointer(value sql.NullInt64) *int {
 		return nil
 	}
 	out := int(value.Int64)
+	return &out
+}
+
+func nullableFloatPointer(value sql.NullFloat64) *float64 {
+	if !value.Valid {
+		return nil
+	}
+	out := value.Float64
 	return &out
 }
 

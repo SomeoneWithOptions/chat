@@ -201,6 +201,14 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var assistantUsage *openrouter.Usage
+	var streamStartedAt time.Time
+	var firstTokenAt time.Time
+
+	markFirstTokenAt := func() {
+		if firstTokenAt.IsZero() {
+			firstTokenAt = time.Now()
+		}
+	}
 	streamErr := h.openrouter.StreamChatCompletion(
 		researchCtx,
 		openrouter.StreamRequest{
@@ -208,9 +216,13 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			Messages:  promptMessages,
 			Reasoning: openRouterReasoningConfig(input.ReasoningEffort),
 		},
-		nil,
+		func() error {
+			streamStartedAt = time.Now()
+			return nil
+		},
 		func(delta string) error {
 			assistantContent.WriteString(delta)
+			markFirstTokenAt()
 			if err := writeSSEEvent(w, map[string]any{"type": "token", "delta": delta}); err != nil {
 				return err
 			}
@@ -219,6 +231,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		},
 		func(reasoning string) error {
 			reasoningContent.WriteString(reasoning)
+			markFirstTokenAt()
 			if err := writeSSEEvent(w, map[string]any{"type": "reasoning", "delta": reasoning}); err != nil {
 				return err
 			}
@@ -226,11 +239,11 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			return nil
 		},
 		func(usage openrouter.Usage) error {
-			copied := usage
+			copied := usageWithTokensPerSecond(usage, streamStartedAt, firstTokenAt)
 			assistantUsage = &copied
 			if err := writeSSEEvent(w, map[string]any{
 				"type":  "usage",
-				"usage": usageResponseFromOpenRouter(usage),
+				"usage": usageResponseFromOpenRouter(copied),
 			}); err != nil {
 				return err
 			}

@@ -72,6 +72,8 @@ export type Usage = {
   totalTokens: number;
   reasoningTokens?: number;
   costMicrosUsd?: number;
+  byokInferenceCostMicrosUsd?: number;
+  tokensPerSecond?: number;
 };
 
 export type UploadedFile = {

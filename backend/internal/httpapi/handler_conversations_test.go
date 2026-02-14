@@ -862,14 +862,16 @@ WHERE user_id = ?;
 func TestChatMessagesStreamsAndPersistsUsage(t *testing.T) {
 	reasoningTokens := 8
 	costMicros := 77
+	byokInferenceCostMicros := 33
 	handler, db := newTestHandler(t, stubStreamer{
 		tokens: []string{"Usage", " tracked"},
 		usage: &openrouter.Usage{
-			PromptTokens:     12,
-			CompletionTokens: 20,
-			TotalTokens:      32,
-			ReasoningTokens:  &reasoningTokens,
-			CostMicrosUSD:    &costMicros,
+			PromptTokens:            12,
+			CompletionTokens:        20,
+			TotalTokens:             32,
+			ReasoningTokens:         &reasoningTokens,
+			CostMicrosUSD:           &costMicros,
+			ByokInferenceCostMicros: &byokInferenceCostMicros,
 		},
 	})
 	t.Cleanup(func() { _ = db.Close() })
@@ -896,13 +898,15 @@ func TestChatMessagesStreamsAndPersistsUsage(t *testing.T) {
 	var totalTokens sql.NullInt64
 	var persistedReasoningTokens sql.NullInt64
 	var persistedCostMicros sql.NullInt64
+	var persistedByokInferenceCostMicros sql.NullInt64
+	var persistedTokensPerSecond sql.NullFloat64
 	if err := db.QueryRow(`
-SELECT prompt_tokens, completion_tokens, total_tokens, reasoning_tokens, cost_microusd
+SELECT prompt_tokens, completion_tokens, total_tokens, reasoning_tokens, cost_microusd, byok_inference_cost_microusd, tokens_per_second
 FROM messages
 WHERE user_id = ? AND role = 'assistant'
 ORDER BY rowid DESC
 LIMIT 1;
-`, user.ID).Scan(&promptTokens, &completionTokens, &totalTokens, &persistedReasoningTokens, &persistedCostMicros); err != nil {
+`, user.ID).Scan(&promptTokens, &completionTokens, &totalTokens, &persistedReasoningTokens, &persistedCostMicros, &persistedByokInferenceCostMicros, &persistedTokensPerSecond); err != nil {
 		t.Fatalf("query assistant usage: %v", err)
 	}
 	if !promptTokens.Valid || promptTokens.Int64 != 12 {
@@ -919,6 +923,12 @@ LIMIT 1;
 	}
 	if !persistedCostMicros.Valid || persistedCostMicros.Int64 != 77 {
 		t.Fatalf("unexpected cost micros: %+v", persistedCostMicros)
+	}
+	if !persistedByokInferenceCostMicros.Valid || persistedByokInferenceCostMicros.Int64 != 33 {
+		t.Fatalf("unexpected BYOK inference cost micros: %+v", persistedByokInferenceCostMicros)
+	}
+	if !persistedTokensPerSecond.Valid || persistedTokensPerSecond.Float64 <= 0 {
+		t.Fatalf("unexpected tokens per second: %+v", persistedTokensPerSecond)
 	}
 }
 
@@ -1916,6 +1926,8 @@ CREATE TABLE messages (
   total_tokens INTEGER,
   reasoning_tokens INTEGER,
   cost_microusd INTEGER,
+  byok_inference_cost_microusd INTEGER,
+  tokens_per_second REAL,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

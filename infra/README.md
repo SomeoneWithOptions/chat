@@ -37,6 +37,8 @@ One-time GCP setup helper:
 ./scripts/setup_github_oidc_cloud_run_backend.sh
 ```
 
+The setup helper also applies an Artifact Registry cleanup policy on the configured repo, keeping the latest 10 images by default (override with `--artifact-keep-latest`).
+
 Recommended GitHub repository variables:
 
 - `GCP_WORKLOAD_IDENTITY_PROVIDER` (example: `projects/1011074047731/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider`)

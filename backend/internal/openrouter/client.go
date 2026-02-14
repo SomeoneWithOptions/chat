@@ -37,13 +37,13 @@ type Model struct {
 }
 
 type Usage struct {
-	PromptTokens             int      `json:"promptTokens"`
-	CompletionTokens         int      `json:"completionTokens"`
-	TotalTokens              int      `json:"totalTokens"`
-	ReasoningTokens          *int     `json:"reasoningTokens,omitempty"`
-	CostMicrosUSD            *int     `json:"costMicrosUsd,omitempty"`
-	ByokInferenceCostMicros  *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
-	TokensPerSecond          *float64 `json:"tokensPerSecond,omitempty"`
+	PromptTokens            int      `json:"promptTokens"`
+	CompletionTokens        int      `json:"completionTokens"`
+	TotalTokens             int      `json:"totalTokens"`
+	ReasoningTokens         *int     `json:"reasoningTokens,omitempty"`
+	CostMicrosUSD           *int     `json:"costMicrosUsd,omitempty"`
+	ByokInferenceCostMicros *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
+	TokensPerSecond         *float64 `json:"tokensPerSecond,omitempty"`
 }
 
 type ReasoningConfig struct {
@@ -234,7 +234,7 @@ func (c Client) StreamChatCompletion(
 
 		if parsed.Usage != nil && onUsage != nil {
 			usage := Usage{
-				PromptTokens:    parsed.Usage.PromptTokens,
+				PromptTokens:     parsed.Usage.PromptTokens,
 				CompletionTokens: parsed.Usage.CompletionTokens,
 				TotalTokens:      parsed.Usage.TotalTokens,
 				CostMicrosUSD:    parseOptionalPriceMicros(parsed.Usage.Cost),

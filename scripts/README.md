@@ -21,4 +21,5 @@ Utility scripts for local development, DB lifecycle, and deployment.
 - `./scripts/local_image_deploy_cloud_run_backend.sh --env-file /path/to/env.yaml`: image-based deploy with env file replacement.
 - Common overrides: `--project`, `--region`, `--service`, `--image-repo`, `--tag`, `--context`, `--dockerfile`, `--private`, `--dry-run`.
 - Cloud Run compatibility guard: image builds are enforced as `linux/amd64`.
-- `./scripts/setup_github_oidc_cloud_run_backend.sh`: one-time setup for GitHub Actions Workload Identity Federation and deploy IAM bindings.
+- `./scripts/setup_github_oidc_cloud_run_backend.sh`: one-time setup for GitHub Actions Workload Identity Federation, deploy IAM bindings, and Artifact Registry image cleanup policy.
+- Cleanup policy default keeps the latest 10 images in the Artifact Registry repo; override with `--artifact-keep-latest <count>`.

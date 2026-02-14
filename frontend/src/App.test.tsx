@@ -277,6 +277,8 @@ describe('Deep research streaming UX', () => {
           completionTokens: 48,
           totalTokens: 168,
           costMicrosUsd: 420,
+          byokInferenceCostMicrosUsd: 111,
+          tokensPerSecond: 24.5,
         },
       });
       await new Promise<void>((resolve) => {
@@ -306,6 +308,8 @@ describe('Deep research streaming UX', () => {
     expect(screen.getByText('Input tokens')).toBeInTheDocument();
     expect(screen.getByText('120')).toBeInTheDocument();
     expect(screen.getByText('$0.000420')).toBeInTheDocument();
+    expect(screen.getByText('$0.000111')).toBeInTheDocument();
+    expect(screen.getByText('24.50 tok/s')).toBeInTheDocument();
 
     if (releaseStream) releaseStream();
   });

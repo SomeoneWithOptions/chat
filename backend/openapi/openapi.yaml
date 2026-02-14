@@ -681,6 +681,12 @@ components:
         costMicrosUsd:
           type: integer
           minimum: 0
+        byokInferenceCostMicrosUsd:
+          type: integer
+          minimum: 0
+        tokensPerSecond:
+          type: number
+          minimum: 0
     StreamEventMetadata:
       type: object
       required: [type, grounding, deepResearch, modelId]

@@ -65,6 +65,11 @@ function formatCostMicros(micros?: number): string {
   return `$${dollars.toFixed(6)}`;
 }
 
+function formatTokensPerSecond(tokensPerSecond?: number): string {
+  if (tokensPerSecond === undefined) return 'Unavailable';
+  return `${tokensPerSecond.toFixed(2)} tok/s`;
+}
+
 async function copyToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
@@ -463,6 +468,14 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
                 <div className="llm-usage-row">
                   <dt>Price (USD)</dt>
                   <dd>{formatCostMicros(message.usage.costMicrosUsd)}</dd>
+                </div>
+                <div className="llm-usage-row">
+                  <dt>BYOK inference (USD)</dt>
+                  <dd>{formatCostMicros(message.usage.byokInferenceCostMicrosUsd)}</dd>
+                </div>
+                <div className="llm-usage-row">
+                  <dt>Tokens per second</dt>
+                  <dd>{formatTokensPerSecond(message.usage.tokensPerSecond)}</dd>
                 </div>
               </dl>
             </div>
