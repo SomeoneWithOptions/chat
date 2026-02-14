@@ -736,7 +736,7 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 				ByokInferenceCostMicrosUSD: nullableIntPointer(byokInferenceCostMicrosUSD),
 				TokensPerSecond:            nullableFloatPointer(tokensPerSecond),
 				ModelID:                    strings.TrimSpace(usageModelID.String),
-				ProviderName:               strings.TrimSpace(usageProviderName.String),
+				ProviderName:               normalizeProviderName(usageProviderName.String),
 			}
 		}
 		message.GroundingEnabled = groundingEnabled == 1
@@ -2137,7 +2137,7 @@ func (h Handler) usageWithOpenRouterMetrics(
 				enriched.ModelID = modelID
 			}
 			if providerName := strings.TrimSpace(generation.ProviderName); providerName != "" {
-				enriched.ProviderName = providerName
+				enriched.ProviderName = normalizeProviderName(providerName)
 			}
 			if generation.UpstreamInferenceCostMicros != nil {
 				enriched.ByokInferenceCostMicros = generation.UpstreamInferenceCostMicros
@@ -2245,7 +2245,7 @@ func usageResponseFromOpenRouter(usage openrouter.Usage) usageResponse {
 		ByokInferenceCostMicrosUSD: usage.ByokInferenceCostMicros,
 		TokensPerSecond:            usage.TokensPerSecond,
 		ModelID:                    usage.ModelID,
-		ProviderName:               usage.ProviderName,
+		ProviderName:               normalizeProviderName(usage.ProviderName),
 	}
 }
 
@@ -2262,8 +2262,16 @@ func messageUsageFromOpenRouter(usage *openrouter.Usage) *messageUsage {
 		ByokInferenceCostMicrosUSD: usage.ByokInferenceCostMicros,
 		TokensPerSecond:            usage.TokensPerSecond,
 		ModelID:                    usage.ModelID,
-		ProviderName:               usage.ProviderName,
+		ProviderName:               normalizeProviderName(usage.ProviderName),
 	}
+}
+
+func normalizeProviderName(raw string) string {
+	name := strings.TrimSpace(raw)
+	if name == "Google" {
+		return "Google Vertex"
+	}
+	return name
 }
 
 func nullableString(raw string) sql.NullString {

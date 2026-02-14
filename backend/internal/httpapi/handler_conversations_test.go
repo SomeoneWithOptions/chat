@@ -946,7 +946,7 @@ func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) 
 			generationID: {
 				ID:                          generationID,
 				ModelID:                     "openai/gpt-4o-mini",
-				ProviderName:                "OpenAI",
+				ProviderName:                "Google",
 				GenerationTimeMs:            pointerToFloat64(6170),
 				NativeTokensCompletion:      pointerToInt(480),
 				UpstreamInferenceCostMicros: pointerToInt(8000),
@@ -991,7 +991,7 @@ func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) 
 		t.Fatalf("unexpected usage modelId: %+v", lastUsage["modelId"])
 	}
 	providerName, ok := lastUsage["providerName"].(string)
-	if !ok || providerName != "OpenAI" {
+	if !ok || providerName != "Google Vertex" {
 		t.Fatalf("unexpected usage providerName: %+v", lastUsage["providerName"])
 	}
 	tokensPerSecond, ok := lastUsage["tokensPerSecond"].(float64)
@@ -1024,7 +1024,7 @@ LIMIT 1;
 	if !persistedUsageModelID.Valid || persistedUsageModelID.String != "openai/gpt-4o-mini" {
 		t.Fatalf("unexpected persisted usage_model_id: %+v", persistedUsageModelID)
 	}
-	if !persistedUsageProviderName.Valid || persistedUsageProviderName.String != "OpenAI" {
+	if !persistedUsageProviderName.Valid || persistedUsageProviderName.String != "Google Vertex" {
 		t.Fatalf("unexpected persisted usage_provider_name: %+v", persistedUsageProviderName)
 	}
 
@@ -1053,7 +1053,7 @@ LIMIT 1;
 	if payload.Messages[1].Usage.ModelID != "openai/gpt-4o-mini" {
 		t.Fatalf("unexpected listed usage modelId: %+v", payload.Messages[1].Usage.ModelID)
 	}
-	if payload.Messages[1].Usage.ProviderName != "OpenAI" {
+	if payload.Messages[1].Usage.ProviderName != "Google Vertex" {
 		t.Fatalf("unexpected listed usage providerName: %+v", payload.Messages[1].Usage.ProviderName)
 	}
 }
