@@ -13,7 +13,7 @@ Deployment script:
 Image-based deploy script (local build -> Artifact Registry -> Cloud Run):
 
 ```bash
-./scripts/deploy_cloud_run_backend_image.sh
+./scripts/local_image_deploy_cloud_run_backend.sh
 ```
 
 The image deploy script automatically reuses the currently deployed service image repository when `--image-repo` is not provided.
@@ -22,8 +22,31 @@ Optional deployment with explicit env file override:
 
 ```bash
 ./scripts/deploy_cloud_run_backend.sh --env-file /path/to/cloud-run.env.yaml
-./scripts/deploy_cloud_run_backend_image.sh --env-file /path/to/cloud-run.env.yaml
+./scripts/local_image_deploy_cloud_run_backend.sh --env-file /path/to/cloud-run.env.yaml
 ```
+
+## GitHub Actions deploy (OIDC federation)
+
+Workflow:
+
+- `.github/workflows/deploy_backend_cloud_run.yml`
+
+One-time GCP setup helper:
+
+```bash
+./scripts/setup_github_oidc_cloud_run_backend.sh
+```
+
+Recommended GitHub repository variables:
+
+- `GCP_WORKLOAD_IDENTITY_PROVIDER` (example: `projects/1011074047731/locations/global/workloadIdentityPools/github-actions-pool/providers/github-actions-provider`)
+- `GCP_DEPLOY_SERVICE_ACCOUNT` (example: `chat-backend-gha-deployer@chat-486915.iam.gserviceaccount.com`)
+- `GCP_PROJECT_ID` (default in workflow: `chat-486915`)
+- `GCP_REGION` (default in workflow: `us-east1`)
+- `CLOUD_RUN_SERVICE` (default in workflow: `chat-backend`)
+- `ARTIFACT_REGISTRY_REPOSITORY` (default in workflow: `cloud-run-source-deploy`)
+- `BACKEND_IMAGE_NAME` (default in workflow: `chat-backend`)
+- `CLOUD_RUN_ALLOW_UNAUTHENTICATED` (`true`/`false`, default: `true`)
 
 Starter template:
 
