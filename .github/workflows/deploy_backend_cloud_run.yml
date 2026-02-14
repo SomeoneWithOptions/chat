@@ -6,8 +6,6 @@ on:
       - main
     paths:
       - "backend/**"
-      - ".github/workflows/deploy_backend_cloud_run.yml"
-      - "scripts/local_image_deploy_cloud_run_backend.sh"
   workflow_dispatch:
 
 permissions:
