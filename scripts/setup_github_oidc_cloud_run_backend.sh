@@ -10,6 +10,7 @@ PROVIDER_ID="${PROVIDER_ID:-github-actions-provider}"
 DEPLOYER_SA_NAME="${DEPLOYER_SA_NAME:-chat-backend-gha-deployer}"
 REGION="${REGION:-us-east1}"
 ARTIFACT_REPOSITORY="${ARTIFACT_REPOSITORY:-cloud-run-source-deploy}"
+ARTIFACT_KEEP_LATEST="${ARTIFACT_KEEP_LATEST:-10}"
 SERVICE_NAME="${SERVICE_NAME:-chat-backend}"
 RUNTIME_SA="${RUNTIME_SA:-}"
 
@@ -30,13 +31,15 @@ Options:
   --deployer-sa-name <name>           Service account name for deploys (default: ${DEPLOYER_SA_NAME}).
   --region <region>                   Artifact Registry/Cloud Run region (default: ${REGION}).
   --artifact-repo <repo>              Artifact Registry docker repo (default: ${ARTIFACT_REPOSITORY}).
+  --artifact-keep-latest <count>      Artifact Registry cleanup keep-count (default: ${ARTIFACT_KEEP_LATEST}).
   --service <service-name>            Cloud Run service name to inspect for runtime SA (default: ${SERVICE_NAME}).
   --runtime-sa <email>                Cloud Run runtime service account email (default: auto-detect from service).
   -h, --help                          Show help.
 
 Environment variables:
   PROJECT_ID, PROJECT_NUMBER, REPO, BRANCH_REF, POOL_ID, PROVIDER_ID,
-  DEPLOYER_SA_NAME, REGION, ARTIFACT_REPOSITORY, SERVICE_NAME, RUNTIME_SA
+  DEPLOYER_SA_NAME, REGION, ARTIFACT_REPOSITORY, ARTIFACT_KEEP_LATEST,
+  SERVICE_NAME, RUNTIME_SA
 EOF
 }
 
@@ -76,6 +79,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --artifact-repo)
       ARTIFACT_REPOSITORY="${2:-}"
+      shift 2
+      ;;
+    --artifact-keep-latest)
+      ARTIFACT_KEEP_LATEST="${2:-}"
       shift 2
       ;;
     --service)
@@ -126,6 +133,11 @@ fi
 if [[ -z "${RUNTIME_SA}" ]]; then
   echo "error: runtime service account could not be auto-detected." >&2
   echo "       pass --runtime-sa explicitly." >&2
+  exit 1
+fi
+
+if ! [[ "${ARTIFACT_KEEP_LATEST}" =~ ^[0-9]+$ ]] || [[ "${ARTIFACT_KEEP_LATEST}" -lt 1 ]]; then
+  echo "error: --artifact-keep-latest must be an integer >= 1" >&2
   exit 1
 fi
 
@@ -193,6 +205,39 @@ gcloud artifacts repositories add-iam-policy-binding "${ARTIFACT_REPOSITORY}" \
   --location "${REGION}" \
   --member "serviceAccount:${DEPLOYER_SA_EMAIL}" \
   --role "roles/artifactregistry.writer" >/dev/null
+
+echo "Setting Artifact Registry cleanup policy on ${ARTIFACT_REPOSITORY} (keep latest ${ARTIFACT_KEEP_LATEST})"
+cleanup_policy_file="$(mktemp)"
+cat > "${cleanup_policy_file}" <<EOF
+[
+  {
+    "name": "delete-old-images",
+    "action": {
+      "type": "Delete"
+    },
+    "condition": {
+      "tagState": "any",
+      "olderThan": "1s"
+    }
+  },
+  {
+    "name": "keep-latest-${ARTIFACT_KEEP_LATEST}",
+    "action": {
+      "type": "Keep"
+    },
+    "mostRecentVersions": {
+      "keepCount": ${ARTIFACT_KEEP_LATEST}
+    }
+  }
+]
+EOF
+
+gcloud artifacts repositories set-cleanup-policies "${ARTIFACT_REPOSITORY}" \
+  --project "${PROJECT_ID}" \
+  --location "${REGION}" \
+  --policy "${cleanup_policy_file}" \
+  --no-dry-run >/dev/null
+rm -f "${cleanup_policy_file}"
 
 gcloud iam service-accounts add-iam-policy-binding "${RUNTIME_SA}" \
   --project "${PROJECT_ID}" \

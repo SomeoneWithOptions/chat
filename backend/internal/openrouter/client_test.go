@@ -142,7 +142,7 @@ func TestStreamChatCompletionEmitsUsage(t *testing.T) {
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\"}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\",\"cost_details\":{\"upstream_inference_cost\":\"0.000111\"}}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -187,6 +187,9 @@ func TestStreamChatCompletionEmitsUsage(t *testing.T) {
 	}
 	if usage.CostMicrosUSD == nil || *usage.CostMicrosUSD != 420 {
 		t.Fatalf("unexpected cost micros usage: %+v", usage.CostMicrosUSD)
+	}
+	if usage.ByokInferenceCostMicros == nil || *usage.ByokInferenceCostMicros != 111 {
+		t.Fatalf("unexpected BYOK inference micros usage: %+v", usage.ByokInferenceCostMicros)
 	}
 }
 

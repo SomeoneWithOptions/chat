@@ -546,11 +546,13 @@ type citationResponse struct {
 }
 
 type usageResponse struct {
-	PromptTokens     int  `json:"promptTokens"`
-	CompletionTokens int  `json:"completionTokens"`
-	TotalTokens      int  `json:"totalTokens"`
-	ReasoningTokens  *int `json:"reasoningTokens,omitempty"`
-	CostMicrosUSD    *int `json:"costMicrosUsd,omitempty"`
+	PromptTokens                 int      `json:"promptTokens"`
+	CompletionTokens             int      `json:"completionTokens"`
+	TotalTokens                  int      `json:"totalTokens"`
+	ReasoningTokens              *int     `json:"reasoningTokens,omitempty"`
+	CostMicrosUSD                *int     `json:"costMicrosUsd,omitempty"`
+	ByokInferenceCostMicrosUSD   *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
+	TokensPerSecond              *float64 `json:"tokensPerSecond,omitempty"`
 }
 
 type messageResponse struct {
@@ -666,7 +668,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.grounding_enabled, m.deep_research_enabled, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.grounding_enabled, m.deep_research_enabled, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -688,6 +690,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		var totalTokens sql.NullInt64
 		var reasoningTokens sql.NullInt64
 		var costMicrosUSD sql.NullInt64
+		var byokInferenceCostMicrosUSD sql.NullInt64
+		var tokensPerSecond sql.NullFloat64
 		var groundingEnabled int
 		var deepResearchEnabled int
 
@@ -703,6 +707,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&totalTokens,
 			&reasoningTokens,
 			&costMicrosUSD,
+			&byokInferenceCostMicrosUSD,
+			&tokensPerSecond,
 			&groundingEnabled,
 			&deepResearchEnabled,
 			&message.CreatedAt,
@@ -720,6 +726,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 				TotalTokens:      int(totalTokens.Int64),
 				ReasoningTokens:  nullableIntPointer(reasoningTokens),
 				CostMicrosUSD:    nullableIntPointer(costMicrosUSD),
+				ByokInferenceCostMicrosUSD: nullableIntPointer(byokInferenceCostMicrosUSD),
+				TokensPerSecond: nullableFloatPointer(tokensPerSecond),
 			}
 		}
 		message.GroundingEnabled = groundingEnabled == 1
@@ -1445,11 +1453,13 @@ func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role
 }
 
 type messageUsage struct {
-	PromptTokens     int
-	CompletionTokens int
-	TotalTokens      int
-	ReasoningTokens  *int
-	CostMicrosUSD    *int
+	PromptTokens               int
+	CompletionTokens           int
+	TotalTokens                int
+	ReasoningTokens            *int
+	CostMicrosUSD              *int
+	ByokInferenceCostMicrosUSD *int
+	TokensPerSecond            *float64
 }
 
 func (h Handler) insertMessageWithCitations(
@@ -1476,12 +1486,16 @@ func (h Handler) insertMessageWithCitations(
 	var totalTokensValue any
 	var reasoningTokensValue any
 	var costMicrosUSDValue any
+	var byokInferenceCostMicrosUSDValue any
+	var tokensPerSecondValue any
 	if usage != nil {
 		promptTokensValue = usage.PromptTokens
 		completionTokensValue = usage.CompletionTokens
 		totalTokensValue = usage.TotalTokens
 		reasoningTokensValue = usage.ReasoningTokens
 		costMicrosUSDValue = usage.CostMicrosUSD
+		byokInferenceCostMicrosUSDValue = usage.ByokInferenceCostMicrosUSD
+		tokensPerSecondValue = usage.TokensPerSecond
 	}
 	if _, err := tx.ExecContext(ctx, `
 INSERT INTO messages (
@@ -1497,11 +1511,13 @@ INSERT INTO messages (
   total_tokens,
   reasoning_tokens,
   cost_microusd,
+  byok_inference_cost_microusd,
+  tokens_per_second,
   grounding_enabled,
   deep_research_enabled
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
 		return "", err
 	}
 

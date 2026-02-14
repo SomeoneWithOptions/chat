@@ -62,17 +62,24 @@ jobs:
           set -euo pipefail
 
           short_sha="${GITHUB_SHA::7}"
-          image_tag="$(date -u +%Y%m%d-%H%M%S)-${short_sha}"
-          image_uri="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}/${IMAGE_NAME}:${image_tag}"
+          unique_tag="$(date -u +%Y%m%d-%H%M%S)-${short_sha}"
+          sha_tag="sha-${short_sha}"
+          latest_tag="latest"
+          image_base="${REGION}-docker.pkg.dev/${PROJECT_ID}/${ARTIFACT_REGISTRY_REPO}/${IMAGE_NAME}"
+          image_uri="${image_base}:${unique_tag}"
 
           docker buildx build \
             --platform "${PLATFORM}" \
             --file backend/Dockerfile \
-            --tag "${image_uri}" \
+            --tag "${image_base}:${unique_tag}" \
+            --tag "${image_base}:${sha_tag}" \
+            --tag "${image_base}:${latest_tag}" \
             --push \
             backend
 
           echo "image_uri=${image_uri}" >> "${GITHUB_OUTPUT}"
+          echo "image_latest=${image_base}:${latest_tag}" >> "${GITHUB_OUTPUT}"
+          echo "image_sha=${image_base}:${sha_tag}" >> "${GITHUB_OUTPUT}"
 
       - name: Deploy Cloud Run service
         env:
@@ -100,6 +107,8 @@ jobs:
       - name: Verify deploy
         env:
           IMAGE_URI: ${{ steps.image.outputs.image_uri }}
+          IMAGE_LATEST: ${{ steps.image.outputs.image_latest }}
+          IMAGE_SHA: ${{ steps.image.outputs.image_sha }}
         run: |
           set -euo pipefail
           service_url="$(
@@ -118,4 +127,6 @@ jobs:
 
           echo "Service URL: ${service_url}"
           echo "Expected image: ${IMAGE_URI}"
+          echo "Pushed latest tag: ${IMAGE_LATEST}"
+          echo "Pushed sha tag: ${IMAGE_SHA}"
           echo "Active image: ${deployed_image}"
