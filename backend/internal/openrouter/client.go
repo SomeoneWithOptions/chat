@@ -11,6 +11,7 @@ import (
 	"math"
 	"math/big"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -44,6 +45,16 @@ type Usage struct {
 	CostMicrosUSD           *int     `json:"costMicrosUsd,omitempty"`
 	ByokInferenceCostMicros *int     `json:"byokInferenceCostMicrosUsd,omitempty"`
 	TokensPerSecond         *float64 `json:"tokensPerSecond,omitempty"`
+	GenerationID            string   `json:"-"`
+}
+
+type Generation struct {
+	ID                          string
+	LatencyMs                   *float64
+	GenerationTimeMs            *float64
+	TokensCompletion            *int
+	NativeTokensCompletion      *int
+	UpstreamInferenceCostMicros *int
 }
 
 type ReasoningConfig struct {
@@ -91,6 +102,7 @@ type streamAPICostDetails struct {
 }
 
 type streamAPIResponse struct {
+	ID      string `json:"id,omitempty"`
 	Choices []struct {
 		Delta struct {
 			Content          string            `json:"content"`
@@ -105,6 +117,19 @@ type streamAPIResponse struct {
 
 type listModelsAPIResponse struct {
 	Data []listModelsAPIModel `json:"data"`
+}
+
+type getGenerationAPIResponse struct {
+	Data getGenerationAPIData `json:"data"`
+}
+
+type getGenerationAPIData struct {
+	ID                     string          `json:"id"`
+	Latency                json.RawMessage `json:"latency"`
+	GenerationTime         json.RawMessage `json:"generation_time"`
+	TokensCompletion       json.RawMessage `json:"tokens_completion"`
+	NativeTokensCompletion json.RawMessage `json:"native_tokens_completion"`
+	UpstreamInferenceCost  json.RawMessage `json:"upstream_inference_cost"`
 }
 
 type listModelsAPIModel struct {
@@ -128,12 +153,17 @@ type Client struct {
 }
 
 type upstreamStatusError struct {
+	operation  string
 	statusCode int
 	body       string
 }
 
 func (e upstreamStatusError) Error() string {
-	return fmt.Sprintf("openrouter models returned %d: %s", e.statusCode, e.body)
+	operation := strings.TrimSpace(e.operation)
+	if operation == "" {
+		operation = "request"
+	}
+	return fmt.Sprintf("openrouter %s returned %d: %s", operation, e.statusCode, e.body)
 }
 
 func NewClient(cfg config.Config, httpClient *http.Client) Client {
@@ -213,6 +243,7 @@ func (c Client) StreamChatCompletion(
 
 	scanner := bufio.NewScanner(resp.Body)
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	generationID := ""
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" || strings.HasPrefix(line, ":") || !strings.HasPrefix(line, "data:") {
@@ -231,6 +262,9 @@ func (c Client) StreamChatCompletion(
 		if err := json.Unmarshal([]byte(payload), &parsed); err != nil {
 			continue
 		}
+		if id := strings.TrimSpace(parsed.ID); id != "" {
+			generationID = id
+		}
 
 		if parsed.Usage != nil && onUsage != nil {
 			usage := Usage{
@@ -246,6 +280,7 @@ func (c Client) StreamChatCompletion(
 				reasoningTokens := parsed.Usage.CompletionTokensDetails.ReasoningTokens
 				usage.ReasoningTokens = &reasoningTokens
 			}
+			usage.GenerationID = generationID
 			if err := onUsage(usage); err != nil {
 				return err
 			}
@@ -284,6 +319,59 @@ func (c Client) StreamChatCompletion(
 		return fmt.Errorf("read openrouter stream: %w", err)
 	}
 	return nil
+}
+
+func (c Client) GetGeneration(ctx context.Context, generationID string) (Generation, error) {
+	if strings.TrimSpace(c.apiKey) == "" {
+		return Generation{}, ErrMissingAPIKey
+	}
+
+	id := strings.TrimSpace(generationID)
+	if id == "" {
+		return Generation{}, errors.New("generation id is required")
+	}
+
+	endpoint := c.baseURL + "/generation?id=" + url.QueryEscape(id)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+	if err != nil {
+		return Generation{}, fmt.Errorf("build openrouter generation request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return Generation{}, fmt.Errorf("request openrouter generation: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return Generation{}, upstreamStatusError{
+			operation:  "generation",
+			statusCode: resp.StatusCode,
+			body:       strings.TrimSpace(string(body)),
+		}
+	}
+
+	var parsed getGenerationAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return Generation{}, fmt.Errorf("decode openrouter generation response: %w", err)
+	}
+
+	parsedID := strings.TrimSpace(parsed.Data.ID)
+	if parsedID == "" {
+		parsedID = id
+	}
+
+	return Generation{
+		ID:                          parsedID,
+		LatencyMs:                   parseOptionalFloat(parsed.Data.Latency),
+		GenerationTimeMs:            parseOptionalFloat(parsed.Data.GenerationTime),
+		TokensCompletion:            parseOptionalInt(parsed.Data.TokensCompletion),
+		NativeTokensCompletion:      parseOptionalInt(parsed.Data.NativeTokensCompletion),
+		UpstreamInferenceCostMicros: parseOptionalPriceMicros(parsed.Data.UpstreamInferenceCost),
+	}, nil
 }
 
 func parseOptionalPriceMicros(raw json.RawMessage) *int {
@@ -330,6 +418,7 @@ func (c Client) listModelsFromPath(ctx context.Context, path string) ([]Model, e
 	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
 		return nil, upstreamStatusError{
+			operation:  "models",
 			statusCode: resp.StatusCode,
 			body:       strings.TrimSpace(string(body)),
 		}
@@ -393,6 +482,71 @@ func parsePriceMicros(raw json.RawMessage) int {
 	}
 
 	return 0
+}
+
+func parseOptionalFloat(raw json.RawMessage) *float64 {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return nil
+	}
+
+	var asNumber float64
+	if err := json.Unmarshal(raw, &asNumber); err == nil {
+		return &asNumber
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		trimmed := strings.TrimSpace(asString)
+		if trimmed == "" {
+			return nil
+		}
+		parsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return nil
+		}
+		return &parsed
+	}
+
+	return nil
+}
+
+func parseOptionalInt(raw json.RawMessage) *int {
+	value := strings.TrimSpace(string(raw))
+	if value == "" || value == "null" {
+		return nil
+	}
+
+	var asInt int
+	if err := json.Unmarshal(raw, &asInt); err == nil {
+		return &asInt
+	}
+
+	var asFloat float64
+	if err := json.Unmarshal(raw, &asFloat); err == nil {
+		rounded := int(math.Round(asFloat))
+		return &rounded
+	}
+
+	var asString string
+	if err := json.Unmarshal(raw, &asString); err == nil {
+		trimmed := strings.TrimSpace(asString)
+		if trimmed == "" {
+			return nil
+		}
+		parsed, err := strconv.Atoi(trimmed)
+		if err == nil {
+			return &parsed
+		}
+		floatParsed, err := strconv.ParseFloat(trimmed, 64)
+		if err != nil {
+			return nil
+		}
+		rounded := int(math.Round(floatParsed))
+		return &rounded
+	}
+
+	return nil
 }
 
 func normalizeSupportedParameters(raw []string) []string {

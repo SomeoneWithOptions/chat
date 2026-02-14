@@ -142,7 +142,7 @@ func TestStreamChatCompletionEmitsUsage(t *testing.T) {
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("data: {\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\",\"cost_details\":{\"upstream_inference_cost\":\"0.000111\"}}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"gen-123\",\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\",\"cost_details\":{\"upstream_inference_cost\":\"0.000111\"}}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -190,6 +190,70 @@ func TestStreamChatCompletionEmitsUsage(t *testing.T) {
 	}
 	if usage.ByokInferenceCostMicros == nil || *usage.ByokInferenceCostMicros != 111 {
 		t.Fatalf("unexpected BYOK inference micros usage: %+v", usage.ByokInferenceCostMicros)
+	}
+	if usage.GenerationID != "gen-123" {
+		t.Fatalf("unexpected generation id in usage: %q", usage.GenerationID)
+	}
+}
+
+func TestGetGenerationParsesTimingAndUsage(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/generation" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("id"); got != "gen-abc" {
+			t.Fatalf("unexpected generation id query: %q", got)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer test-key" {
+			t.Fatalf("unexpected auth header: %q", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{
+			"data": {
+				"id": "gen-abc",
+				"latency": 2670,
+				"generation_time": 6170,
+				"tokens_completion": 480,
+				"native_tokens_completion": 480,
+				"upstream_inference_cost": "0.008"
+			}
+		}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(config.Config{
+		OpenRouterAPIKey:  "test-key",
+		OpenRouterBaseURL: server.URL,
+	}, server.Client())
+
+	generation, err := client.GetGeneration(context.Background(), "gen-abc")
+	if err != nil {
+		t.Fatalf("get generation: %v", err)
+	}
+
+	if generation.ID != "gen-abc" {
+		t.Fatalf("unexpected generation id: %q", generation.ID)
+	}
+	if generation.LatencyMs == nil || *generation.LatencyMs != 2670 {
+		t.Fatalf("unexpected latency ms: %+v", generation.LatencyMs)
+	}
+	if generation.GenerationTimeMs == nil || *generation.GenerationTimeMs != 6170 {
+		t.Fatalf("unexpected generation time ms: %+v", generation.GenerationTimeMs)
+	}
+	if generation.TokensCompletion == nil || *generation.TokensCompletion != 480 {
+		t.Fatalf("unexpected completion tokens: %+v", generation.TokensCompletion)
+	}
+	if generation.NativeTokensCompletion == nil || *generation.NativeTokensCompletion != 480 {
+		t.Fatalf("unexpected native completion tokens: %+v", generation.NativeTokensCompletion)
+	}
+	if generation.UpstreamInferenceCostMicros == nil || *generation.UpstreamInferenceCostMicros != 8000 {
+		t.Fatalf("unexpected upstream inference cost micros: %+v", generation.UpstreamInferenceCostMicros)
 	}
 }
 

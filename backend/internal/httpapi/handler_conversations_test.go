@@ -932,6 +932,85 @@ LIMIT 1;
 	}
 }
 
+func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) {
+	generationID := "gen-abc"
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Usage", " tracked"},
+		usage: &openrouter.Usage{
+			PromptTokens:     1122,
+			CompletionTokens: 480,
+			TotalTokens:      1602,
+			GenerationID:     generationID,
+		},
+		generations: map[string]openrouter.Generation{
+			generationID: {
+				ID:                          generationID,
+				GenerationTimeMs:            pointerToFloat64(6170),
+				NativeTokensCompletion:      pointerToInt(480),
+				UpstreamInferenceCostMicros: pointerToInt(8000),
+			},
+		},
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Track usage","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, resp.Code)
+	}
+
+	events := decodeSSEEvents(t, resp.Body.String())
+	var lastUsage map[string]any
+	for _, event := range events {
+		if event.Type != "usage" {
+			continue
+		}
+		usage, _ := event.Data["usage"].(map[string]any)
+		lastUsage = usage
+	}
+	if lastUsage == nil {
+		t.Fatalf("expected usage event in stream body: %s", resp.Body.String())
+	}
+
+	byokMicros, ok := lastUsage["byokInferenceCostMicrosUsd"].(float64)
+	if !ok || int(byokMicros) != 8000 {
+		t.Fatalf("unexpected usage byokInferenceCostMicrosUsd: %+v", lastUsage["byokInferenceCostMicrosUsd"])
+	}
+	tokensPerSecond, ok := lastUsage["tokensPerSecond"].(float64)
+	if !ok {
+		t.Fatalf("expected tokensPerSecond in usage event, got: %+v", lastUsage)
+	}
+	if tokensPerSecond < 77.7 || tokensPerSecond > 77.9 {
+		t.Fatalf("expected tokensPerSecond to match generation metadata, got %f", tokensPerSecond)
+	}
+
+	var persistedByokMicros sql.NullInt64
+	var persistedTokensPerSecond sql.NullFloat64
+	if err := db.QueryRow(`
+SELECT byok_inference_cost_microusd, tokens_per_second
+FROM messages
+WHERE user_id = ? AND role = 'assistant'
+ORDER BY rowid DESC
+LIMIT 1;
+`, user.ID).Scan(&persistedByokMicros, &persistedTokensPerSecond); err != nil {
+		t.Fatalf("query persisted usage metrics: %v", err)
+	}
+	if !persistedByokMicros.Valid || persistedByokMicros.Int64 != 8000 {
+		t.Fatalf("unexpected persisted byok_inference_cost_microusd: %+v", persistedByokMicros)
+	}
+	if !persistedTokensPerSecond.Valid || persistedTokensPerSecond.Float64 < 77.7 || persistedTokensPerSecond.Float64 > 77.9 {
+		t.Fatalf("unexpected persisted tokens_per_second: %+v", persistedTokensPerSecond)
+	}
+}
+
 func TestChatMessagesAppliesReasoningEffortOverrideAndPersistsPreset(t *testing.T) {
 	var capturedRequest openrouter.StreamRequest
 	handler, db := newTestHandler(t, stubStreamer{
@@ -1759,10 +1838,20 @@ func assertContainsPhaseInOrder(t *testing.T, phases []string, phase string, aft
 	return -1
 }
 
+func pointerToInt(value int) *int {
+	return &value
+}
+
+func pointerToFloat64(value float64) *float64 {
+	return &value
+}
+
 type stubStreamer struct {
 	tokens          []string
 	reasoningTokens []string
 	usage           *openrouter.Usage
+	generations     map[string]openrouter.Generation
+	generationErr   error
 	err             error
 	catalog         []openrouter.Model
 	catalogErr      error
@@ -1821,6 +1910,16 @@ func (s stubStreamer) ListModels(_ context.Context) ([]openrouter.Model, error) 
 		return nil, s.catalogErr
 	}
 	return s.catalog, nil
+}
+
+func (s stubStreamer) GetGeneration(_ context.Context, generationID string) (openrouter.Generation, error) {
+	if s.generationErr != nil {
+		return openrouter.Generation{}, s.generationErr
+	}
+	if generation, ok := s.generations[generationID]; ok {
+		return generation, nil
+	}
+	return openrouter.Generation{}, errors.New("generation not found")
 }
 
 type stubFileStore struct {

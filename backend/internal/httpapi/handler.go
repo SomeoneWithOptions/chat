@@ -46,6 +46,7 @@ type chatStreamer interface {
 		onReasoning func(string) error,
 		onUsage func(openrouter.Usage) error,
 	) error
+	GetGeneration(ctx context.Context, generationID string) (openrouter.Generation, error)
 }
 
 type modelCataloger interface {
@@ -1112,7 +1113,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		func(usage openrouter.Usage) error {
-			copied := usageWithTokensPerSecond(usage, streamStartedAt, firstTokenAt)
+			copied := usage
 			assistantUsage = &copied
 
 			if err := writeSSEEvent(w, map[string]any{
@@ -1125,6 +1126,18 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 	)
+
+	if assistantUsage != nil {
+		enriched := h.usageWithOpenRouterMetrics(r.Context(), *assistantUsage, streamStartedAt, firstTokenAt)
+		assistantUsage = &enriched
+		if started {
+			_ = writeSSEEvent(w, map[string]any{
+				"type":  "usage",
+				"usage": usageResponseFromOpenRouter(enriched),
+			})
+			flusher.Flush()
+		}
+	}
 
 	var persistedCitations []citationResponse
 	if assistantContent.Len() > 0 {
@@ -2088,6 +2101,77 @@ func openRouterReasoningConfig(effort string) *openrouter.ReasoningConfig {
 		return nil
 	}
 	return &openrouter.ReasoningConfig{Effort: normalized}
+}
+
+func (h Handler) usageWithOpenRouterMetrics(ctx context.Context, usage openrouter.Usage, streamStartedAt, firstTokenAt time.Time) openrouter.Usage {
+	enriched := usage
+
+	generationID := strings.TrimSpace(usage.GenerationID)
+	if generationID != "" {
+		if generation, err := h.getGenerationWithRetry(ctx, generationID); err == nil {
+			if generation.UpstreamInferenceCostMicros != nil {
+				enriched.ByokInferenceCostMicros = generation.UpstreamInferenceCostMicros
+			}
+			if tokensPerSecond := tokensPerSecondFromGeneration(generation, usage); tokensPerSecond != nil {
+				enriched.TokensPerSecond = tokensPerSecond
+			}
+		}
+	}
+
+	return usageWithTokensPerSecond(enriched, streamStartedAt, firstTokenAt)
+}
+
+func (h Handler) getGenerationWithRetry(ctx context.Context, generationID string) (openrouter.Generation, error) {
+	var lastErr error
+	retryDelays := []time.Duration{0, 120 * time.Millisecond, 300 * time.Millisecond}
+
+	for _, delay := range retryDelays {
+		if delay > 0 {
+			timer := time.NewTimer(delay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return openrouter.Generation{}, ctx.Err()
+			case <-timer.C:
+			}
+		}
+
+		generation, err := h.openrouter.GetGeneration(ctx, generationID)
+		if err == nil {
+			return generation, nil
+		}
+		lastErr = err
+	}
+
+	if lastErr == nil {
+		lastErr = errors.New("generation lookup failed")
+	}
+	return openrouter.Generation{}, lastErr
+}
+
+func tokensPerSecondFromGeneration(generation openrouter.Generation, usage openrouter.Usage) *float64 {
+	if generation.GenerationTimeMs == nil || *generation.GenerationTimeMs <= 0 {
+		return nil
+	}
+
+	completionTokens := 0
+	switch {
+	case generation.NativeTokensCompletion != nil && *generation.NativeTokensCompletion > 0:
+		completionTokens = *generation.NativeTokensCompletion
+	case generation.TokensCompletion != nil && *generation.TokensCompletion > 0:
+		completionTokens = *generation.TokensCompletion
+	case usage.CompletionTokens > 0:
+		completionTokens = usage.CompletionTokens
+	}
+	if completionTokens <= 0 {
+		return nil
+	}
+
+	perSecond := float64(completionTokens) / (*generation.GenerationTimeMs / 1000)
+	if perSecond <= 0 {
+		return nil
+	}
+	return &perSecond
 }
 
 func usageWithTokensPerSecond(usage openrouter.Usage, streamStartedAt, firstTokenAt time.Time) openrouter.Usage {
