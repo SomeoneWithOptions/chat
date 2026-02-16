@@ -1189,7 +1189,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		if !started {
 			status := http.StatusBadGateway
 			code := "openrouter_error"
-			message := "failed to stream from OpenRouter"
+			message := fmt.Sprintf("failed to stream from OpenRouter: %v", streamErr)
 			if errors.Is(streamErr, openrouter.ErrMissingAPIKey) {
 				status = http.StatusInternalServerError
 				code = "openrouter_unconfigured"
