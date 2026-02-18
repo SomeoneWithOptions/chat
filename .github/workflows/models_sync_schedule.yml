@@ -1,0 +1,41 @@
+name: Sync Models Schedule
+
+on:
+  schedule:
+    # 12:00 AM and 12:00 PM COT (UTC-5) => 05:00 and 17:00 UTC
+    - cron: "0 5,17 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: models-sync-schedule
+  cancel-in-progress: false
+
+jobs:
+  sync-models:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Trigger model sync endpoint
+        env:
+          MODEL_SYNC_BEARER_TOKEN: ${{ secrets.MODEL_SYNC_BEARER_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          response_file="$(mktemp)"
+          http_code="$(
+            curl -sS -o "${response_file}" -w "%{http_code}" \
+              -X POST "https://api.chat.sanetomore.com/v1/models/sync" \
+              -H "Authorization: Bearer ${MODEL_SYNC_BEARER_TOKEN}"
+          )"
+
+          if [[ "${http_code}" -lt 200 || "${http_code}" -ge 300 ]]; then
+            echo "Model sync failed with HTTP ${http_code}"
+            cat "${response_file}"
+            exit 1
+          fi
+
+          echo "Model sync succeeded with HTTP ${http_code}"
+          cat "${response_file}"
