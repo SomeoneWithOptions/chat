@@ -1058,6 +1058,111 @@ LIMIT 1;
 	}
 }
 
+func TestChatMessagesPersistsProviderFromStreamUsageWhenGenerationLookupFails(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Usage", " tracked"},
+		usage: &openrouter.Usage{
+			PromptTokens:     99,
+			CompletionTokens: 11,
+			TotalTokens:      110,
+			ModelID:          "google/gemini-3.1-pro-preview",
+			ProviderName:     "Google",
+			GenerationID:     "gen-not-ready",
+		},
+		generationErr: errors.New("generation not found"),
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Track usage","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, resp.Code)
+	}
+
+	events := decodeSSEEvents(t, resp.Body.String())
+	var lastUsage map[string]any
+	for _, event := range events {
+		if event.Type != "usage" {
+			continue
+		}
+		usage, _ := event.Data["usage"].(map[string]any)
+		lastUsage = usage
+	}
+	if lastUsage == nil {
+		t.Fatalf("expected usage event in stream body: %s", resp.Body.String())
+	}
+
+	providerName, ok := lastUsage["providerName"].(string)
+	if !ok || providerName != "Google Vertex" {
+		t.Fatalf("unexpected usage providerName: %+v", lastUsage["providerName"])
+	}
+
+	var persistedUsageProviderName sql.NullString
+	if err := db.QueryRow(`
+SELECT usage_provider_name
+FROM messages
+WHERE user_id = ? AND role = 'assistant'
+ORDER BY rowid DESC
+LIMIT 1;
+`, user.ID).Scan(&persistedUsageProviderName); err != nil {
+		t.Fatalf("query persisted usage provider name: %v", err)
+	}
+	if !persistedUsageProviderName.Valid || persistedUsageProviderName.String != "Google Vertex" {
+		t.Fatalf("unexpected persisted usage_provider_name: %+v", persistedUsageProviderName)
+	}
+}
+
+func TestChatMessagesDerivesProviderFromModelIDWhenProviderMissing(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Usage", " tracked"},
+		usage: &openrouter.Usage{
+			PromptTokens:     99,
+			CompletionTokens: 11,
+			TotalTokens:      110,
+			ModelID:          "openai/gpt-4o-mini",
+			GenerationID:     "gen-not-ready",
+		},
+		generationErr: errors.New("generation not found"),
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Track usage","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, resp.Code)
+	}
+
+	var persistedUsageProviderName sql.NullString
+	if err := db.QueryRow(`
+SELECT usage_provider_name
+FROM messages
+WHERE user_id = ? AND role = 'assistant'
+ORDER BY rowid DESC
+LIMIT 1;
+`, user.ID).Scan(&persistedUsageProviderName); err != nil {
+		t.Fatalf("query persisted usage provider name: %v", err)
+	}
+	if !persistedUsageProviderName.Valid || persistedUsageProviderName.String != "OpenAI" {
+		t.Fatalf("unexpected persisted usage_provider_name: %+v", persistedUsageProviderName)
+	}
+}
+
 func TestChatMessagesAppliesReasoningEffortOverrideAndPersistsPreset(t *testing.T) {
 	var capturedRequest openrouter.StreamRequest
 	handler, db := newTestHandler(t, stubStreamer{

@@ -143,7 +143,7 @@ func TestStreamChatCompletionEmitsUsage(t *testing.T) {
 
 		w.Header().Set("Content-Type", "text/event-stream")
 		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("data: {\"id\":\"gen-123\",\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\",\"cost_details\":{\"upstream_inference_cost\":\"0.000111\"}}}\n\n"))
+		_, _ = w.Write([]byte("data: {\"id\":\"gen-123\",\"model\":\"openai/gpt-4o-mini\",\"provider\":\"OpenAI\",\"choices\":[],\"usage\":{\"prompt_tokens\":120,\"completion_tokens\":45,\"total_tokens\":165,\"completion_tokens_details\":{\"reasoning_tokens\":12},\"cost\":\"0.000420\",\"cost_details\":{\"upstream_inference_cost\":\"0.000111\"}}}\n\n"))
 		_, _ = w.Write([]byte("data: [DONE]\n\n"))
 	}))
 	defer server.Close()
@@ -194,6 +194,12 @@ func TestStreamChatCompletionEmitsUsage(t *testing.T) {
 	}
 	if usage.GenerationID != "gen-123" {
 		t.Fatalf("unexpected generation id in usage: %q", usage.GenerationID)
+	}
+	if usage.ModelID != "openai/gpt-4o-mini" {
+		t.Fatalf("unexpected model id in usage: %q", usage.ModelID)
+	}
+	if usage.ProviderName != "OpenAI" {
+		t.Fatalf("unexpected provider in usage: %q", usage.ProviderName)
 	}
 }
 

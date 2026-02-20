@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strings"
 	"time"
@@ -2126,8 +2127,10 @@ func (h Handler) usageWithOpenRouterMetrics(
 	streamStartedAt, firstTokenAt time.Time,
 ) openrouter.Usage {
 	enriched := usage
-	if modelID := strings.TrimSpace(requestedModelID); modelID != "" {
-		enriched.ModelID = modelID
+	if strings.TrimSpace(enriched.ModelID) == "" {
+		if modelID := strings.TrimSpace(requestedModelID); modelID != "" {
+			enriched.ModelID = modelID
+		}
 	}
 
 	generationID := strings.TrimSpace(usage.GenerationID)
@@ -2145,7 +2148,13 @@ func (h Handler) usageWithOpenRouterMetrics(
 			if tokensPerSecond := tokensPerSecondFromGeneration(generation, usage); tokensPerSecond != nil {
 				enriched.TokensPerSecond = tokensPerSecond
 			}
+		} else {
+			log.Printf("openrouter generation lookup failed: generation_id=%s err=%v", generationID, err)
 		}
+	}
+
+	if strings.TrimSpace(enriched.ProviderName) == "" {
+		enriched.ProviderName = providerNameFromModelID(enriched.ModelID)
 	}
 
 	return usageWithTokensPerSecond(enriched, streamStartedAt, firstTokenAt)
@@ -2153,7 +2162,7 @@ func (h Handler) usageWithOpenRouterMetrics(
 
 func (h Handler) getGenerationWithRetry(ctx context.Context, generationID string) (openrouter.Generation, error) {
 	var lastErr error
-	retryDelays := []time.Duration{0, 120 * time.Millisecond, 300 * time.Millisecond}
+	retryDelays := []time.Duration{0, 900 * time.Millisecond, 2 * time.Second, 4 * time.Second}
 
 	for _, delay := range retryDelays {
 		if delay > 0 {
@@ -2272,6 +2281,43 @@ func normalizeProviderName(raw string) string {
 		return "Google Vertex"
 	}
 	return name
+}
+
+func providerNameFromModelID(modelID string) string {
+	trimmed := strings.TrimSpace(modelID)
+	if trimmed == "" {
+		return ""
+	}
+
+	prefix := strings.ToLower(trimmed)
+	if idx := strings.Index(prefix, "/"); idx >= 0 {
+		prefix = prefix[:idx]
+	}
+
+	switch prefix {
+	case "google":
+		return "Google Vertex"
+	case "openai":
+		return "OpenAI"
+	case "anthropic":
+		return "Anthropic"
+	case "x-ai", "xai":
+		return "xAI"
+	case "meta", "meta-llama":
+		return "Meta"
+	case "mistral", "mistralai":
+		return "Mistral"
+	case "cohere":
+		return "Cohere"
+	case "deepseek":
+		return "DeepSeek"
+	case "qwen":
+		return "Qwen"
+	case "perplexity":
+		return "Perplexity"
+	default:
+		return ""
+	}
 }
 
 func nullableString(raw string) sql.NullString {

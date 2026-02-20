@@ -106,8 +106,10 @@ type streamAPICostDetails struct {
 }
 
 type streamAPIResponse struct {
-	ID      string `json:"id,omitempty"`
-	Choices []struct {
+	ID       string `json:"id,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Choices  []struct {
 		Delta struct {
 			Content          string            `json:"content"`
 			ReasoningDetails []reasoningDetail `json:"reasoning_details"`
@@ -278,6 +280,8 @@ func (c Client) StreamChatCompletion(
 				CompletionTokens: parsed.Usage.CompletionTokens,
 				TotalTokens:      parsed.Usage.TotalTokens,
 				CostMicrosUSD:    parseOptionalPriceMicros(parsed.Usage.Cost),
+				ModelID:          strings.TrimSpace(parsed.Model),
+				ProviderName:     strings.TrimSpace(parsed.Provider),
 			}
 			if parsed.Usage.CostDetails != nil {
 				usage.ByokInferenceCostMicros = parseOptionalPriceMicros(parsed.Usage.CostDetails.UpstreamInferenceCost)
