@@ -1,25 +1,39 @@
-# chat
+# Chat
 
-Monorepo for the chat app.
+A modern, privacy-focused AI chat assistant with web grounding and deep research capabilities.
 
-## Quick start
+## Features
 
-1. Configure backend env:
+### Multi-Model Support
+- Access 100+ LLMs through OpenRouter
+- Curated model picker with favorites
+- Model pricing and context window info displayed
 
-```bash
-cp backend/.env.example backend/.env
-```
+### Web Grounding (Default ON)
+- Every message is grounded with real-time web search
+- Citations included in responses
+- Powered by Brave Search
 
-Populate `TURSO_DATABASE_URL` and `TURSO_AUTH_TOKEN` from the production `chat` database.
-Set `GOOGLE_CLIENT_ID` during the final auth rollout phase.
+### Deep Research Mode
+- Extended multi-pass analysis
+- More comprehensive citations
+- Ideal for complex questions (up to 150s timeout)
 
-3. Run backend + frontend in separate terminals:
+### File Attachments
+- Upload .txt, .md, .pdf, .csv, .json files
+- 25 MB max file size
+- Files processed securely in your session
 
-```bash
-./scripts/dev_backend.sh
-./scripts/dev_frontend.sh
-```
+### Reasoning Controls
+- Adjust thinking effort per model (when supported)
+- Presets persist across conversations
 
-## API contract
+### Privacy & Security
+- Google sign-in with email allowlist
+- 30-day secure sessions
+- Hard delete for chat history (your data, your control)
 
-OpenAPI spec: `backend/openapi/openapi.yaml`.
+### Clean UX
+- Dark mode only, minimal interface
+- Streaming responses with visible tool activity
+- Conversation list + active thread layout
