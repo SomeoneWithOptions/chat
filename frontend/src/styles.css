@@ -1707,6 +1707,8 @@ code {
   line-height: 1.6;
   resize: none;
   outline: none;
+  overflow-y: auto;
+  transition: height 0.1s ease;
 }
 
 .composer-textarea::placeholder {

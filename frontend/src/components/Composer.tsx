@@ -1,4 +1,4 @@
-import { type ChangeEvent, type FormEvent, useRef } from 'react';
+import { type ChangeEvent, type FormEvent, useEffect, useRef } from 'react';
 import { type ReasoningEffort, type UploadedFile } from '../lib/api';
 
 type ComposerProps = {
@@ -55,6 +55,15 @@ export default function Composer({
   streamWarning,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-grow: resize textarea to fit content on every prompt change
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = 'auto';           // collapse first to get accurate scrollHeight
+    el.style.height = `${el.scrollHeight}px`; // expand to fit content
+  }, [prompt]);
 
   const canSend = prompt.trim().length > 0 && !isStreaming && !uploadingAttachments;
 
@@ -115,12 +124,12 @@ export default function Composer({
         </div>
 
         <textarea
+          ref={textareaRef}
           className="composer-textarea"
           value={prompt}
           onChange={(e) => onPromptChange(e.target.value)}
           onKeyDown={handleKeyDown}
           placeholder="Ask anything..."
-          rows={1}
         />
 
         {pendingAttachments.length > 0 && (
