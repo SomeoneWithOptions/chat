@@ -909,6 +909,55 @@ code {
   word-break: break-word;
 }
 
+.message-user-actions {
+  margin-top: 8px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.message-user-copy-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.message-user-copy-button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.message-user-copy-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-focus);
+  color: var(--text-primary);
+}
+
+.message-user-copy-button:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(212, 175, 55, 0.16);
+}
+
+.message-user-copy-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.message-user-copy-button.copied {
+  color: var(--success);
+  border-color: rgba(92, 168, 108, 0.38);
+  background: rgba(92, 168, 108, 0.12);
+}
+
 .thinking-trace {
   margin: 0 0 10px;
   border: 1px solid var(--border);

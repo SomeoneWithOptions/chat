@@ -441,6 +441,62 @@ describe('Deep research streaming UX', () => {
 });
 
 describe('Model selector filtering', () => {
+  it('shows an always-visible copy icon on user messages and copies the sent text', async () => {
+    const writeTextMock = vi.fn().mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      configurable: true,
+    });
+
+    const createdConversation: api.Conversation = {
+      id: 'conv-1',
+      title: 'New Chat',
+      createdAt: '2026-02-10T00:00:00Z',
+      updatedAt: '2026-02-10T00:00:00Z',
+    };
+    let listCalls = 0;
+    listConversationsMock.mockImplementation(async () => {
+      listCalls += 1;
+      if (listCalls === 1) return [];
+      return [createdConversation];
+    });
+
+    let releaseStream: (() => void) | undefined;
+    streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
+      await new Promise<void>((resolve) => {
+        releaseStream = () => {
+          onEvent({ type: 'done' });
+          resolve();
+        };
+      });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Copy this user message');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    const copyButton = await screen.findByRole('button', { name: /copy message/i });
+    expect(copyButton).toBeInTheDocument();
+
+    await user.click(copyButton);
+
+    expect(copyButton).toHaveAttribute('aria-label', 'Message copied');
+
+    if (releaseStream) releaseStream();
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
+    });
+  });
+
   it('keeps free + favorites visible when All is off and shows the rest when toggled on', async () => {
     listModelsMock.mockResolvedValueOnce({
       models: [

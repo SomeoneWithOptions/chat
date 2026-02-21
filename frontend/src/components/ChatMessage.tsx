@@ -153,6 +153,7 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   const renderMarkdown = !isUser;
   const isAssistant = message.role === 'assistant';
   const showStreamingIndicator = isStreaming && isAssistant && !message.content;
+  const [copiedUserMessage, setCopiedUserMessage] = useState(false);
   const [traceExpanded, setTraceExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
@@ -195,6 +196,17 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
     : '';
   const usageModel = message.usage?.modelId ?? message.modelId ?? 'Unavailable';
   const usageProvider = message.usage?.providerName ?? 'Unavailable';
+
+  useEffect(() => {
+    if (!copiedUserMessage) return;
+    const timeoutId = window.setTimeout(() => setCopiedUserMessage(false), 1800);
+    return () => window.clearTimeout(timeoutId);
+  }, [copiedUserMessage]);
+
+  async function handleCopyUserMessage() {
+    const didCopy = await copyToClipboard(message.content);
+    if (didCopy) setCopiedUserMessage(true);
+  }
 
   return (
     <div className={`message ${message.role}`}>
@@ -337,6 +349,30 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
             </span>
           )}
         </div>
+
+        {isUser && (
+          <div className="message-user-actions">
+            <button
+              type="button"
+              className={`message-user-copy-button ${copiedUserMessage ? 'copied' : ''}`}
+              onClick={handleCopyUserMessage}
+              disabled={!message.content}
+              aria-label={copiedUserMessage ? 'Message copied' : 'Copy message'}
+              title={copiedUserMessage ? 'Message copied' : 'Copy message'}
+            >
+              {copiedUserMessage ? (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <polyline points="20 6 9 17 4 12" />
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <rect x="9" y="9" width="11" height="11" rx="2" ry="2" />
+                  <path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" />
+                </svg>
+              )}
+            </button>
+          </div>
+        )}
 
         {message.citations.length > 0 && (
           <div className="grounding-sources">
