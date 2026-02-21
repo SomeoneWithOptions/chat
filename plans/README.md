@@ -14,6 +14,8 @@ Recommended execution order:
 8. `plans/07-infra-deployment-plan.md`
 9. `plans/08-testing-security-observability-plan.md`
 10. `plans/09-implementation-roadmap.md`
+11. `plans/10-agentic-web-research-orchestration-plan.md`
+12. `plans/11-agentic-web-research-execution-checklist.md`
 
 Core stack assumptions used in these plans:
 
