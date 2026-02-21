@@ -915,10 +915,10 @@ code {
 
 .message-user-actions {
   position: absolute;
-  left: 0;
+  right: 0;
   bottom: -32px;
   display: flex;
-  justify-content: flex-start;
+  justify-content: flex-end;
 }
 
 .message-user-copy-button {
