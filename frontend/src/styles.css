@@ -909,8 +909,14 @@ code {
   word-break: break-word;
 }
 
+.message.user .message-inner {
+  margin-bottom: 32px;
+}
+
 .message-user-actions {
-  margin-top: 8px;
+  position: absolute;
+  left: 0;
+  bottom: -32px;
   display: flex;
   justify-content: flex-start;
 }
