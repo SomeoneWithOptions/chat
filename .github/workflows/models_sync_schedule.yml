@@ -3,7 +3,7 @@ name: Sync Models Schedule
 on:
   schedule:
     # 12:00 AM and 12:00 PM COT (UTC-5) => 05:00 and 17:00 UTC
-    - cron: "0 5,17 * * *"
+    - cron: "15 5,17 * * *"
   workflow_dispatch:
 
 permissions:
