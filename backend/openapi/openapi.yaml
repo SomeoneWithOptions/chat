@@ -419,6 +419,9 @@ components:
     ReasoningEffort:
       type: string
       enum: [low, medium, high]
+    ProgressDecision:
+      type: string
+      enum: [search_more, finalize, fallback]
     ReasoningPreset:
       type: object
       required: [modelId, mode, effort]
@@ -722,6 +725,14 @@ components:
           enum: [planning, searching, reading, evaluating, iterating, synthesizing, finalizing]
         message:
           type: string
+        title:
+          type: string
+        detail:
+          type: string
+        isQuickStep:
+          type: boolean
+        decision:
+          $ref: '#/components/schemas/ProgressDecision'
         pass:
           type: integer
           minimum: 0

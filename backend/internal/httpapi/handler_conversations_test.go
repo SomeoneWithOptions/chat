@@ -1486,6 +1486,7 @@ func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
 	events := decodeSSEEvents(t, resp.Body.String())
 	phases := make([]string, 0, 8)
 	sawLoopMetadata := false
+	sawSummaryFields := false
 	for _, event := range events {
 		if event.Type == "progress" {
 			if phase, ok := event.Data["phase"].(string); ok {
@@ -1493,6 +1494,9 @@ func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
 			}
 			if _, ok := event.Data["loop"]; ok {
 				sawLoopMetadata = true
+			}
+			if title, ok := event.Data["title"].(string); ok && strings.TrimSpace(title) != "" {
+				sawSummaryFields = true
 			}
 		}
 	}
@@ -1506,6 +1510,78 @@ func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
 	_ = assertContainsPhaseInOrder(t, phases, "finalizing", position)
 	if !sawLoopMetadata {
 		t.Fatalf("expected loop metadata in progress events, got %+v", events)
+	}
+	if !sawSummaryFields {
+		t.Fatalf("expected progress title fields in events, got %+v", events)
+	}
+}
+
+func TestChatMessagesStreamsProgressBeforeTokensForGroundedChat(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Grounded", " answer"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.ChatResearchMaxSearchQ = 1
+	handler.cfg.ChatResearchMaxLoops = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/one", Title: "Example One", Snippet: "First snippet"},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Ground this response","modelId":"openrouter/free","grounding":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	events := decodeSSEEvents(t, resp.Body.String())
+	firstProgressIndex := -1
+	firstTokenIndex := -1
+	sawQuickSearching := false
+	for idx, event := range events {
+		if event.Type == "progress" && firstProgressIndex == -1 {
+			firstProgressIndex = idx
+		}
+		if event.Type == "token" && firstTokenIndex == -1 {
+			firstTokenIndex = idx
+		}
+		if event.Type != "progress" {
+			continue
+		}
+		title, _ := event.Data["title"].(string)
+		if strings.TrimSpace(title) == "" {
+			t.Fatalf("expected progress title field, got %+v", event.Data)
+		}
+		phase, _ := event.Data["phase"].(string)
+		if phase == "searching" {
+			if quick, ok := event.Data["isQuickStep"].(bool); ok && quick {
+				sawQuickSearching = true
+			}
+		}
+	}
+	if firstProgressIndex == -1 {
+		t.Fatalf("expected progress events, got %+v", events)
+	}
+	if firstTokenIndex == -1 {
+		t.Fatalf("expected token events, got %+v", events)
+	}
+	if firstProgressIndex > firstTokenIndex {
+		t.Fatalf("expected progress before tokens, got %+v", events)
+	}
+	if !sawQuickSearching {
+		t.Fatalf("expected quick searching progress event, got %+v", events)
 	}
 }
 

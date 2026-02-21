@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"sort"
 	"strings"
 	"time"
@@ -110,7 +111,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			Evidence:            rankedEvidence,
 		}
 
-		emitProgress(onProgress, Progress{
+		emitProgress(onProgress, WithProgressSummary(Progress{
 			Phase:             PhasePlanning,
 			Message:           fmt.Sprintf("Planning loop %d of %d", loop, o.cfg.MaxLoops),
 			Loop:              loop,
@@ -119,9 +120,12 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			TotalPasses:       o.cfg.MaxLoops,
 			SourcesRead:       sourcesRead,
 			SourcesConsidered: sourcesConsidered,
-		})
+		}, ProgressSummaryInput{
+			Phase: PhasePlanning,
+		}))
 
 		decision, err := o.planner.InitialPlan(runCtx, planInput)
+		decisionUsedFallback := false
 		if loop > 1 {
 			decision, err = o.planner.EvaluateEvidence(runCtx, planInput)
 		}
@@ -131,6 +135,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			if loop == 1 {
 				decision = HeuristicPlanner{}.InitialPlan(planInput)
 			}
+			decisionUsedFallback = true
 		}
 		if len(decision.CoverageGaps) > 0 {
 			coverageGaps = decision.CoverageGaps
@@ -159,7 +164,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			break
 		}
 
-		emitProgress(onProgress, Progress{
+		emitProgress(onProgress, WithProgressSummary(Progress{
 			Phase:             PhaseSearching,
 			Message:           fmt.Sprintf("Searching %d query variants", len(queries)),
 			Loop:              loop,
@@ -168,7 +173,12 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			TotalPasses:       o.cfg.MaxLoops,
 			SourcesRead:       sourcesRead,
 			SourcesConsidered: sourcesConsidered,
-		})
+		}, ProgressSummaryInput{
+			Phase:        PhaseSearching,
+			QueryCount:   len(queries),
+			Decision:     DecisionFromNextAction(decision.NextAction),
+			UsedFallback: decisionUsedFallback,
+		}))
 
 		candidates := make([]Citation, 0, len(queries)*o.cfg.SearchResultsPerQ)
 		for _, query := range queries {
@@ -229,7 +239,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			candidates = candidates[:remainingReadBudget]
 		}
 
-		emitProgress(onProgress, Progress{
+		emitProgress(onProgress, WithProgressSummary(Progress{
 			Phase:             PhaseReading,
 			Message:           fmt.Sprintf("Reading %d candidate sources", len(candidates)),
 			Loop:              loop,
@@ -238,7 +248,11 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			TotalPasses:       o.cfg.MaxLoops,
 			SourcesRead:       sourcesRead,
 			SourcesConsidered: sourcesConsidered + len(candidates),
-		})
+		}, ProgressSummaryInput{
+			Phase:          PhaseReading,
+			CandidateCount: len(candidates),
+			Decision:       DecisionFromNextAction(decision.NextAction),
+		}))
 
 		for _, candidate := range candidates {
 			if pool.HasRead(candidate.URL) {
@@ -260,7 +274,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			}
 		}
 
-		emitProgress(onProgress, Progress{
+		emitProgress(onProgress, WithProgressSummary(Progress{
 			Phase:             PhaseEvaluating,
 			Message:           "Evaluating evidence sufficiency",
 			Loop:              loop,
@@ -269,7 +283,9 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			TotalPasses:       o.cfg.MaxLoops,
 			SourcesRead:       sourcesRead,
 			SourcesConsidered: sourcesConsidered,
-		})
+		}, ProgressSummaryInput{
+			Phase: PhaseEvaluating,
+		}))
 
 		evalInput := PlannerInput{
 			Question:             trimmedQuestion,
@@ -285,9 +301,11 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			LatestReadCandidates: candidates,
 		}
 		evalDecision, evalErr := o.planner.EvaluateEvidence(runCtx, evalInput)
+		evalUsedFallback := false
 		if evalErr != nil {
 			warnings = appendUniqueWarning(warnings, "Evidence evaluation fallback was used.")
 			evalDecision = HeuristicPlanner{}.EvaluateEvidence(evalInput)
+			evalUsedFallback = true
 		}
 		if len(evalDecision.CoverageGaps) > 0 {
 			coverageGaps = evalDecision.CoverageGaps
@@ -298,7 +316,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			break
 		}
 
-		emitProgress(onProgress, Progress{
+		emitProgress(onProgress, WithProgressSummary(Progress{
 			Phase:             PhaseIterating,
 			Message:           fmt.Sprintf("Continuing to loop %d", loop+1),
 			Loop:              loop,
@@ -307,7 +325,11 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			TotalPasses:       o.cfg.MaxLoops,
 			SourcesRead:       sourcesRead,
 			SourcesConsidered: sourcesConsidered,
-		})
+		}, ProgressSummaryInput{
+			Phase:        PhaseIterating,
+			Decision:     DecisionFromNextAction(evalDecision.NextAction),
+			UsedFallback: evalUsedFallback,
+		}))
 	}
 
 	return o.resultWithStop(pool, loopsExecuted, usedQueries, sourcesConsidered, sourcesRead, warnings, stopReason), nil
@@ -396,5 +418,17 @@ func emitProgress(onProgress func(Progress), progress Progress) {
 	if onProgress == nil {
 		return
 	}
+	log.Printf(
+		"research progress ux: phase=%s loop=%d max_loops=%d sources_read=%d sources_considered=%d title=%q has_detail=%t is_quick_step=%t decision=%s",
+		progress.Phase,
+		progress.Loop,
+		progress.MaxLoops,
+		progress.SourcesRead,
+		progress.SourcesConsidered,
+		progress.Title,
+		strings.TrimSpace(progress.Detail) != "",
+		progress.IsQuickStep,
+		progress.Decision,
+	)
 	onProgress(progress)
 }

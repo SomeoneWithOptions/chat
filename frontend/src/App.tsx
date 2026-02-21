@@ -20,6 +20,7 @@ import {
   type ReasoningEffort,
   type ReasoningMode,
   type ReasoningPreset,
+  type ProgressDecision,
   type ResearchPhase,
   type UploadedFile,
   type User,
@@ -114,7 +115,10 @@ function loadGoogleIdentityScript(): Promise<void> {
 
 type ResearchActivity = {
   phase: ResearchPhase;
-  message: string;
+  title: string;
+  detail?: string;
+  isQuickStep?: boolean;
+  decision?: ProgressDecision;
   pass?: number;
   totalPasses?: number;
   loop?: number;
@@ -135,15 +139,65 @@ const researchPhaseLabels: Record<ResearchPhase, string> = {
   finalizing: 'Finalizing',
 };
 
-const researchPhaseDefaults: Record<ResearchPhase, string> = {
-  planning: 'Preparing research strategy',
-  searching: 'Collecting web evidence',
-  reading: 'Reading candidate sources',
-  evaluating: 'Assessing evidence coverage',
-  iterating: 'Refining follow-up queries',
-  synthesizing: 'Drafting structured response',
-  finalizing: 'Ordering citations and finishing output',
+const researchPhaseTitleDefaults: Record<ResearchPhase, string> = {
+  planning: 'Planning next step',
+  searching: 'Searching trusted sources',
+  reading: 'Reading selected sources',
+  evaluating: 'Checking evidence quality',
+  iterating: 'Running another pass',
+  synthesizing: 'Drafting response',
+  finalizing: 'Finalizing answer',
 };
+
+const researchPhaseDetailDefaults: Record<ResearchPhase, string> = {
+  planning: 'Checking what evidence is still missing',
+  searching: 'Searching trusted sources for corroboration',
+  reading: 'Using top-ranked pages to improve accuracy',
+  evaluating: 'Deciding whether we can answer confidently',
+  iterating: 'Need one more search to close gaps',
+  synthesizing: 'Grounding claims to collected sources',
+  finalizing: 'Ordering citations and sending response',
+};
+
+function resolveResearchTitle(
+  phase: ResearchPhase,
+  title: string | undefined,
+  message: string | undefined,
+): string {
+  const trimmedTitle = title?.trim();
+  if (trimmedTitle) return trimmedTitle;
+  const trimmedMessage = message?.trim();
+  if (trimmedMessage) return trimmedMessage;
+  return researchPhaseTitleDefaults[phase];
+}
+
+function resolveResearchDetail(
+  phase: ResearchPhase,
+  detail: string | undefined,
+  isQuickStep: boolean | undefined,
+): string | undefined {
+  if (isQuickStep) return undefined;
+  const trimmedDetail = detail?.trim();
+  if (trimmedDetail) return trimmedDetail;
+  return researchPhaseDetailDefaults[phase];
+}
+
+function formatResearchCounter(activity: ResearchActivity | undefined): string | null {
+  if (!activity) return null;
+  const counters: string[] = [];
+  if (activity.loop && activity.maxLoops) counters.push(`loop ${activity.loop}/${activity.maxLoops}`);
+  if (activity.pass && activity.totalPasses) counters.push(`${activity.pass}/${activity.totalPasses}`);
+  if (activity.sourcesRead !== undefined || activity.sourcesConsidered !== undefined) {
+    counters.push(`sources ${activity.sourcesRead ?? 0}/${activity.sourcesConsidered ?? 0}`);
+  }
+  return counters.length > 0 ? counters.join(' · ') : null;
+}
+
+function formatDecisionLabel(decision: ProgressDecision | undefined): string | null {
+  if (decision === 'fallback') return 'Fallback path';
+  if (decision === 'finalize') return 'Ready to finalize';
+  return null;
+}
 
 const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> = [
   { value: 'low', label: 'Low' },
@@ -155,21 +209,6 @@ const defaultReasoningEffortByMode: Record<ReasoningMode, ReasoningEffort> = {
   chat: 'medium',
   deep_research: 'high',
 };
-
-function formatResearchProgressDetail(
-  phase: ResearchPhase,
-  message: string | undefined,
-  meta: { loop?: number; maxLoops?: number; sourcesConsidered?: number; sourcesRead?: number },
-): string {
-  const base = message ?? researchPhaseDefaults[phase];
-  const extras: string[] = [];
-  if (meta.loop && meta.maxLoops) extras.push(`loop ${meta.loop}/${meta.maxLoops}`);
-  if (meta.sourcesConsidered !== undefined || meta.sourcesRead !== undefined) {
-    extras.push(`sources ${meta.sourcesRead ?? 0}/${meta.sourcesConsidered ?? 0}`);
-  }
-  if (extras.length === 0) return base;
-  return `${base} (${extras.join(' · ')})`;
-}
 
 function resolveReasoningEffort(
   presets: ReasoningPreset[],
@@ -193,11 +232,11 @@ function buildInitialThinkingTrace(options: { grounding: boolean; deepResearch: 
   if (options.deepResearch) {
     return {
       status: 'running',
-      summary: researchPhaseDefaults.planning,
+      summary: researchPhaseTitleDefaults.planning,
       steps: researchPhases.map((phase, index) => ({
         id: phase,
         label: researchPhaseLabels[phase],
-        detail: researchPhaseDefaults[phase],
+        detail: researchPhaseDetailDefaults[phase],
         status: index === 0 ? 'active' : 'pending',
       })),
     };
@@ -265,6 +304,7 @@ export default function App() {
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [researchActivity, setResearchActivity] = useState<ResearchActivity[]>([]);
+  const [researchActivityMode, setResearchActivityMode] = useState<ReasoningMode | null>(null);
   const [researchCompleted, setResearchCompleted] = useState(false);
   const [researchPanelExpanded, setResearchPanelExpanded] = useState(false);
   const [thinkingTrace, setThinkingTrace] = useState<ThinkingTrace | null>(null);
@@ -400,6 +440,7 @@ export default function App() {
       setMessages([]);
       setStreamWarning(null);
       setResearchActivity([]);
+      setResearchActivityMode(null);
       setResearchCompleted(false);
       setThinkingTrace(null);
       setActiveAssistantMessageId(null);
@@ -628,11 +669,20 @@ export default function App() {
   }, [researchActivity]);
 
   const researchStatus = useMemo(() => {
-    if (isStreaming && researchActivity.length > 0) return 'Running';
+    if (isStreaming && (researchActivity.length > 0 || researchActivityMode !== null)) return 'Running';
     if (researchCompleted) return 'Complete';
     if (researchActivity.length > 0) return 'Stopped';
     return 'Ready';
-  }, [isStreaming, researchActivity.length, researchCompleted]);
+  }, [isStreaming, researchActivity.length, researchActivityMode, researchCompleted]);
+
+  const showResearchPanel = useMemo(() => {
+    if (researchActivityMode === 'deep_research') {
+      return deepResearch || researchActivity.length > 0;
+    }
+    return researchActivity.length > 0;
+  }, [deepResearch, researchActivity.length, researchActivityMode]);
+
+  const showResearchTimeline = researchActivityMode === 'deep_research';
 
   // ─── Handlers ─────────────────────────────────
 
@@ -666,6 +716,7 @@ export default function App() {
       setMessages([]);
       setStreamWarning(null);
       setResearchActivity([]);
+      setResearchActivityMode(null);
       setResearchCompleted(false);
       setThinkingTrace(null);
       setActiveAssistantMessageId(null);
@@ -742,6 +793,9 @@ export default function App() {
     setSidebarCollapsed(true);
     setActiveConversationId(null);
     setMessages([]);
+    setResearchActivity([]);
+    setResearchActivityMode(null);
+    setResearchCompleted(false);
     setThinkingTrace(null);
     setActiveAssistantMessageId(null);
   }
@@ -868,7 +922,9 @@ export default function App() {
     setStreamWarning(null);
     setError(null);
     setResearchActivity([]);
+    setResearchActivityMode(isDeepResearchRequest ? 'deep_research' : grounding ? 'chat' : null);
     setResearchCompleted(false);
+    setResearchPanelExpanded(false);
     setActiveAssistantMessageId(assistantMessage.id);
     setThinkingTrace(buildInitialThinkingTrace({ grounding, deepResearch: isDeepResearchRequest }));
 
@@ -890,21 +946,22 @@ export default function App() {
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
+            setResearchActivityMode(eventData.deepResearch ? 'deep_research' : eventData.grounding ? 'chat' : null);
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === assistantMessage.id ? { ...m, modelId: eventData.modelId } : m,
               ),
             );
-            if (!isDeepResearchRequest) {
+            if (!eventData.deepResearch) {
               setThinkingTrace((existing) => {
                 if (!existing) return existing;
                 return {
                   ...existing,
-                  summary: grounding ? 'Gathering grounded context' : 'Drafting response',
+                  summary: eventData.grounding ? 'Gathering grounded context' : 'Drafting response',
                   steps: existing.steps.map((step) => {
                     if (step.id === 'understand') return { ...step, status: 'done' };
-                    if (step.id === 'grounding') return { ...step, status: grounding ? 'active' : 'done' };
-                    if (step.id === 'compose') return { ...step, status: grounding ? 'pending' : 'active' };
+                    if (step.id === 'grounding') return { ...step, status: eventData.grounding ? 'active' : 'done' };
+                    if (step.id === 'compose') return { ...step, status: eventData.grounding ? 'pending' : 'active' };
                     return step;
                   }),
                 };
@@ -921,20 +978,18 @@ export default function App() {
             return;
           }
           if (eventData.type === 'progress') {
-            if (!isDeepResearchRequest) return;
             const currentPhaseIndex = researchPhases.indexOf(eventData.phase);
-            const progressDetail = formatResearchProgressDetail(eventData.phase, eventData.message, {
-              loop: eventData.loop,
-              maxLoops: eventData.maxLoops,
-              sourcesConsidered: eventData.sourcesConsidered,
-              sourcesRead: eventData.sourcesRead,
-            });
+            const progressTitle = resolveResearchTitle(eventData.phase, eventData.title, eventData.message);
+            const progressDetail = resolveResearchDetail(eventData.phase, eventData.detail, eventData.isQuickStep);
             setResearchActivity((existing) =>
               [
                 ...existing,
                 {
                   phase: eventData.phase,
-                  message: progressDetail,
+                  title: progressTitle,
+                  detail: progressDetail,
+                  isQuickStep: eventData.isQuickStep,
+                  decision: eventData.decision,
                   pass: eventData.pass,
                   totalPasses: eventData.totalPasses,
                   loop: eventData.loop,
@@ -944,22 +999,32 @@ export default function App() {
                 },
               ].slice(-30),
             );
-            setThinkingTrace((existing) => {
-              const previous = new Map(existing?.steps.map((step) => [step.id, step]));
-              return {
-                status: 'running',
-                summary: progressDetail,
-                steps: researchPhases.map((phase, index) => ({
-                  id: phase,
-                  label: researchPhaseLabels[phase],
-                  detail:
-                    phase === eventData.phase
-                      ? progressDetail
-                      : previous.get(phase)?.detail ?? researchPhaseDefaults[phase],
-                  status: index < currentPhaseIndex ? 'done' : index === currentPhaseIndex ? 'active' : 'pending',
-                })),
-              };
-            });
+            if (isDeepResearchRequest) {
+              setThinkingTrace((existing) => {
+                const previous = new Map(existing?.steps.map((step) => [step.id, step]));
+                return {
+                  status: 'running',
+                  summary: progressDetail ? `${progressTitle}: ${progressDetail}` : progressTitle,
+                  steps: researchPhases.map((phase, index) => ({
+                    id: phase,
+                    label: researchPhaseLabels[phase],
+                    detail:
+                      phase === eventData.phase
+                        ? progressDetail ?? progressTitle
+                        : previous.get(phase)?.detail ?? researchPhaseDetailDefaults[phase],
+                    status: index < currentPhaseIndex ? 'done' : index === currentPhaseIndex ? 'active' : 'pending',
+                  })),
+                };
+              });
+            } else {
+              setThinkingTrace((existing) => {
+                if (!existing) return existing;
+                return {
+                  ...existing,
+                  summary: progressDetail ? `${progressTitle}: ${progressDetail}` : progressTitle,
+                };
+              });
+            }
             return;
           }
           if (eventData.type === 'warning') { setStreamWarning(eventData.message); return; }
@@ -971,7 +1036,7 @@ export default function App() {
             return;
           }
           if (eventData.type === 'done') {
-            if (isDeepResearchRequest) setResearchCompleted(true);
+            setResearchCompleted(true);
             setThinkingTrace((existing) => {
               if (!existing) return existing;
               return {
@@ -1174,67 +1239,83 @@ export default function App() {
 
         </header>
 
-        {(deepResearch || researchActivity.length > 0) && (
+        {showResearchPanel && (
           <section className={`research-panel ${researchPanelExpanded ? 'expanded' : 'collapsed'}`} data-testid="research-timeline">
-            <button
-              type="button"
-              className="research-panel-header"
-              onClick={() => setResearchPanelExpanded((open) => !open)}
-              aria-expanded={researchPanelExpanded}
-            >
-              <span className="research-panel-title">Research Activity</span>
-              <span className="research-panel-header-right">
+            {showResearchTimeline ? (
+              <button
+                type="button"
+                className="research-panel-header"
+                onClick={() => setResearchPanelExpanded((open) => !open)}
+                aria-expanded={researchPanelExpanded}
+              >
+                <span className="research-panel-title">Research Activity</span>
+                <span className="research-panel-header-right">
+                  <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
+                    {researchStatus}
+                  </span>
+                  <svg
+                    className={`research-panel-chevron ${researchPanelExpanded ? 'open' : ''}`}
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                  >
+                    <polyline points="6 9 12 15 18 9" />
+                  </svg>
+                </span>
+              </button>
+            ) : (
+              <div className="research-panel-header static">
+                <span className="research-panel-title">Research Progress</span>
                 <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
                   {researchStatus}
                 </span>
-                <svg
-                  className={`research-panel-chevron ${researchPanelExpanded ? 'open' : ''}`}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </span>
-            </button>
+              </div>
+            )}
 
-            {/* Collapsed: show only the active (or last completed) step */}
-            {!researchPanelExpanded && (() => {
+            {(!showResearchTimeline || !researchPanelExpanded) && (() => {
               const activeIndex = latestResearchPhaseIndex >= 0 ? latestResearchPhaseIndex : 0;
               const activePhase = researchPhases[activeIndex];
               const latest = latestResearchByPhase.get(activePhase);
+              const counterText = formatResearchCounter(latest);
+              const decisionLabel = formatDecisionLabel(latest?.decision);
+              const title = latest?.title ?? researchPhaseTitleDefaults[activePhase];
+              const detail = latest?.isQuickStep ? undefined : (latest?.detail ?? researchPhaseDetailDefaults[activePhase]);
               let state: 'pending' | 'active' | 'done' = 'pending';
               if (researchActivity.length > 0) {
                 state = researchCompleted ? 'done' : 'active';
               }
 
               return (
-                <div className="research-active-step">
+                <div className={`research-active-step ${detail ? 'two-line' : 'one-line'}`}>
                   <span className={`research-step-marker ${state}`} />
                   <div className="research-step-content">
                     <div className="research-step-row">
-                      <span className="research-step-title">{researchPhaseLabels[activePhase]}</span>
-                      {latest?.pass && latest.totalPasses ? (
+                      <span className="research-step-title">{title}</span>
+                      {counterText ? (
                         <span className="research-step-pass">
-                          {latest.pass}/{latest.totalPasses}
+                          {counterText}
                         </span>
                       ) : null}
                     </div>
-                    <p className="research-step-message">{latest?.message ?? researchPhaseDefaults[activePhase]}</p>
+                    {detail ? <p className="research-step-message">{detail}</p> : null}
+                    {decisionLabel ? <p className="research-step-decision">{decisionLabel}</p> : null}
                   </div>
                 </div>
               );
             })()}
 
-            {/* Expanded: show all phases */}
-            {researchPanelExpanded && (
+            {showResearchTimeline && researchPanelExpanded && (
               <ol className="research-timeline">
                 {researchPhases.map((phase, index) => {
                   const latest = latestResearchByPhase.get(phase);
+                  const counterText = formatResearchCounter(latest);
+                  const decisionLabel = formatDecisionLabel(latest?.decision);
+                  const title = latest?.title ?? researchPhaseTitleDefaults[phase];
+                  const detail = latest?.isQuickStep ? undefined : (latest?.detail ?? researchPhaseDetailDefaults[phase]);
                   let state: 'pending' | 'active' | 'done' = 'pending';
                   if (index < latestResearchPhaseIndex) state = 'done';
                   if (index === latestResearchPhaseIndex) state = researchCompleted ? 'done' : 'active';
@@ -1245,14 +1326,15 @@ export default function App() {
                       <span className="research-step-marker" />
                       <div className="research-step-content">
                         <div className="research-step-row">
-                          <span className="research-step-title">{researchPhaseLabels[phase]}</span>
-                          {latest?.pass && latest.totalPasses ? (
+                          <span className="research-step-title">{title}</span>
+                          {counterText ? (
                             <span className="research-step-pass">
-                              {latest.pass}/{latest.totalPasses}
+                              {counterText}
                             </span>
                           ) : null}
                         </div>
-                        <p className="research-step-message">{latest?.message ?? researchPhaseDefaults[phase]}</p>
+                        {detail ? <p className="research-step-message">{detail}</p> : null}
+                        {decisionLabel ? <p className="research-step-decision">{decisionLabel}</p> : null}
                       </div>
                     </li>
                   );

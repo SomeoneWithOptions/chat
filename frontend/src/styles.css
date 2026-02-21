@@ -2199,6 +2199,7 @@ code {
   background: linear-gradient(180deg, rgba(212, 175, 55, 0.06), rgba(255, 255, 255, 0.02));
   animation: slideUp 220ms var(--ease-out);
   overflow: hidden;
+  min-height: 76px;
 }
 
 .research-panel-header {
@@ -2218,6 +2219,14 @@ code {
 
 .research-panel-header:hover {
   background: rgba(255, 255, 255, 0.03);
+}
+
+.research-panel-header.static {
+  cursor: default;
+}
+
+.research-panel-header.static:hover {
+  background: transparent;
 }
 
 .research-panel-header-right {
@@ -2264,6 +2273,8 @@ code {
   align-items: flex-start;
   gap: 10px;
   padding: 0 14px 10px;
+  min-height: 56px;
+  transition: opacity 160ms ease, transform 160ms var(--ease-out);
 }
 
 .research-active-step .research-step-marker {
@@ -2303,6 +2314,7 @@ code {
   display: flex;
   align-items: flex-start;
   gap: 10px;
+  transition: opacity 160ms ease, transform 160ms var(--ease-out);
 }
 
 .research-step-marker {
@@ -2329,6 +2341,7 @@ code {
 .research-step-content {
   flex: 1;
   min-width: 0;
+  min-height: 40px;
 }
 
 .research-step-row {
@@ -2341,6 +2354,10 @@ code {
 .research-step-title {
   font-size: 12px;
   color: var(--text-secondary);
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .research-step.active .research-step-title {
@@ -2354,12 +2371,25 @@ code {
 .research-step-pass {
   font-size: 11px;
   color: var(--text-tertiary);
+  white-space: nowrap;
 }
 
 .research-step-message {
   font-size: 12px;
   color: var(--text-tertiary);
   margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  line-height: 1.4;
+  min-height: 1.4em;
+}
+
+.research-step-decision {
+  margin-top: 3px;
+  font-size: 11px;
+  color: var(--accent-muted);
 }
 
 /* ─── Dropdown overlay ───────────────────────── */

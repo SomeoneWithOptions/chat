@@ -1033,7 +1033,55 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	groundingCitations, groundingWarning := h.resolveGroundingContext(r.Context(), req.Message, grounding, timeSensitive)
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	metadataEvent := map[string]any{
+		"type":           "metadata",
+		"grounding":      grounding,
+		"deepResearch":   deepResearch,
+		"modelId":        modelID,
+		"conversationId": conversationID,
+	}
+	if reasoningEffort != "" {
+		metadataEvent["reasoningEffort"] = reasoningEffort
+	}
+	if err := writeSSEEvent(w, metadataEvent); err != nil {
+		writeError(w, http.StatusInternalServerError, "stream_error", "failed to start stream")
+		return
+	}
+	flusher.Flush()
+
+	groundingCitations, groundingWarning := h.resolveGroundingContext(
+		r.Context(),
+		req.Message,
+		grounding,
+		timeSensitive,
+		func(progress research.Progress) {
+			_ = writeSSEEvent(w, progressEventData(progress))
+			flusher.Flush()
+		},
+	)
+	if groundingWarning != "" {
+		_ = writeSSEEvent(w, map[string]any{
+			"type":    "warning",
+			"scope":   "grounding",
+			"message": groundingWarning,
+		})
+		flusher.Flush()
+	}
+
+	if grounding {
+		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+			Phase:   research.PhaseSynthesizing,
+			Message: "Preparing grounded response",
+		}, research.ProgressSummaryInput{
+			Phase: research.PhaseSynthesizing,
+		})))
+		flusher.Flush()
+	}
+
 	promptMessages := []openrouter.Message{
 		{Role: "system", Content: buildSystemPrompt(grounding, false, len(groundingCitations) > 0, timeSensitive)},
 	}
@@ -1046,7 +1094,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	promptMessages = append(promptMessages, historyMessages...)
 	promptMessages = append(promptMessages, openrouter.Message{Role: "user", Content: userPrompt})
 
-	started := false
+	started := true
 	var assistantContent strings.Builder
 	var reasoningContent strings.Builder
 	var assistantUsage *openrouter.Usage
@@ -1067,34 +1115,6 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			Reasoning: openRouterReasoningConfig(reasoningEffort),
 		},
 		func() error {
-			w.Header().Set("Content-Type", "text/event-stream")
-			w.Header().Set("Cache-Control", "no-cache")
-			w.Header().Set("Connection", "keep-alive")
-
-			metadataEvent := map[string]any{
-				"type":           "metadata",
-				"grounding":      grounding,
-				"deepResearch":   deepResearch,
-				"modelId":        modelID,
-				"conversationId": conversationID,
-			}
-			if reasoningEffort != "" {
-				metadataEvent["reasoningEffort"] = reasoningEffort
-			}
-			if err := writeSSEEvent(w, metadataEvent); err != nil {
-				return err
-			}
-			if groundingWarning != "" {
-				if err := writeSSEEvent(w, map[string]any{
-					"type":    "warning",
-					"scope":   "grounding",
-					"message": groundingWarning,
-				}); err != nil {
-					return err
-				}
-			}
-			flusher.Flush()
-			started = true
 			streamStartedAt = time.Now()
 			return nil
 		},
@@ -1138,6 +1158,16 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 	)
+
+	if grounding {
+		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+			Phase:   research.PhaseFinalizing,
+			Message: "Finalizing citations and response",
+		}, research.ProgressSummaryInput{
+			Phase: research.PhaseFinalizing,
+		})))
+		flusher.Flush()
+	}
 
 	var persistedCitations []citationResponse
 	if assistantContent.Len() > 0 {
@@ -1209,13 +1239,18 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 const maxGroundingResults = 10
 const maxConversationHistoryMessages = 24
 
-func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
+func (h Handler) resolveGroundingContext(
+	ctx context.Context,
+	message string,
+	enabled, timeSensitive bool,
+	onProgress func(research.Progress),
+) ([]citationResponse, string) {
 	if !enabled {
 		return nil, ""
 	}
 
 	if h.cfg.AgenticResearchChatEnabled {
-		result, err := h.runResearchOrchestrator(ctx, research.ModeChat, message, timeSensitive, nil)
+		result, err := h.runResearchOrchestrator(ctx, research.ModeChat, message, timeSensitive, onProgress)
 		if err == nil {
 			citations := convertResearchCitations(result.Citations, maxGroundingResults)
 			warning := researchWarning(result)
@@ -1225,10 +1260,15 @@ func (h Handler) resolveGroundingContext(ctx context.Context, message string, en
 		}
 	}
 
-	return h.resolveGroundingContextLegacy(ctx, message, enabled, timeSensitive)
+	return h.resolveGroundingContextLegacy(ctx, message, enabled, timeSensitive, onProgress)
 }
 
-func (h Handler) resolveGroundingContextLegacy(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
+func (h Handler) resolveGroundingContextLegacy(
+	ctx context.Context,
+	message string,
+	enabled, timeSensitive bool,
+	onProgress func(research.Progress),
+) ([]citationResponse, string) {
 	if !enabled {
 		return nil, ""
 	}
@@ -1241,12 +1281,33 @@ func (h Handler) resolveGroundingContextLegacy(ctx context.Context, message stri
 	if timeSensitive {
 		queries = append(queries, strings.TrimSpace(message)+" official release notes changelog")
 	}
+	if onProgress != nil {
+		onProgress(summarizedProgress(research.Progress{
+			Phase:       research.PhasePlanning,
+			Message:     fmt.Sprintf("Planned %d research passes", len(queries)),
+			TotalPasses: len(queries),
+		}, research.ProgressSummaryInput{
+			Phase: research.PhasePlanning,
+		}))
+	}
 
 	citations := make([]citationResponse, 0, maxGroundingResults)
 	seenURLs := make(map[string]struct{}, maxGroundingResults)
 	for idx, query := range queries {
 		if query == "" {
 			continue
+		}
+		if onProgress != nil {
+			onProgress(summarizedProgress(research.Progress{
+				Phase:       research.PhaseSearching,
+				Message:     fmt.Sprintf("Searching pass %d of %d", idx+1, len(queries)),
+				Pass:        idx + 1,
+				TotalPasses: len(queries),
+			}, research.ProgressSummaryInput{
+				Phase:      research.PhaseSearching,
+				QueryCount: 1,
+				Decision:   research.ProgressDecisionSearchMore,
+			}))
 		}
 
 		results, err := h.grounding.Search(ctx, query, maxGroundingResults)

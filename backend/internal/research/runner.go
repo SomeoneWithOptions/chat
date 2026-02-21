@@ -37,14 +37,18 @@ const (
 )
 
 type Progress struct {
-	Phase             Phase  `json:"phase"`
-	Message           string `json:"message,omitempty"`
-	Pass              int    `json:"pass,omitempty"`
-	TotalPasses       int    `json:"totalPasses,omitempty"`
-	Loop              int    `json:"loop,omitempty"`
-	MaxLoops          int    `json:"maxLoops,omitempty"`
-	SourcesConsidered int    `json:"sourcesConsidered,omitempty"`
-	SourcesRead       int    `json:"sourcesRead,omitempty"`
+	Phase             Phase            `json:"phase"`
+	Message           string           `json:"message,omitempty"`
+	Title             string           `json:"title,omitempty"`
+	Detail            string           `json:"detail,omitempty"`
+	IsQuickStep       bool             `json:"isQuickStep,omitempty"`
+	Decision          ProgressDecision `json:"decision,omitempty"`
+	Pass              int              `json:"pass,omitempty"`
+	TotalPasses       int              `json:"totalPasses,omitempty"`
+	Loop              int              `json:"loop,omitempty"`
+	MaxLoops          int              `json:"maxLoops,omitempty"`
+	SourcesConsidered int              `json:"sourcesConsidered,omitempty"`
+	SourcesRead       int              `json:"sourcesRead,omitempty"`
 }
 
 type Citation struct {
@@ -129,11 +133,13 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 
 	queries := buildPassQueries(baseQuestion, timeSensitive, cfg.MinPasses, cfg.MaxPasses)
 	if onProgress != nil {
-		onProgress(Progress{
+		onProgress(WithProgressSummary(Progress{
 			Phase:       PhasePlanning,
 			Message:     fmt.Sprintf("Planned %d research passes", len(queries)),
 			TotalPasses: len(queries),
-		})
+		}, ProgressSummaryInput{
+			Phase: PhasePlanning,
+		}))
 	}
 
 	candidates := make(map[string]Citation, len(queries)*cfg.ResultsPerPass)
@@ -143,12 +149,16 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 
 	for i, query := range queries {
 		if onProgress != nil {
-			onProgress(Progress{
+			onProgress(WithProgressSummary(Progress{
 				Phase:       PhaseSearching,
 				Message:     fmt.Sprintf("Searching pass %d of %d", i+1, len(queries)),
 				Pass:        i + 1,
 				TotalPasses: len(queries),
-			})
+			}, ProgressSummaryInput{
+				Phase:      PhaseSearching,
+				QueryCount: 1,
+				Decision:   ProgressDecisionSearchMore,
+			}))
 		}
 
 		if err := waitBeforeSearchAttempt(ctx, &lastSearchAttemptAt, cfg.MinSearchInterval); err != nil {

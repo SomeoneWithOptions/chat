@@ -97,6 +97,7 @@ export type ChatRequest = {
 };
 
 export type ResearchPhase = 'planning' | 'searching' | 'reading' | 'evaluating' | 'iterating' | 'synthesizing' | 'finalizing';
+export type ProgressDecision = 'search_more' | 'finalize' | 'fallback';
 
 export type StreamEvent =
   | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; reasoningEffort?: ReasoningEffort; conversationId?: string }
@@ -110,6 +111,10 @@ export type StreamEvent =
       maxLoops?: number;
       sourcesConsidered?: number;
       sourcesRead?: number;
+      title?: string;
+      detail?: string;
+      isQuickStep?: boolean;
+      decision?: ProgressDecision;
     }
   | { type: 'warning'; scope: string; message: string }
   | { type: 'citations'; citations: Citation[] }

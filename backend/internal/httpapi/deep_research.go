@@ -88,34 +88,25 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			input.ConversationID,
 			input.UserMessageID,
 		)
-		_ = writeSSEEvent(w, map[string]any{
-			"type":        "progress",
-			"phase":       research.PhasePlanning,
-			"message":     "Planning deep research response",
-			"totalPasses": 0,
-		})
-		_ = writeSSEEvent(w, map[string]any{
-			"type":        "progress",
-			"phase":       research.PhaseSearching,
-			"message":     "Grounding disabled; skipping web search",
-			"totalPasses": 0,
-		})
+		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+			Phase:   research.PhasePlanning,
+			Message: "Planning deep research response",
+		}, research.ProgressSummaryInput{
+			Phase: research.PhasePlanning,
+		})))
+		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+			Phase:   research.PhaseSearching,
+			Message: "Grounding disabled; skipping web search",
+		}, research.ProgressSummaryInput{
+			Phase:      research.PhaseSearching,
+			QueryCount: 1,
+		})))
 		flusher.Flush()
 	} else {
 		searchStartedAt := time.Now()
 		if h.cfg.AgenticResearchDeepEnabled {
 			researchResult, err := h.runResearchOrchestrator(researchCtx, research.ModeDeepResearch, input.Message, timeSensitive, func(progress research.Progress) {
-				_ = writeSSEEvent(w, map[string]any{
-					"type":              "progress",
-					"phase":             progress.Phase,
-					"message":           progress.Message,
-					"pass":              progress.Pass,
-					"totalPasses":       progress.TotalPasses,
-					"loop":              progress.Loop,
-					"maxLoops":          progress.MaxLoops,
-					"sourcesConsidered": progress.SourcesConsidered,
-					"sourcesRead":       progress.SourcesRead,
-				})
+				_ = writeSSEEvent(w, progressEventData(progress))
 				flusher.Flush()
 			})
 			if err != nil {
@@ -164,13 +155,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 				MinSearchInterval: braveFreeTierSpacing,
 			})
 			researchResult, err := runner.Run(researchCtx, input.Message, timeSensitive, func(progress research.Progress) {
-				_ = writeSSEEvent(w, map[string]any{
-					"type":        "progress",
-					"phase":       progress.Phase,
-					"message":     progress.Message,
-					"pass":        progress.Pass,
-					"totalPasses": progress.TotalPasses,
-				})
+				_ = writeSSEEvent(w, progressEventData(progress))
 				flusher.Flush()
 			})
 			if err != nil {
@@ -232,11 +217,12 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		flusher.Flush()
 	}
 
-	_ = writeSSEEvent(w, map[string]any{
-		"type":    "progress",
-		"phase":   research.PhaseSynthesizing,
-		"message": "Synthesizing evidence into final answer",
-	})
+	_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+		Phase:   research.PhaseSynthesizing,
+		Message: "Synthesizing evidence into final answer",
+	}, research.ProgressSummaryInput{
+		Phase: research.PhaseSynthesizing,
+	})))
 	flusher.Flush()
 
 	promptMessages := []openrouter.Message{
@@ -305,11 +291,12 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		},
 	)
 
-	_ = writeSSEEvent(w, map[string]any{
-		"type":    "progress",
-		"phase":   research.PhaseFinalizing,
-		"message": "Finalizing citations and response",
-	})
+	_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+		Phase:   research.PhaseFinalizing,
+		Message: "Finalizing citations and response",
+	}, research.ProgressSummaryInput{
+		Phase: research.PhaseFinalizing,
+	})))
 	flusher.Flush()
 
 	orderedCitations := orderCitationsByClaims(citations, assistantContent.String())

@@ -225,14 +225,68 @@ describe('Deep research streaming UX', () => {
   it('renders research phases and completion state from progress events', async () => {
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: true, modelId: 'openrouter/free', conversationId: 'conv-1' });
-      onEvent({ type: 'progress', phase: 'planning', message: 'Planned 3 research passes', totalPasses: 3, loop: 1, maxLoops: 3 });
-      onEvent({ type: 'progress', phase: 'searching', message: 'Searching pass 1 of 3', pass: 1, totalPasses: 3, loop: 1, maxLoops: 3 });
-      onEvent({ type: 'progress', phase: 'reading', message: 'Reading 4 candidate sources', loop: 1, maxLoops: 3, sourcesConsidered: 4, sourcesRead: 2 });
-      onEvent({ type: 'progress', phase: 'evaluating', message: 'Evaluating evidence', loop: 1, maxLoops: 3, sourcesConsidered: 4, sourcesRead: 2 });
-      onEvent({ type: 'progress', phase: 'iterating', message: 'Continuing to loop 2', loop: 1, maxLoops: 3, sourcesConsidered: 4, sourcesRead: 2 });
-      onEvent({ type: 'progress', phase: 'synthesizing', message: 'Synthesizing evidence' });
+      onEvent({
+        type: 'progress',
+        phase: 'planning',
+        title: 'Planning next step',
+        detail: 'Checking what evidence is still missing',
+        totalPasses: 3,
+        loop: 1,
+        maxLoops: 3,
+      });
+      onEvent({
+        type: 'progress',
+        phase: 'searching',
+        title: 'Searching trusted sources',
+        detail: 'Searching trusted sources for corroboration',
+        pass: 1,
+        totalPasses: 3,
+        loop: 1,
+        maxLoops: 3,
+      });
+      onEvent({
+        type: 'progress',
+        phase: 'reading',
+        title: 'Reading selected sources',
+        detail: 'Using top-ranked pages to improve accuracy',
+        loop: 1,
+        maxLoops: 3,
+        sourcesConsidered: 4,
+        sourcesRead: 2,
+      });
+      onEvent({
+        type: 'progress',
+        phase: 'evaluating',
+        title: 'Checking evidence quality',
+        detail: 'Deciding whether we can answer confidently',
+        loop: 1,
+        maxLoops: 3,
+        sourcesConsidered: 4,
+        sourcesRead: 2,
+      });
+      onEvent({
+        type: 'progress',
+        phase: 'iterating',
+        title: 'Running another pass',
+        detail: 'Need one more search to close gaps',
+        loop: 1,
+        maxLoops: 3,
+        sourcesConsidered: 4,
+        sourcesRead: 2,
+      });
+      onEvent({
+        type: 'progress',
+        phase: 'synthesizing',
+        title: 'Drafting response',
+        detail: 'Grounding claims to collected sources',
+      });
       onEvent({ type: 'token', delta: 'Final answer [1].' });
-      onEvent({ type: 'progress', phase: 'finalizing', message: 'Finalizing citations' });
+      onEvent({
+        type: 'progress',
+        phase: 'finalizing',
+        title: 'Finalizing answer',
+        detail: 'Ordering citations and sending response',
+      });
       onEvent({ type: 'done' });
     });
 
@@ -252,19 +306,19 @@ describe('Deep research streaming UX', () => {
     // Panel is visible and collapsed by default — shows only the active step
     const panel = await screen.findByTestId('research-timeline');
     expect(panel).toBeInTheDocument();
-    expect(screen.getByText('Finalizing')).toBeInTheDocument();
+    expect(screen.getByText('Finalizing answer')).toBeInTheDocument();
     expect(screen.getByText('Complete')).toBeInTheDocument();
 
     // Expand the panel to see all phases
     await user.click(screen.getByRole('button', { name: /research activity/i }));
 
-    expect(screen.getByText('Planning')).toBeInTheDocument();
-    expect(screen.getByText('Searching')).toBeInTheDocument();
-    expect(screen.getByText('Reading')).toBeInTheDocument();
-    expect(screen.getByText('Evaluating')).toBeInTheDocument();
-    expect(screen.getByText('Iterating')).toBeInTheDocument();
-    expect(screen.getByText('Synthesizing')).toBeInTheDocument();
-    expect(screen.getByText('Finalizing')).toBeInTheDocument();
+    expect(screen.getByText('Planning next step')).toBeInTheDocument();
+    expect(screen.getByText('Searching trusted sources')).toBeInTheDocument();
+    expect(screen.getByText('Reading selected sources')).toBeInTheDocument();
+    expect(screen.getByText('Checking evidence quality')).toBeInTheDocument();
+    expect(screen.getByText('Running another pass')).toBeInTheDocument();
+    expect(screen.getByText('Drafting response')).toBeInTheDocument();
+    expect(screen.getByText('Finalizing answer')).toBeInTheDocument();
   });
 
   it('renders usage details after sources when usage events are streamed', async () => {
@@ -327,10 +381,10 @@ describe('Deep research streaming UX', () => {
     if (releaseStream) releaseStream();
   });
 
-  it('ignores progress rendering for non-deep-research sends', async () => {
+  it('renders compact one-line progress for non-deep-research sends', async () => {
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
-      onEvent({ type: 'progress', phase: 'planning', message: 'Should be ignored' });
+      onEvent({ type: 'progress', phase: 'searching', title: 'Getting grounding results', isQuickStep: true });
       onEvent({ type: 'done' });
     });
 
@@ -345,7 +399,11 @@ describe('Deep research streaming UX', () => {
       expect(streamMessageMock).toHaveBeenCalledTimes(1);
     });
 
-    expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
+    const panel = await screen.findByTestId('research-timeline');
+    expect(panel).toBeInTheDocument();
+    expect(screen.getByText('Research Progress')).toBeInTheDocument();
+    expect(screen.getByText('Getting grounding results')).toBeInTheDocument();
+    expect(panel.querySelector('.research-step-message')).toBeNull();
   });
 
   it('includes selected reasoning effort in chat requests when model supports reasoning', async () => {
