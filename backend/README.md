@@ -42,6 +42,11 @@ cp backend/.env.example backend/.env
 - `MODEL_SYNC_BEARER_TOKEN` (required for `POST /v1/models/sync`)
 - `DEFAULT_CHAT_REASONING_EFFORT` (optional: `low`, `medium`, `high`; default `medium`)
 - `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional: `low`, `medium`, `high`; default `high`)
+- `AGENTIC_RESEARCH_CHAT_ENABLED` / `AGENTIC_RESEARCH_DEEP_ENABLED` (optional; default `true`)
+- `CHAT_RESEARCH_MAX_LOOPS`, `CHAT_RESEARCH_MAX_SOURCES_READ`, `CHAT_RESEARCH_MAX_SEARCH_QUERIES`, `CHAT_RESEARCH_TIMEOUT_SECONDS` (optional chat budgets)
+- `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
+- `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read safety limits)
+- `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
 
 Auth sequencing:
 
@@ -72,4 +77,6 @@ For temporary anonymous testing, set:
   - Requires `Authorization: Bearer <MODEL_SYNC_BEARER_TOKEN>`.
 - `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat` or `deep_research`.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
+- Chat and deep research both support iterative agentic web research loops behind independent feature flags.
+- Deep research uses larger loop/query/read budgets than normal chat and still respects `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

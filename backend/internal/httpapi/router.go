@@ -6,11 +6,13 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"chat/backend/internal/auth"
 	"chat/backend/internal/brave"
 	"chat/backend/internal/config"
 	"chat/backend/internal/openrouter"
+	"chat/backend/internal/research"
 	"chat/backend/internal/session"
 
 	"github.com/go-chi/chi/v5"
@@ -35,6 +37,11 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 
 	h := NewHandlerWithFileStore(cfg, db, store, verifier, openRouterClient, files)
 	h.grounding = brave.NewClient(cfg, nil)
+	h.researchReader = research.NewHTTPReader(research.ReaderConfig{
+		RequestTimeout: time.Duration(cfg.ResearchSourceTimeoutSecs) * time.Second,
+		MaxBytes:       int64(cfg.ResearchSourceMaxBytes),
+	}, nil)
+	h.researchPlannerResponder = newOpenRouterPlannerResponder(openRouterClient, cfg.OpenRouterDefaultModel)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)

@@ -117,13 +117,20 @@ type ResearchActivity = {
   message: string;
   pass?: number;
   totalPasses?: number;
+  loop?: number;
+  maxLoops?: number;
+  sourcesConsidered?: number;
+  sourcesRead?: number;
 };
 
-const researchPhases: ResearchPhase[] = ['planning', 'searching', 'synthesizing', 'finalizing'];
+const researchPhases: ResearchPhase[] = ['planning', 'searching', 'reading', 'evaluating', 'iterating', 'synthesizing', 'finalizing'];
 
 const researchPhaseLabels: Record<ResearchPhase, string> = {
   planning: 'Planning',
   searching: 'Searching',
+  reading: 'Reading',
+  evaluating: 'Evaluating',
+  iterating: 'Iterating',
   synthesizing: 'Synthesizing',
   finalizing: 'Finalizing',
 };
@@ -131,6 +138,9 @@ const researchPhaseLabels: Record<ResearchPhase, string> = {
 const researchPhaseDefaults: Record<ResearchPhase, string> = {
   planning: 'Preparing research strategy',
   searching: 'Collecting web evidence',
+  reading: 'Reading candidate sources',
+  evaluating: 'Assessing evidence coverage',
+  iterating: 'Refining follow-up queries',
   synthesizing: 'Drafting structured response',
   finalizing: 'Ordering citations and finishing output',
 };
@@ -145,6 +155,21 @@ const defaultReasoningEffortByMode: Record<ReasoningMode, ReasoningEffort> = {
   chat: 'medium',
   deep_research: 'high',
 };
+
+function formatResearchProgressDetail(
+  phase: ResearchPhase,
+  message: string | undefined,
+  meta: { loop?: number; maxLoops?: number; sourcesConsidered?: number; sourcesRead?: number },
+): string {
+  const base = message ?? researchPhaseDefaults[phase];
+  const extras: string[] = [];
+  if (meta.loop && meta.maxLoops) extras.push(`loop ${meta.loop}/${meta.maxLoops}`);
+  if (meta.sourcesConsidered !== undefined || meta.sourcesRead !== undefined) {
+    extras.push(`sources ${meta.sourcesRead ?? 0}/${meta.sourcesConsidered ?? 0}`);
+  }
+  if (extras.length === 0) return base;
+  return `${base} (${extras.join(' · ')})`;
+}
 
 function resolveReasoningEffort(
   presets: ReasoningPreset[],
@@ -898,14 +923,24 @@ export default function App() {
           if (eventData.type === 'progress') {
             if (!isDeepResearchRequest) return;
             const currentPhaseIndex = researchPhases.indexOf(eventData.phase);
+            const progressDetail = formatResearchProgressDetail(eventData.phase, eventData.message, {
+              loop: eventData.loop,
+              maxLoops: eventData.maxLoops,
+              sourcesConsidered: eventData.sourcesConsidered,
+              sourcesRead: eventData.sourcesRead,
+            });
             setResearchActivity((existing) =>
               [
                 ...existing,
                 {
                   phase: eventData.phase,
-                  message: eventData.message ?? researchPhaseDefaults[eventData.phase],
+                  message: progressDetail,
                   pass: eventData.pass,
                   totalPasses: eventData.totalPasses,
+                  loop: eventData.loop,
+                  maxLoops: eventData.maxLoops,
+                  sourcesConsidered: eventData.sourcesConsidered,
+                  sourcesRead: eventData.sourcesRead,
                 },
               ].slice(-30),
             );
@@ -913,13 +948,13 @@ export default function App() {
               const previous = new Map(existing?.steps.map((step) => [step.id, step]));
               return {
                 status: 'running',
-                summary: eventData.message ?? researchPhaseDefaults[eventData.phase],
+                summary: progressDetail,
                 steps: researchPhases.map((phase, index) => ({
                   id: phase,
                   label: researchPhaseLabels[phase],
                   detail:
                     phase === eventData.phase
-                      ? eventData.message ?? previous.get(phase)?.detail ?? researchPhaseDefaults[phase]
+                      ? progressDetail
                       : previous.get(phase)?.detail ?? researchPhaseDefaults[phase],
                   status: index < currentPhaseIndex ? 'done' : index === currentPhaseIndex ? 'active' : 'pending',
                 })),

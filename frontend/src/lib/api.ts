@@ -96,11 +96,21 @@ export type ChatRequest = {
   fileIds?: string[];
 };
 
-export type ResearchPhase = 'planning' | 'searching' | 'synthesizing' | 'finalizing';
+export type ResearchPhase = 'planning' | 'searching' | 'reading' | 'evaluating' | 'iterating' | 'synthesizing' | 'finalizing';
 
 export type StreamEvent =
   | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; reasoningEffort?: ReasoningEffort; conversationId?: string }
-  | { type: 'progress'; phase: ResearchPhase; message?: string; pass?: number; totalPasses?: number }
+  | {
+      type: 'progress';
+      phase: ResearchPhase;
+      message?: string;
+      pass?: number;
+      totalPasses?: number;
+      loop?: number;
+      maxLoops?: number;
+      sourcesConsidered?: number;
+      sourcesRead?: number;
+    }
   | { type: 'warning'; scope: string; message: string }
   | { type: 'citations'; citations: Citation[] }
   | { type: 'token'; delta: string }

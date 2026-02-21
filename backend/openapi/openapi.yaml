@@ -719,13 +719,25 @@ components:
           enum: [progress]
         phase:
           type: string
-          enum: [planning, searching, synthesizing, finalizing]
+          enum: [planning, searching, reading, evaluating, iterating, synthesizing, finalizing]
         message:
           type: string
         pass:
           type: integer
           minimum: 0
         totalPasses:
+          type: integer
+          minimum: 0
+        loop:
+          type: integer
+          minimum: 0
+        maxLoops:
+          type: integer
+          minimum: 0
+        sourcesConsidered:
+          type: integer
+          minimum: 0
+        sourcesRead:
           type: integer
           minimum: 0
     StreamEventWarning:

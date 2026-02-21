@@ -1485,10 +1485,14 @@ func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
 
 	events := decodeSSEEvents(t, resp.Body.String())
 	phases := make([]string, 0, 8)
+	sawLoopMetadata := false
 	for _, event := range events {
 		if event.Type == "progress" {
 			if phase, ok := event.Data["phase"].(string); ok {
 				phases = append(phases, phase)
+			}
+			if _, ok := event.Data["loop"]; ok {
+				sawLoopMetadata = true
 			}
 		}
 	}
@@ -1496,8 +1500,63 @@ func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
 	position := -1
 	position = assertContainsPhaseInOrder(t, phases, "planning", position)
 	position = assertContainsPhaseInOrder(t, phases, "searching", position)
+	position = assertContainsPhaseInOrder(t, phases, "reading", position)
+	position = assertContainsPhaseInOrder(t, phases, "evaluating", position)
 	position = assertContainsPhaseInOrder(t, phases, "synthesizing", position)
 	_ = assertContainsPhaseInOrder(t, phases, "finalizing", position)
+	if !sawLoopMetadata {
+		t.Fatalf("expected loop metadata in progress events, got %+v", events)
+	}
+}
+
+func TestChatMessagesDeepResearchFeatureFlagOffUsesLegacyPhases(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Legacy", " answer [1]"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.AgenticResearchDeepEnabled = false
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://gov.example.gov/report", Title: "Official report", Snippet: "Detailed 2026 update."},
+			{URL: "https://docs.example.com/changelog", Title: "Changelog", Snippet: "Release notes and changes."},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Research this","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	events := decodeSSEEvents(t, resp.Body.String())
+	phases := make([]string, 0, 8)
+	for _, event := range events {
+		if event.Type == "progress" {
+			if phase, ok := event.Data["phase"].(string); ok {
+				phases = append(phases, phase)
+			}
+		}
+	}
+	_ = assertContainsPhaseInOrder(t, phases, "planning", -1)
+	_ = assertContainsPhaseInOrder(t, phases, "searching", -1)
+	_ = assertContainsPhaseInOrder(t, phases, "synthesizing", -1)
+	_ = assertContainsPhaseInOrder(t, phases, "finalizing", -1)
+	for _, phase := range phases {
+		if phase == "reading" || phase == "evaluating" || phase == "iterating" {
+			t.Fatalf("did not expect agentic-only phase with flag off, got %q in %+v", phase, phases)
+		}
+	}
 }
 
 func TestChatMessagesDeepResearchTimeoutUsesConfig(t *testing.T) {
@@ -1949,6 +2008,20 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 		OpenRouterDefaultModel:     "openrouter/free",
 		DefaultChatReasoningEffort: "medium",
 		DefaultDeepReasoningEffort: "high",
+		AgenticResearchChatEnabled: true,
+		AgenticResearchDeepEnabled: true,
+		ChatResearchMaxLoops:       2,
+		ChatResearchMaxSourcesRead: 4,
+		ChatResearchMaxSearchQ:     4,
+		ChatResearchTimeoutSeconds: 20,
+		DeepResearchTimeoutSeconds: 150,
+		DeepResearchMaxLoops:       6,
+		DeepResearchMaxSourcesRead: 16,
+		DeepResearchMaxSearchQ:     18,
+		ResearchSourceTimeoutSecs:  8,
+		ResearchSourceMaxBytes:     1_500_000,
+		ResearchMaxCitationsChat:   8,
+		ResearchMaxCitationsDeep:   12,
 	}
 
 	handler := NewHandlerWithFileStore(cfg, db, session.NewStore(db), auth.NewVerifier(cfg), streamer, fileStore)

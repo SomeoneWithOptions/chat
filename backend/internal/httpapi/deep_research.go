@@ -81,14 +81,6 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	citations := make([]citationResponse, 0, maxDeepResearchCitations)
 	searchWarning := ""
 
-	runner := research.NewRunner(h.grounding, research.Config{
-		MinPasses:         3,
-		MaxPasses:         6,
-		ResultsPerPass:    maxGroundingResults,
-		MaxCitations:      maxDeepResearchCitations,
-		MinSearchInterval: braveFreeTierSpacing,
-	})
-
 	if !input.Grounding {
 		log.Printf(
 			"deep research search skipped: user_id=%s conversation_id=%s user_message_id=%s reason=grounding_disabled",
@@ -111,55 +103,116 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		flusher.Flush()
 	} else {
 		searchStartedAt := time.Now()
-		researchResult, err := runner.Run(researchCtx, input.Message, timeSensitive, func(progress research.Progress) {
-			_ = writeSSEEvent(w, map[string]any{
-				"type":        "progress",
-				"phase":       progress.Phase,
-				"message":     progress.Message,
-				"pass":        progress.Pass,
-				"totalPasses": progress.TotalPasses,
+		if h.cfg.AgenticResearchDeepEnabled {
+			researchResult, err := h.runResearchOrchestrator(researchCtx, research.ModeDeepResearch, input.Message, timeSensitive, func(progress research.Progress) {
+				_ = writeSSEEvent(w, map[string]any{
+					"type":              "progress",
+					"phase":             progress.Phase,
+					"message":           progress.Message,
+					"pass":              progress.Pass,
+					"totalPasses":       progress.TotalPasses,
+					"loop":              progress.Loop,
+					"maxLoops":          progress.MaxLoops,
+					"sourcesConsidered": progress.SourcesConsidered,
+					"sourcesRead":       progress.SourcesRead,
+				})
+				flusher.Flush()
 			})
-			flusher.Flush()
-		})
-		if err != nil {
-			message := "deep research interrupted"
-			if errors.Is(err, context.DeadlineExceeded) {
-				message = fmt.Sprintf("deep research timed out after %d seconds", timeoutSeconds)
-			} else if errors.Is(err, context.Canceled) {
-				message = "deep research request canceled"
+			if err != nil {
+				message := "deep research interrupted"
+				if errors.Is(err, context.DeadlineExceeded) {
+					message = fmt.Sprintf("deep research timed out after %d seconds", timeoutSeconds)
+				} else if errors.Is(err, context.Canceled) {
+					message = "deep research request canceled"
+				}
+				log.Printf(
+					"deep research search failed: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s err=%v elapsed_ms=%d",
+					input.UserID,
+					input.IsAnonymous,
+					input.ConversationID,
+					input.UserMessageID,
+					err,
+					time.Since(searchStartedAt).Milliseconds(),
+				)
+				_ = writeSSEEvent(w, map[string]any{"type": "error", "message": message})
+				_ = writeSSEEvent(w, map[string]any{"type": "done"})
+				flusher.Flush()
+				return
 			}
+
+			searchWarning = researchWarning(researchResult)
 			log.Printf(
-				"deep research search failed: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s err=%v elapsed_ms=%d",
+				"deep research search completed: user_id=%s conversation_id=%s user_message_id=%s loops=%d searches=%d sources_read=%d citations=%d stop_reason=%s warning_present=%t elapsed_ms=%d",
 				input.UserID,
-				input.IsAnonymous,
 				input.ConversationID,
 				input.UserMessageID,
-				err,
+				researchResult.Loops,
+				researchResult.SearchQueries,
+				researchResult.SourcesRead,
+				len(researchResult.Citations),
+				researchResult.StopReason,
+				searchWarning != "",
 				time.Since(searchStartedAt).Milliseconds(),
 			)
-			_ = writeSSEEvent(w, map[string]any{"type": "error", "message": message})
-			_ = writeSSEEvent(w, map[string]any{"type": "done"})
-			flusher.Flush()
-			return
-		}
-		searchWarning = strings.TrimSpace(researchResult.Warning)
-		log.Printf(
-			"deep research search completed: user_id=%s conversation_id=%s user_message_id=%s passes=%d citations=%d warning_present=%t elapsed_ms=%d",
-			input.UserID,
-			input.ConversationID,
-			input.UserMessageID,
-			researchResult.Passes,
-			len(researchResult.Citations),
-			searchWarning != "",
-			time.Since(searchStartedAt).Milliseconds(),
-		)
-		for _, item := range researchResult.Citations {
-			citations = append(citations, citationResponse{
-				URL:            item.URL,
-				Title:          trimToRunes(item.Title, 240),
-				Snippet:        trimToRunes(item.Snippet, 800),
-				SourceProvider: "brave",
+			citations = append(citations, convertResearchCitations(researchResult.Citations, maxDeepResearchCitations)...)
+		} else {
+			runner := research.NewRunner(h.grounding, research.Config{
+				MinPasses:         3,
+				MaxPasses:         6,
+				ResultsPerPass:    maxGroundingResults,
+				MaxCitations:      maxDeepResearchCitations,
+				MinSearchInterval: braveFreeTierSpacing,
 			})
+			researchResult, err := runner.Run(researchCtx, input.Message, timeSensitive, func(progress research.Progress) {
+				_ = writeSSEEvent(w, map[string]any{
+					"type":        "progress",
+					"phase":       progress.Phase,
+					"message":     progress.Message,
+					"pass":        progress.Pass,
+					"totalPasses": progress.TotalPasses,
+				})
+				flusher.Flush()
+			})
+			if err != nil {
+				message := "deep research interrupted"
+				if errors.Is(err, context.DeadlineExceeded) {
+					message = fmt.Sprintf("deep research timed out after %d seconds", timeoutSeconds)
+				} else if errors.Is(err, context.Canceled) {
+					message = "deep research request canceled"
+				}
+				log.Printf(
+					"deep research search failed: user_id=%s anonymous=%t conversation_id=%s user_message_id=%s err=%v elapsed_ms=%d",
+					input.UserID,
+					input.IsAnonymous,
+					input.ConversationID,
+					input.UserMessageID,
+					err,
+					time.Since(searchStartedAt).Milliseconds(),
+				)
+				_ = writeSSEEvent(w, map[string]any{"type": "error", "message": message})
+				_ = writeSSEEvent(w, map[string]any{"type": "done"})
+				flusher.Flush()
+				return
+			}
+			searchWarning = strings.TrimSpace(researchResult.Warning)
+			log.Printf(
+				"deep research search completed: user_id=%s conversation_id=%s user_message_id=%s passes=%d citations=%d warning_present=%t elapsed_ms=%d",
+				input.UserID,
+				input.ConversationID,
+				input.UserMessageID,
+				researchResult.Passes,
+				len(researchResult.Citations),
+				searchWarning != "",
+				time.Since(searchStartedAt).Milliseconds(),
+			)
+			for _, item := range researchResult.Citations {
+				citations = append(citations, citationResponse{
+					URL:            item.URL,
+					Title:          trimToRunes(item.Title, 240),
+					Snippet:        trimToRunes(item.Snippet, 800),
+					SourceProvider: "brave",
+				})
+			}
 		}
 	}
 

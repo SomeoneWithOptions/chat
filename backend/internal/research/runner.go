@@ -29,15 +29,22 @@ type Phase string
 const (
 	PhasePlanning     Phase = "planning"
 	PhaseSearching    Phase = "searching"
+	PhaseReading      Phase = "reading"
+	PhaseEvaluating   Phase = "evaluating"
+	PhaseIterating    Phase = "iterating"
 	PhaseSynthesizing Phase = "synthesizing"
 	PhaseFinalizing   Phase = "finalizing"
 )
 
 type Progress struct {
-	Phase       Phase  `json:"phase"`
-	Message     string `json:"message,omitempty"`
-	Pass        int    `json:"pass,omitempty"`
-	TotalPasses int    `json:"totalPasses,omitempty"`
+	Phase             Phase  `json:"phase"`
+	Message           string `json:"message,omitempty"`
+	Pass              int    `json:"pass,omitempty"`
+	TotalPasses       int    `json:"totalPasses,omitempty"`
+	Loop              int    `json:"loop,omitempty"`
+	MaxLoops          int    `json:"maxLoops,omitempty"`
+	SourcesConsidered int    `json:"sourcesConsidered,omitempty"`
+	SourcesRead       int    `json:"sourcesRead,omitempty"`
 }
 
 type Citation struct {

@@ -32,6 +32,11 @@ Set at minimum:
 - `GCS_UPLOAD_BUCKET` (required to upload attachments)
 - `MODEL_SYNC_BEARER_TOKEN` (required for `POST /v1/models/sync`; send it as `Authorization: Bearer <token>`)
 - `DEEP_RESEARCH_TIMEOUT_SECONDS` (optional, default `150`; applies to deep-research requests only)
+- `AGENTIC_RESEARCH_CHAT_ENABLED` / `AGENTIC_RESEARCH_DEEP_ENABLED` (optional; default `true`)
+- `CHAT_RESEARCH_MAX_LOOPS`, `CHAT_RESEARCH_MAX_SOURCES_READ`, `CHAT_RESEARCH_MAX_SEARCH_QUERIES`, `CHAT_RESEARCH_TIMEOUT_SECONDS` (optional chat budgets)
+- `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
+- `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read limits)
+- `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
 - `DEFAULT_CHAT_REASONING_EFFORT` (optional, default `medium`)
 - `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional, default `high`)
 - `SESSION_TTL_HOURS` (optional, default `720` for 30-day reauthentication)
@@ -81,7 +86,8 @@ Expected response:
 
 ## Deep Research Behavior (Local)
 
-- Deep research runs a dedicated multi-pass research pipeline (3-6 Brave search passes).
-- SSE progress events are streamed with phases: `planning`, `searching`, `synthesizing`, `finalizing`.
+- Chat and deep research can run the shared agentic loop (`plan -> search -> read -> evaluate -> iterate/finalize`) when enabled.
+- Deep research uses larger default budgets than chat and remains bounded by `DEEP_RESEARCH_TIMEOUT_SECONDS`.
+- SSE progress events include phases: `planning`, `searching`, `reading`, `evaluating`, `iterating`, `synthesizing`, `finalizing`.
 - Timeout and cancellation are enforced server-side via `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - When Brave search partially fails, the request continues with available evidence and warning events.

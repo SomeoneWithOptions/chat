@@ -225,8 +225,11 @@ describe('Deep research streaming UX', () => {
   it('renders research phases and completion state from progress events', async () => {
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: true, modelId: 'openrouter/free', conversationId: 'conv-1' });
-      onEvent({ type: 'progress', phase: 'planning', message: 'Planned 3 research passes', totalPasses: 3 });
-      onEvent({ type: 'progress', phase: 'searching', message: 'Searching pass 1 of 3', pass: 1, totalPasses: 3 });
+      onEvent({ type: 'progress', phase: 'planning', message: 'Planned 3 research passes', totalPasses: 3, loop: 1, maxLoops: 3 });
+      onEvent({ type: 'progress', phase: 'searching', message: 'Searching pass 1 of 3', pass: 1, totalPasses: 3, loop: 1, maxLoops: 3 });
+      onEvent({ type: 'progress', phase: 'reading', message: 'Reading 4 candidate sources', loop: 1, maxLoops: 3, sourcesConsidered: 4, sourcesRead: 2 });
+      onEvent({ type: 'progress', phase: 'evaluating', message: 'Evaluating evidence', loop: 1, maxLoops: 3, sourcesConsidered: 4, sourcesRead: 2 });
+      onEvent({ type: 'progress', phase: 'iterating', message: 'Continuing to loop 2', loop: 1, maxLoops: 3, sourcesConsidered: 4, sourcesRead: 2 });
       onEvent({ type: 'progress', phase: 'synthesizing', message: 'Synthesizing evidence' });
       onEvent({ type: 'token', delta: 'Final answer [1].' });
       onEvent({ type: 'progress', phase: 'finalizing', message: 'Finalizing citations' });
@@ -257,6 +260,9 @@ describe('Deep research streaming UX', () => {
 
     expect(screen.getByText('Planning')).toBeInTheDocument();
     expect(screen.getByText('Searching')).toBeInTheDocument();
+    expect(screen.getByText('Reading')).toBeInTheDocument();
+    expect(screen.getByText('Evaluating')).toBeInTheDocument();
+    expect(screen.getByText('Iterating')).toBeInTheDocument();
     expect(screen.getByText('Synthesizing')).toBeInTheDocument();
     expect(screen.getByText('Finalizing')).toBeInTheDocument();
   });

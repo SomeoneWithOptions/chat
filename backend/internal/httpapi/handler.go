@@ -16,6 +16,7 @@ import (
 	"chat/backend/internal/brave"
 	"chat/backend/internal/config"
 	"chat/backend/internal/openrouter"
+	"chat/backend/internal/research"
 	"chat/backend/internal/session"
 
 	"github.com/go-chi/chi/v5"
@@ -28,14 +29,16 @@ var (
 )
 
 type Handler struct {
-	cfg        config.Config
-	db         *sql.DB
-	sessions   session.Store
-	verifier   auth.Verifier
-	openrouter chatStreamer
-	grounding  groundingSearcher
-	models     modelCataloger
-	files      fileObjectStore
+	cfg                      config.Config
+	db                       *sql.DB
+	sessions                 session.Store
+	verifier                 auth.Verifier
+	openrouter               chatStreamer
+	grounding                groundingSearcher
+	researchReader           research.Reader
+	researchPlannerResponder research.PromptResponder
+	models                   modelCataloger
+	files                    fileObjectStore
 }
 
 type chatStreamer interface {
@@ -1207,6 +1210,25 @@ const maxGroundingResults = 10
 const maxConversationHistoryMessages = 24
 
 func (h Handler) resolveGroundingContext(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
+	if !enabled {
+		return nil, ""
+	}
+
+	if h.cfg.AgenticResearchChatEnabled {
+		result, err := h.runResearchOrchestrator(ctx, research.ModeChat, message, timeSensitive, nil)
+		if err == nil {
+			citations := convertResearchCitations(result.Citations, maxGroundingResults)
+			warning := researchWarning(result)
+			if len(citations) > 0 || warning != "" {
+				return citations, warning
+			}
+		}
+	}
+
+	return h.resolveGroundingContextLegacy(ctx, message, enabled, timeSensitive)
+}
+
+func (h Handler) resolveGroundingContextLegacy(ctx context.Context, message string, enabled, timeSensitive bool) ([]citationResponse, string) {
 	if !enabled {
 		return nil, ""
 	}

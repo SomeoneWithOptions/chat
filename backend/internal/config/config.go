@@ -22,6 +22,17 @@ const (
 	defaultUploadDir           = "/tmp/chat-uploads"
 	defaultGCSUploadPrefix     = "chat-uploads"
 	defaultResearchTimeoutSecs = 150
+	defaultChatResearchTimeout = 20
+	defaultSourceFetchTimeout  = 8
+	defaultSourceMaxBytes      = 1_500_000
+	defaultChatMaxLoops        = 2
+	defaultChatMaxSourcesRead  = 4
+	defaultChatMaxSearchQ      = 4
+	defaultDeepMaxLoops        = 6
+	defaultDeepMaxSourcesRead  = 16
+	defaultDeepMaxSearchQ      = 18
+	defaultChatMaxCitations    = 8
+	defaultDeepMaxCitations    = 12
 )
 
 type Config struct {
@@ -50,6 +61,19 @@ type Config struct {
 	GCSUploadBucket            string
 	GCSUploadPrefix            string
 	DeepResearchTimeoutSeconds int
+	AgenticResearchChatEnabled bool
+	AgenticResearchDeepEnabled bool
+	ChatResearchMaxLoops       int
+	ChatResearchMaxSourcesRead int
+	ChatResearchMaxSearchQ     int
+	ChatResearchTimeoutSeconds int
+	DeepResearchMaxLoops       int
+	DeepResearchMaxSourcesRead int
+	DeepResearchMaxSearchQ     int
+	ResearchSourceTimeoutSecs  int
+	ResearchSourceMaxBytes     int
+	ResearchMaxCitationsChat   int
+	ResearchMaxCitationsDeep   int
 }
 
 func (c Config) ListenAddress() string {
@@ -80,6 +104,19 @@ func Load() (Config, error) {
 		GCSUploadBucket:            strings.TrimSpace(os.Getenv("GCS_UPLOAD_BUCKET")),
 		GCSUploadPrefix:            envOrDefault("GCS_UPLOAD_PREFIX", defaultGCSUploadPrefix),
 		DeepResearchTimeoutSeconds: intOrDefault("DEEP_RESEARCH_TIMEOUT_SECONDS", defaultResearchTimeoutSecs),
+		AgenticResearchChatEnabled: boolOrDefault("AGENTIC_RESEARCH_CHAT_ENABLED", true),
+		AgenticResearchDeepEnabled: boolOrDefault("AGENTIC_RESEARCH_DEEP_ENABLED", true),
+		ChatResearchMaxLoops:       intOrDefault("CHAT_RESEARCH_MAX_LOOPS", defaultChatMaxLoops),
+		ChatResearchMaxSourcesRead: intOrDefault("CHAT_RESEARCH_MAX_SOURCES_READ", defaultChatMaxSourcesRead),
+		ChatResearchMaxSearchQ:     intOrDefault("CHAT_RESEARCH_MAX_SEARCH_QUERIES", defaultChatMaxSearchQ),
+		ChatResearchTimeoutSeconds: intOrDefault("CHAT_RESEARCH_TIMEOUT_SECONDS", defaultChatResearchTimeout),
+		DeepResearchMaxLoops:       intOrDefault("DEEP_RESEARCH_MAX_LOOPS", defaultDeepMaxLoops),
+		DeepResearchMaxSourcesRead: intOrDefault("DEEP_RESEARCH_MAX_SOURCES_READ", defaultDeepMaxSourcesRead),
+		DeepResearchMaxSearchQ:     intOrDefault("DEEP_RESEARCH_MAX_SEARCH_QUERIES", defaultDeepMaxSearchQ),
+		ResearchSourceTimeoutSecs:  intOrDefault("RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS", defaultSourceFetchTimeout),
+		ResearchSourceMaxBytes:     intOrDefault("RESEARCH_SOURCE_MAX_BYTES", defaultSourceMaxBytes),
+		ResearchMaxCitationsChat:   intOrDefault("RESEARCH_MAX_CITATIONS_CHAT", defaultChatMaxCitations),
+		ResearchMaxCitationsDeep:   intOrDefault("RESEARCH_MAX_CITATIONS_DEEP", defaultDeepMaxCitations),
 	}
 
 	if cfg.Environment == "production" {
@@ -116,6 +153,19 @@ func Load() (Config, error) {
 	if err := validateReasoningEffort(cfg.DefaultDeepReasoningEffort); err != nil {
 		return Config{}, fmt.Errorf("DEFAULT_DEEP_RESEARCH_REASONING_EFFORT %w", err)
 	}
+
+	cfg.DeepResearchTimeoutSeconds = ensurePositiveInt(cfg.DeepResearchTimeoutSeconds, defaultResearchTimeoutSecs)
+	cfg.ChatResearchMaxLoops = ensurePositiveInt(cfg.ChatResearchMaxLoops, defaultChatMaxLoops)
+	cfg.ChatResearchMaxSourcesRead = ensurePositiveInt(cfg.ChatResearchMaxSourcesRead, defaultChatMaxSourcesRead)
+	cfg.ChatResearchMaxSearchQ = ensurePositiveInt(cfg.ChatResearchMaxSearchQ, defaultChatMaxSearchQ)
+	cfg.ChatResearchTimeoutSeconds = ensurePositiveInt(cfg.ChatResearchTimeoutSeconds, defaultChatResearchTimeout)
+	cfg.DeepResearchMaxLoops = ensurePositiveInt(cfg.DeepResearchMaxLoops, defaultDeepMaxLoops)
+	cfg.DeepResearchMaxSourcesRead = ensurePositiveInt(cfg.DeepResearchMaxSourcesRead, defaultDeepMaxSourcesRead)
+	cfg.DeepResearchMaxSearchQ = ensurePositiveInt(cfg.DeepResearchMaxSearchQ, defaultDeepMaxSearchQ)
+	cfg.ResearchSourceTimeoutSecs = ensurePositiveInt(cfg.ResearchSourceTimeoutSecs, defaultSourceFetchTimeout)
+	cfg.ResearchSourceMaxBytes = ensurePositiveInt(cfg.ResearchSourceMaxBytes, defaultSourceMaxBytes)
+	cfg.ResearchMaxCitationsChat = ensurePositiveInt(cfg.ResearchMaxCitationsChat, defaultChatMaxCitations)
+	cfg.ResearchMaxCitationsDeep = ensurePositiveInt(cfg.ResearchMaxCitationsDeep, defaultDeepMaxCitations)
 
 	return cfg, nil
 }
@@ -180,4 +230,11 @@ func validateReasoningEffort(effort string) error {
 	default:
 		return fmt.Errorf("must be one of: low, medium, high")
 	}
+}
+
+func ensurePositiveInt(value, fallback int) int {
+	if value <= 0 {
+		return fallback
+	}
+	return value
 }
