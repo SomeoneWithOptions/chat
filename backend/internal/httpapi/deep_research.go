@@ -239,7 +239,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			return nil
 		},
 		func(usage openrouter.Usage) error {
-			copied := usage
+			copied := usageWithLocalUsageFallbacks(usage, input.ModelID, streamStartedAt, firstTokenAt)
 			assistantUsage = &copied
 			if err := writeSSEEvent(w, map[string]any{
 				"type":  "usage",
@@ -251,16 +251,6 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			return nil
 		},
 	)
-
-	if assistantUsage != nil {
-		enriched := h.usageWithOpenRouterMetrics(researchCtx, *assistantUsage, input.ModelID, streamStartedAt, firstTokenAt)
-		assistantUsage = &enriched
-		_ = writeSSEEvent(w, map[string]any{
-			"type":  "usage",
-			"usage": usageResponseFromOpenRouter(enriched),
-		})
-		flusher.Flush()
-	}
 
 	_ = writeSSEEvent(w, map[string]any{
 		"type":    "progress",
@@ -275,7 +265,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	}
 
 	if assistantContent.Len() > 0 {
-		_, err := h.insertMessageWithCitations(
+		assistantMessageID, err := h.insertMessageWithCitations(
 			researchCtx,
 			input.UserID,
 			input.ConversationID,
@@ -310,6 +300,10 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 				"citations": orderedCitations,
 			})
 			flusher.Flush()
+		}
+
+		if assistantUsage != nil {
+			h.enrichAndPersistMessageUsageAsync(input.UserID, assistantMessageID, input.ModelID, *assistantUsage, streamStartedAt, firstTokenAt)
 		}
 	}
 

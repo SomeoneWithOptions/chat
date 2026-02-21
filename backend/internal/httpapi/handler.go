@@ -1122,7 +1122,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return nil
 		},
 		func(usage openrouter.Usage) error {
-			copied := usage
+			copied := usageWithLocalUsageFallbacks(usage, modelID, streamStartedAt, firstTokenAt)
 			assistantUsage = &copied
 
 			if err := writeSSEEvent(w, map[string]any{
@@ -1136,25 +1136,13 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		},
 	)
 
-	if assistantUsage != nil {
-		enriched := h.usageWithOpenRouterMetrics(r.Context(), *assistantUsage, modelID, streamStartedAt, firstTokenAt)
-		assistantUsage = &enriched
-		if started {
-			_ = writeSSEEvent(w, map[string]any{
-				"type":  "usage",
-				"usage": usageResponseFromOpenRouter(enriched),
-			})
-			flusher.Flush()
-		}
-	}
-
 	var persistedCitations []citationResponse
 	if assistantContent.Len() > 0 {
 		persistedCitations = groundingCitations
 		if len(persistedCitations) > maxNormalCitations {
 			persistedCitations = persistedCitations[:maxNormalCitations]
 		}
-		_, err := h.insertMessageWithCitations(
+		assistantMessageID, err := h.insertMessageWithCitations(
 			r.Context(),
 			user.ID,
 			conversationID,
@@ -1177,12 +1165,17 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 				"message": "failed to persist assistant response",
 			})
 			flusher.Flush()
-		} else if started && len(persistedCitations) > 0 {
-			_ = writeSSEEvent(w, map[string]any{
-				"type":      "citations",
-				"citations": persistedCitations,
-			})
-			flusher.Flush()
+		} else {
+			if started && len(persistedCitations) > 0 {
+				_ = writeSSEEvent(w, map[string]any{
+					"type":      "citations",
+					"citations": persistedCitations,
+				})
+				flusher.Flush()
+			}
+			if assistantUsage != nil {
+				h.enrichAndPersistMessageUsageAsync(user.ID, assistantMessageID, modelID, *assistantUsage, streamStartedAt, firstTokenAt)
+			}
 		}
 	}
 
@@ -2126,12 +2119,7 @@ func (h Handler) usageWithOpenRouterMetrics(
 	requestedModelID string,
 	streamStartedAt, firstTokenAt time.Time,
 ) openrouter.Usage {
-	enriched := usage
-	if strings.TrimSpace(enriched.ModelID) == "" {
-		if modelID := strings.TrimSpace(requestedModelID); modelID != "" {
-			enriched.ModelID = modelID
-		}
-	}
+	enriched := usageWithLocalUsageFallbacks(usage, requestedModelID, streamStartedAt, firstTokenAt)
 
 	generationID := strings.TrimSpace(usage.GenerationID)
 	if generationID != "" {
@@ -2153,11 +2141,75 @@ func (h Handler) usageWithOpenRouterMetrics(
 		}
 	}
 
+	return enriched
+}
+
+func usageWithLocalUsageFallbacks(usage openrouter.Usage, requestedModelID string, streamStartedAt, firstTokenAt time.Time) openrouter.Usage {
+	enriched := usage
+	if strings.TrimSpace(enriched.ModelID) == "" {
+		if modelID := strings.TrimSpace(requestedModelID); modelID != "" {
+			enriched.ModelID = modelID
+		}
+	}
 	if strings.TrimSpace(enriched.ProviderName) == "" {
 		enriched.ProviderName = providerNameFromModelID(enriched.ModelID)
 	}
-
 	return usageWithTokensPerSecond(enriched, streamStartedAt, firstTokenAt)
+}
+
+func (h Handler) enrichAndPersistMessageUsageAsync(
+	userID, messageID, requestedModelID string,
+	usage openrouter.Usage,
+	streamStartedAt, firstTokenAt time.Time,
+) {
+	if strings.TrimSpace(userID) == "" || strings.TrimSpace(messageID) == "" {
+		return
+	}
+	if strings.TrimSpace(usage.GenerationID) == "" {
+		return
+	}
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+
+		enriched := h.usageWithOpenRouterMetrics(ctx, usage, requestedModelID, streamStartedAt, firstTokenAt)
+		if err := h.updateMessageUsage(ctx, userID, messageID, messageUsageFromOpenRouter(&enriched)); err != nil {
+			log.Printf("message usage enrichment persist failed: message_id=%s err=%v", messageID, err)
+		}
+	}()
+}
+
+func (h Handler) updateMessageUsage(ctx context.Context, userID, messageID string, usage *messageUsage) error {
+	if usage == nil {
+		return nil
+	}
+
+	var promptTokensValue any = usage.PromptTokens
+	var completionTokensValue any = usage.CompletionTokens
+	var totalTokensValue any = usage.TotalTokens
+	var reasoningTokensValue any = usage.ReasoningTokens
+	var costMicrosUSDValue any = usage.CostMicrosUSD
+	var byokInferenceCostMicrosUSDValue any = usage.ByokInferenceCostMicrosUSD
+	var tokensPerSecondValue any = usage.TokensPerSecond
+	var usageModelIDValue any = nullableString(usage.ModelID)
+	var usageProviderNameValue any = nullableString(usage.ProviderName)
+
+	_, err := h.db.ExecContext(ctx, `
+UPDATE messages
+SET
+  prompt_tokens = ?,
+  completion_tokens = ?,
+  total_tokens = ?,
+  reasoning_tokens = ?,
+  cost_microusd = ?,
+  byok_inference_cost_microusd = ?,
+  tokens_per_second = ?,
+  usage_model_id = ?,
+  usage_provider_name = ?
+WHERE id = ? AND user_id = ?;
+`, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, messageID, userID)
+	return err
 }
 
 func (h Handler) getGenerationWithRetry(ctx context.Context, generationID string) (openrouter.Generation, error) {

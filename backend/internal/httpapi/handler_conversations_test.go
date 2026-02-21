@@ -981,39 +981,44 @@ func TestChatMessagesUsesOpenRouterGenerationMetricsWhenAvailable(t *testing.T) 
 	if lastUsage == nil {
 		t.Fatalf("expected usage event in stream body: %s", resp.Body.String())
 	}
-
-	byokMicros, ok := lastUsage["byokInferenceCostMicrosUsd"].(float64)
-	if !ok || int(byokMicros) != 8000 {
-		t.Fatalf("unexpected usage byokInferenceCostMicrosUsd: %+v", lastUsage["byokInferenceCostMicrosUsd"])
-	}
-	modelID, ok := lastUsage["modelId"].(string)
-	if !ok || modelID != "openai/gpt-4o-mini" {
-		t.Fatalf("unexpected usage modelId: %+v", lastUsage["modelId"])
-	}
-	providerName, ok := lastUsage["providerName"].(string)
-	if !ok || providerName != "Google Vertex" {
-		t.Fatalf("unexpected usage providerName: %+v", lastUsage["providerName"])
-	}
-	tokensPerSecond, ok := lastUsage["tokensPerSecond"].(float64)
-	if !ok {
-		t.Fatalf("expected tokensPerSecond in usage event, got: %+v", lastUsage)
-	}
-	if tokensPerSecond < 77.7 || tokensPerSecond > 77.9 {
-		t.Fatalf("expected tokensPerSecond to match generation metadata, got %f", tokensPerSecond)
+	if modelID, ok := lastUsage["modelId"].(string); !ok || modelID != "openrouter/free" {
+		t.Fatalf("unexpected immediate usage modelId: %+v", lastUsage["modelId"])
 	}
 
 	var persistedByokMicros sql.NullInt64
 	var persistedTokensPerSecond sql.NullFloat64
 	var persistedUsageModelID sql.NullString
 	var persistedUsageProviderName sql.NullString
-	if err := db.QueryRow(`
+	assertionsMet := false
+	deadline := time.Now().Add(3 * time.Second)
+	for !assertionsMet {
+		if err := db.QueryRow(`
 SELECT byok_inference_cost_microusd, tokens_per_second, usage_model_id, usage_provider_name
 FROM messages
 WHERE user_id = ? AND role = 'assistant'
 ORDER BY rowid DESC
 LIMIT 1;
 `, user.ID).Scan(&persistedByokMicros, &persistedTokensPerSecond, &persistedUsageModelID, &persistedUsageProviderName); err != nil {
-		t.Fatalf("query persisted usage metrics: %v", err)
+			t.Fatalf("query persisted usage metrics: %v", err)
+		}
+
+		assertionsMet = persistedByokMicros.Valid &&
+			persistedByokMicros.Int64 == 8000 &&
+			persistedTokensPerSecond.Valid &&
+			persistedTokensPerSecond.Float64 >= 77.7 &&
+			persistedTokensPerSecond.Float64 <= 77.9 &&
+			persistedUsageModelID.Valid &&
+			persistedUsageModelID.String == "openai/gpt-4o-mini" &&
+			persistedUsageProviderName.Valid &&
+			persistedUsageProviderName.String == "Google Vertex"
+
+		if assertionsMet {
+			break
+		}
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(20 * time.Millisecond)
 	}
 	if !persistedByokMicros.Valid || persistedByokMicros.Int64 != 8000 {
 		t.Fatalf("unexpected persisted byok_inference_cost_microusd: %+v", persistedByokMicros)
@@ -1055,6 +1060,67 @@ LIMIT 1;
 	}
 	if payload.Messages[1].Usage.ProviderName != "Google Vertex" {
 		t.Fatalf("unexpected listed usage providerName: %+v", payload.Messages[1].Usage.ProviderName)
+	}
+}
+
+func TestChatMessagesCitationsDoNotWaitForGenerationLookup(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Grounded", " answer"},
+		usage: &openrouter.Usage{
+			PromptTokens:     40,
+			CompletionTokens: 20,
+			TotalTokens:      60,
+			GenerationID:     "gen-not-ready",
+		},
+		generationErr: errors.New("generation not found"),
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/one", Title: "Example One", Snippet: "First snippet"},
+			{URL: "https://example.com/two", Title: "Example Two", Snippet: "Second snippet"},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"What happened?","modelId":"openrouter/free"}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	startedAt := time.Now()
+	handler.ChatMessages(resp, req)
+	elapsed := time.Since(startedAt)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	if elapsed > 2*time.Second {
+		t.Fatalf("expected response to finish quickly, took %v", elapsed)
+	}
+
+	events := decodeSSEEvents(t, resp.Body.String())
+	citationsIndex := -1
+	doneIndex := -1
+	for idx, event := range events {
+		if event.Type == "citations" {
+			citationsIndex = idx
+		}
+		if event.Type == "done" {
+			doneIndex = idx
+		}
+	}
+	if citationsIndex == -1 {
+		t.Fatalf("expected citations event in stream body: %s", resp.Body.String())
+	}
+	if doneIndex == -1 {
+		t.Fatalf("expected done event in stream body: %s", resp.Body.String())
+	}
+	if citationsIndex > doneIndex {
+		t.Fatalf("expected citations before done, got events: %+v", events)
 	}
 }
 
@@ -1872,6 +1938,7 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 	if err != nil {
 		t.Fatalf("open sqlite: %v", err)
 	}
+	db.SetMaxOpenConns(1)
 	if _, err := db.Exec(testSchema); err != nil {
 		t.Fatalf("apply schema: %v", err)
 	}
