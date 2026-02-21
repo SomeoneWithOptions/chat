@@ -59,6 +59,12 @@ export default function Composer({
   const canSend = prompt.trim().length > 0 && !isStreaming && !uploadingAttachments;
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+    const isMobile = window.innerWidth < 768;
+
+    if (isMobile && e.key === 'Enter') {
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (canSend) {
