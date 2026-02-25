@@ -328,6 +328,7 @@ export default function App() {
 
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
+  const previousMessagesRef = useRef<MessageData[]>(messages);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
 
   // ─── Virtual keyboard handling (mobile) ─────
@@ -585,6 +586,10 @@ export default function App() {
 
   // Auto-scroll on new messages when the user is already following the stream.
   useEffect(() => {
+    const messagesChanged = previousMessagesRef.current !== messages;
+    previousMessagesRef.current = messages;
+    if (!messagesChanged) return;
+
     const container = messagesContainerRef.current;
     if (!container || !shouldAutoScrollRef.current) return;
 
@@ -1346,7 +1351,7 @@ export default function App() {
 
         {/* Messages */}
         <div ref={messagesContainerRef} className="messages-container">
-          {loadingMessages && (
+          {loadingMessages && messages.length === 0 && (
             <div className="messages-empty">
               <span className="loading-text">Loading messages...</span>
             </div>
