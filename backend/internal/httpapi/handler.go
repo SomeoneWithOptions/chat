@@ -1319,6 +1319,11 @@ func (h Handler) resolveGroundingContextLegacy(
 		if query == "" {
 			continue
 		}
+		if idx > 0 {
+			if err := waitWithContext(ctx, braveFreeTierSpacing); err != nil {
+				return citations, ""
+			}
+		}
 		if onProgress != nil {
 			onProgress(summarizedProgress(research.Progress{
 				Phase:       research.PhaseSearching,
@@ -1333,10 +1338,16 @@ func (h Handler) resolveGroundingContextLegacy(
 		}
 
 		results, err := h.grounding.Search(ctx, query, maxGroundingResults)
+		if isBraveRateLimitError(err) {
+			if waitErr := waitWithContext(ctx, braveFreeTierSpacing); waitErr == nil {
+				results, err = h.grounding.Search(ctx, query, maxGroundingResults)
+			}
+		}
 		if err != nil {
 			if errors.Is(err, brave.ErrMissingAPIKey) {
 				return nil, "Grounding is unavailable because BRAVE_API_KEY is not configured."
 			}
+			logGroundingSearchFailure("chat_legacy", idx+1, len(queries), query, err)
 			if idx == 0 {
 				return nil, "Grounding search failed. Continuing without web sources."
 			}
@@ -1367,6 +1378,31 @@ func (h Handler) resolveGroundingContextLegacy(
 	}
 
 	return citations, ""
+}
+
+func isBraveRateLimitError(err error) bool {
+	var apiErr brave.APIError
+	return errors.As(err, &apiErr) && apiErr.StatusCode == http.StatusTooManyRequests
+}
+
+func braveStatusCode(err error) int {
+	var apiErr brave.APIError
+	if errors.As(err, &apiErr) {
+		return apiErr.StatusCode
+	}
+	return 0
+}
+
+func logGroundingSearchFailure(scope string, pass, total int, query string, err error) {
+	log.Printf(
+		"grounding search failed: scope=%s pass=%d total=%d query_chars=%d status_code=%d err=%v",
+		strings.TrimSpace(scope),
+		pass,
+		total,
+		len([]rune(strings.TrimSpace(query))),
+		braveStatusCode(err),
+		err,
+	)
 }
 
 func (h Handler) RequireSession(next http.Handler) http.Handler {

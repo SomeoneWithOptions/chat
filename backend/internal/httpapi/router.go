@@ -36,7 +36,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	}
 
 	h := NewHandlerWithFileStore(cfg, db, store, verifier, openRouterClient, files)
-	h.grounding = brave.NewClient(cfg, nil)
+	h.grounding = newRateLimitedGroundingSearcher(brave.NewClient(cfg, nil), braveFreeTierSpacing)
 	h.researchReader = research.NewHTTPReader(research.ReaderConfig{
 		RequestTimeout: time.Duration(cfg.ResearchSourceTimeoutSecs) * time.Second,
 		MaxBytes:       int64(cfg.ResearchSourceMaxBytes),

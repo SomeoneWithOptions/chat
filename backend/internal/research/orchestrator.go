@@ -205,6 +205,18 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 				lastSearchAttemptAt = time.Now()
 			}
 			if searchErr != nil {
+				statusCode := 0
+				var apiErr brave.APIError
+				if errors.As(searchErr, &apiErr) {
+					statusCode = apiErr.StatusCode
+				}
+				log.Printf(
+					"research search failed: loop=%d query_chars=%d status_code=%d err=%v",
+					loop,
+					len([]rune(strings.TrimSpace(query))),
+					statusCode,
+					searchErr,
+				)
 				if errors.Is(searchErr, brave.ErrMissingAPIKey) {
 					warnings = appendUniqueWarning(warnings, "Grounding is unavailable because BRAVE_API_KEY is not configured.")
 				} else {

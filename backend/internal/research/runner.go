@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"math"
 	"net/url"
 	"sort"
@@ -181,6 +182,19 @@ func (r Runner) Run(ctx context.Context, question string, timeSensitive bool, on
 			lastSearchAttemptAt = time.Now()
 		}
 		if err != nil {
+			statusCode := 0
+			var apiErr brave.APIError
+			if errors.As(err, &apiErr) {
+				statusCode = apiErr.StatusCode
+			}
+			log.Printf(
+				"research runner search failed: pass=%d total=%d query_chars=%d status_code=%d err=%v",
+				i+1,
+				len(queries),
+				len([]rune(strings.TrimSpace(query))),
+				statusCode,
+				err,
+			)
 			if errors.Is(ctx.Err(), context.Canceled) || errors.Is(ctx.Err(), context.DeadlineExceeded) {
 				return Result{}, ctx.Err()
 			}
