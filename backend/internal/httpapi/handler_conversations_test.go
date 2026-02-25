@@ -17,6 +17,7 @@ import (
 	"chat/backend/internal/brave"
 	"chat/backend/internal/config"
 	"chat/backend/internal/openrouter"
+	"chat/backend/internal/research"
 	"chat/backend/internal/session"
 
 	"github.com/go-chi/chi/v5"
@@ -1454,6 +1455,95 @@ func TestChatMessagesGroundingFailureStreamsWarningAndContinues(t *testing.T) {
 	}
 }
 
+func TestChatMessagesGroundingPartialReadFailureSuppressesWarning(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Grounded", " response"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.ChatResearchMaxLoops = 1
+	handler.cfg.ChatResearchMaxSearchQ = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/a", Title: "Example A", Snippet: "First snippet"},
+			{URL: "https://example.com/b", Title: "Example B", Snippet: "Second snippet"},
+		},
+	}
+	handler.researchReader = stubResearchReader{
+		responses: map[string]research.ReadResult{
+			"https://example.com/a": {URL: "https://example.com/a", FetchStatus: "unsupported_content_type"},
+			"https://example.com/b": {URL: "https://example.com/b", FinalURL: "https://example.com/b", ContentType: "text/plain", Text: "Readable body", Snippet: "Readable body", FetchStatus: "ok", FetchedAt: time.Now().UTC()},
+		},
+		errs: map[string]error{
+			"https://example.com/a": errors.New("unsupported content type"),
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Ground this response","modelId":"openrouter/free","grounding":true}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if strings.Contains(body, `"scope":"grounding"`) {
+		t.Fatalf("expected no grounding warning on partial read failure: %s", body)
+	}
+	if !strings.Contains(body, `"type":"token"`) {
+		t.Fatalf("expected token events in stream body: %s", body)
+	}
+}
+
+func TestChatMessagesGroundingAllReadFailuresEmitWarning(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Grounded", " response"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.ChatResearchMaxLoops = 1
+	handler.cfg.ChatResearchMaxSearchQ = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/a", Title: "Example A", Snippet: "First snippet"},
+			{URL: "https://example.com/b", Title: "Example B", Snippet: "Second snippet"},
+		},
+	}
+	handler.researchReader = stubResearchReader{
+		responses: map[string]research.ReadResult{
+			"https://example.com/a": {URL: "https://example.com/a", FetchStatus: "blocked"},
+			"https://example.com/b": {URL: "https://example.com/b", FetchStatus: "http_403"},
+		},
+		errs: map[string]error{
+			"https://example.com/a": errors.New("blocked url host"),
+			"https://example.com/b": errors.New("upstream returned status 403"),
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Ground this response","modelId":"openrouter/free","grounding":true}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"scope":"grounding"`) {
+		t.Fatalf("expected grounding warning in stream body: %s", body)
+	}
+	if !strings.Contains(body, "Could not read selected sources; continuing with search snippets.") {
+		t.Fatalf("expected updated read warning message in stream body: %s", body)
+	}
+}
+
 func TestChatMessagesDeepResearchStreamsProgressInOrder(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Deep", " answer [1]"}})
 	t.Cleanup(func() { _ = db.Close() })
@@ -1841,6 +1931,103 @@ func TestChatMessagesDeepResearchFallbackOnSearchFailure(t *testing.T) {
 	body := resp.Body.String()
 	if !strings.Contains(body, `"scope":"research"`) {
 		t.Fatalf("expected research warning in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"type":"token"`) {
+		t.Fatalf("expected token events in stream body: %s", body)
+	}
+}
+
+func TestChatMessagesDeepResearchAllReadFailuresEmitWarning(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Deep", " response"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.DeepResearchMaxLoops = 1
+	handler.cfg.DeepResearchMaxSearchQ = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/a", Title: "Example A", Snippet: "First snippet"},
+			{URL: "https://example.com/b", Title: "Example B", Snippet: "Second snippet"},
+		},
+	}
+	handler.researchReader = stubResearchReader{
+		responses: map[string]research.ReadResult{
+			"https://example.com/a": {URL: "https://example.com/a", FetchStatus: "blocked"},
+			"https://example.com/b": {URL: "https://example.com/b", FetchStatus: "http_502"},
+		},
+		errs: map[string]error{
+			"https://example.com/a": errors.New("blocked url host"),
+			"https://example.com/b": errors.New("upstream returned status 502"),
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Research anyway","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"scope":"research"`) {
+		t.Fatalf("expected deep research warning in stream body: %s", body)
+	}
+	if !strings.Contains(body, "Could not read selected sources; continuing with search snippets.") {
+		t.Fatalf("expected updated read warning message in stream body: %s", body)
+	}
+}
+
+func TestChatMessagesDeepResearchPartialReadFailureSuppressesWarning(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Deep", " response"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.DeepResearchMaxLoops = 1
+	handler.cfg.DeepResearchMaxSearchQ = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/a", Title: "Example A", Snippet: "First snippet"},
+			{URL: "https://example.com/b", Title: "Example B", Snippet: "Second snippet"},
+		},
+	}
+	handler.researchReader = stubResearchReader{
+		responses: map[string]research.ReadResult{
+			"https://example.com/a": {URL: "https://example.com/a", FetchStatus: "unsupported_content_type"},
+			"https://example.com/b": {URL: "https://example.com/b", FinalURL: "https://example.com/b", ContentType: "text/plain", Text: "Readable body", Snippet: "Readable body", FetchStatus: "ok", FetchedAt: time.Now().UTC()},
+		},
+		errs: map[string]error{
+			"https://example.com/a": errors.New("unsupported content type"),
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Research anyway","modelId":"openrouter/free","deepResearch":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if strings.Contains(body, `"scope":"research"`) {
+		t.Fatalf("expected no deep research warning on partial read failure: %s", body)
 	}
 	if !strings.Contains(body, `"type":"token"`) {
 		t.Fatalf("expected token events in stream body: %s", body)
@@ -2239,7 +2426,7 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 		DeepResearchMaxLoops:       6,
 		DeepResearchMaxSourcesRead: 16,
 		DeepResearchMaxSearchQ:     18,
-		ResearchSourceTimeoutSecs:  8,
+		ResearchSourceTimeoutSecs:  12,
 		ResearchSourceMaxBytes:     1_500_000,
 		ResearchMaxCitationsChat:   8,
 		ResearchMaxCitationsDeep:   12,
@@ -2386,6 +2573,21 @@ func (s stubGrounder) Search(ctx context.Context, _ string, _ int) ([]brave.Sear
 		return nil, s.err
 	}
 	return s.results, nil
+}
+
+type stubResearchReader struct {
+	responses map[string]research.ReadResult
+	errs      map[string]error
+}
+
+func (s stubResearchReader) Read(_ context.Context, rawURL string) (research.ReadResult, error) {
+	if err, ok := s.errs[rawURL]; ok {
+		return s.responses[rawURL], err
+	}
+	if result, ok := s.responses[rawURL]; ok {
+		return result, nil
+	}
+	return research.ReadResult{}, errors.New("not found")
 }
 
 func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error, onUsage func(openrouter.Usage) error) error {

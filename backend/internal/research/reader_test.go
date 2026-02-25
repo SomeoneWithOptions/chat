@@ -3,6 +3,7 @@ package research
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"strings"
@@ -112,5 +113,26 @@ func TestReaderExtractionSmokeByContentType(t *testing.T) {
 				t.Fatalf("expected non-empty extracted text")
 			}
 		})
+	}
+}
+
+func TestClassifyReadFailureTimeout(t *testing.T) {
+	reason := classifyReadFailure(context.DeadlineExceeded, ReadResult{FetchStatus: "fetch_failed"})
+	if reason != "timeout" {
+		t.Fatalf("expected timeout reason, got %q", reason)
+	}
+}
+
+func TestClassifyReadFailureUnsupportedContentType(t *testing.T) {
+	reason := classifyReadFailure(errUnsupportedContentType, ReadResult{FetchStatus: "unsupported_content_type"})
+	if reason != "unsupported_content_type" {
+		t.Fatalf("expected unsupported_content_type reason, got %q", reason)
+	}
+}
+
+func TestClassifyReadFailureBlockedURL(t *testing.T) {
+	reason := classifyReadFailure(fmt.Errorf("%w", errBlockedURLHost), ReadResult{FetchStatus: "blocked"})
+	if reason != "blocked_url" {
+		t.Fatalf("expected blocked_url reason, got %q", reason)
 	}
 }

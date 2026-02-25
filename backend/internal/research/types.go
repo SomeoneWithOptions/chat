@@ -92,13 +92,16 @@ type Evidence struct {
 }
 
 type OrchestratorResult struct {
-	Loops             int
-	SearchQueries     int
-	SourcesConsidered int
-	SourcesRead       int
-	Citations         []Citation
-	Evidence          []Evidence
-	Warnings          []string
-	Warning           string
-	StopReason        StopReason
+	Loops              int
+	SearchQueries      int
+	SourcesConsidered  int
+	SourcesRead        int
+	ReadAttempts       int
+	ReadFailures       int
+	ReadFailureReasons map[string]int
+	Citations          []Citation
+	Evidence           []Evidence
+	Warnings           []string
+	Warning            string
+	StopReason         StopReason
 }

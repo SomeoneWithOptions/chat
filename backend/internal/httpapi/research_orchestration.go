@@ -2,6 +2,9 @@ package httpapi
 
 import (
 	"context"
+	"fmt"
+	"log"
+	"sort"
 	"strings"
 	"time"
 
@@ -43,7 +46,34 @@ func (h Handler) runResearchOrchestrator(
 	cfg := h.buildResearchConfig(profile)
 	planner := research.NewJSONPlanner(h.researchPlannerResponder)
 	orchestrator := research.NewOrchestrator(h.grounding, planner, h.researchReader, cfg)
-	return orchestrator.Run(ctx, question, timeSensitive, onProgress)
+	result, err := orchestrator.Run(ctx, question, timeSensitive, onProgress)
+
+	readSuccessRate := 0.0
+	if result.ReadAttempts > 0 {
+		successes := result.ReadAttempts - result.ReadFailures
+		if successes < 0 {
+			successes = 0
+		}
+		readSuccessRate = float64(successes) / float64(result.ReadAttempts)
+	}
+
+	log.Printf(
+		"research orchestrator completed: profile=%s loops=%d searches=%d sources_considered=%d sources_read=%d read_attempts=%d read_failures=%d read_success_rate=%.2f read_failure_reasons=%q stop_reason=%s warning_present=%t err_present=%t",
+		profile,
+		result.Loops,
+		result.SearchQueries,
+		result.SourcesConsidered,
+		result.SourcesRead,
+		result.ReadAttempts,
+		result.ReadFailures,
+		readSuccessRate,
+		formatTopReadFailureReasons(result.ReadFailureReasons, 3),
+		result.StopReason,
+		researchWarning(result) != "",
+		err != nil,
+	)
+
+	return result, err
 }
 
 func researchWarning(result research.OrchestratorResult) string {
@@ -73,4 +103,42 @@ func convertResearchCitations(citations []research.Citation, max int) []citation
 		})
 	}
 	return converted
+}
+
+func formatTopReadFailureReasons(reasons map[string]int, limit int) string {
+	if len(reasons) == 0 || limit <= 0 {
+		return ""
+	}
+
+	type pair struct {
+		reason string
+		count  int
+	}
+	items := make([]pair, 0, len(reasons))
+	for reason, count := range reasons {
+		reason = strings.TrimSpace(reason)
+		if reason == "" || count <= 0 {
+			continue
+		}
+		items = append(items, pair{reason: reason, count: count})
+	}
+	if len(items) == 0 {
+		return ""
+	}
+
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].count == items[j].count {
+			return items[i].reason < items[j].reason
+		}
+		return items[i].count > items[j].count
+	})
+	if len(items) > limit {
+		items = items[:limit]
+	}
+
+	parts := make([]string, 0, len(items))
+	for _, item := range items {
+		parts = append(parts, fmt.Sprintf("%s:%d", item.reason, item.count))
+	}
+	return strings.Join(parts, ",")
 }

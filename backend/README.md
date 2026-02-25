@@ -45,7 +45,7 @@ cp backend/.env.example backend/.env
 - `AGENTIC_RESEARCH_CHAT_ENABLED` / `AGENTIC_RESEARCH_DEEP_ENABLED` (optional; default `true`)
 - `CHAT_RESEARCH_MAX_LOOPS`, `CHAT_RESEARCH_MAX_SOURCES_READ`, `CHAT_RESEARCH_MAX_SEARCH_QUERIES`, `CHAT_RESEARCH_TIMEOUT_SECONDS` (optional chat budgets)
 - `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
-- `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read safety limits)
+- `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read safety limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
 
 Auth sequencing:

@@ -76,7 +76,7 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.DeepResearchMaxSearchQ != 18 {
 		t.Fatalf("unexpected deep max search queries default: %d", cfg.DeepResearchMaxSearchQ)
 	}
-	if cfg.ResearchSourceTimeoutSecs != 8 {
+	if cfg.ResearchSourceTimeoutSecs != 12 {
 		t.Fatalf("unexpected source timeout default: %d", cfg.ResearchSourceTimeoutSecs)
 	}
 	if cfg.ResearchSourceMaxBytes != 1_500_000 {
@@ -182,7 +182,7 @@ func TestLoadClampsInvalidResearchBudgetsToDefaults(t *testing.T) {
 		cfg.DeepResearchMaxLoops != 6 ||
 		cfg.DeepResearchMaxSourcesRead != 16 ||
 		cfg.DeepResearchMaxSearchQ != 18 ||
-		cfg.ResearchSourceTimeoutSecs != 8 ||
+		cfg.ResearchSourceTimeoutSecs != 12 ||
 		cfg.ResearchSourceMaxBytes != 1_500_000 ||
 		cfg.ResearchMaxCitationsChat != 8 ||
 		cfg.ResearchMaxCitationsDeep != 12 {

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"sort"
 	"strings"
 	"time"
@@ -87,6 +88,9 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 	usedQueries := 0
 	sourcesRead := 0
 	sourcesConsidered := 0
+	readAttempts := 0
+	readFailures := 0
+	readFailureReasons := make(map[string]int, 8)
 	lastSearchAttemptAt := time.Time{}
 	stopReason := StopReasonBudgetExhausted
 	loopsExecuted := 0
@@ -94,7 +98,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 	for loop := 1; loop <= o.cfg.MaxLoops; loop++ {
 		loopsExecuted = loop
 		if err := runCtx.Err(); err != nil {
-			return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, warnings, StopReasonTimeout), err
+			return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, readAttempts, readFailures, readFailureReasons, warnings, StopReasonTimeout), err
 		}
 
 		rankedEvidence := pool.Rank()
@@ -183,7 +187,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 		candidates := make([]Citation, 0, len(queries)*o.cfg.SearchResultsPerQ)
 		for _, query := range queries {
 			if err := waitBeforeSearchAttempt(runCtx, &lastSearchAttemptAt, o.cfg.MinSearchInterval); err != nil {
-				return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, warnings, StopReasonTimeout), err
+				return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, readAttempts, readFailures, readFailureReasons, warnings, StopReasonTimeout), err
 			}
 
 			usedQueries++
@@ -196,10 +200,10 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 					retryDelay = defaultRateLimitRetryDelay
 				}
 				if waitErr := waitForRetry(runCtx, retryDelay); waitErr != nil {
-					return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, warnings, StopReasonTimeout), waitErr
+					return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, readAttempts, readFailures, readFailureReasons, warnings, StopReasonTimeout), waitErr
 				}
 				if err := waitBeforeSearchAttempt(runCtx, &lastSearchAttemptAt, o.cfg.MinSearchInterval); err != nil {
-					return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, warnings, StopReasonTimeout), err
+					return o.resultWithStop(pool, loop-1, usedQueries, sourcesConsidered, sourcesRead, readAttempts, readFailures, readFailureReasons, warnings, StopReasonTimeout), err
 				}
 				results, searchErr = o.searcher.Search(runCtx, query, o.cfg.SearchResultsPerQ)
 				lastSearchAttemptAt = time.Now()
@@ -274,9 +278,11 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			if o.reader == nil {
 				continue
 			}
+			readAttempts++
 			readResult, readErr := o.reader.Read(runCtx, candidate.URL)
 			if readErr != nil {
-				warnings = appendUniqueWarning(warnings, "A source could not be read; continuing with search snippets.")
+				readFailures++
+				readFailureReasons[classifyReadFailure(readErr, readResult)]++
 				continue
 			}
 			pool.AddReadResult(candidate, readResult, timeSensitive)
@@ -344,7 +350,11 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 		}))
 	}
 
-	return o.resultWithStop(pool, loopsExecuted, usedQueries, sourcesConsidered, sourcesRead, warnings, stopReason), nil
+	if readAttempts > 0 && sourcesRead == 0 && readFailures > 0 {
+		warnings = appendUniqueWarning(warnings, "Could not read selected sources; continuing with search snippets.")
+	}
+
+	return o.resultWithStop(pool, loopsExecuted, usedQueries, sourcesConsidered, sourcesRead, readAttempts, readFailures, readFailureReasons, warnings, stopReason), nil
 }
 
 func (o Orchestrator) resultWithStop(
@@ -353,6 +363,9 @@ func (o Orchestrator) resultWithStop(
 	searchQueries,
 	sourcesConsidered,
 	sourcesRead int,
+	readAttempts,
+	readFailures int,
+	readFailureReasons map[string]int,
 	warnings []string,
 	stop StopReason,
 ) OrchestratorResult {
@@ -366,14 +379,17 @@ func (o Orchestrator) resultWithStop(
 	}
 
 	result := OrchestratorResult{
-		Loops:             loops,
-		SearchQueries:     searchQueries,
-		SourcesConsidered: sourcesConsidered,
-		SourcesRead:       sourcesRead,
-		Citations:         citations,
-		Evidence:          ranked,
-		Warnings:          warnings,
-		StopReason:        stop,
+		Loops:              loops,
+		SearchQueries:      searchQueries,
+		SourcesConsidered:  sourcesConsidered,
+		SourcesRead:        sourcesRead,
+		ReadAttempts:       readAttempts,
+		ReadFailures:       readFailures,
+		ReadFailureReasons: cloneReadFailureReasons(readFailureReasons),
+		Citations:          citations,
+		Evidence:           ranked,
+		Warnings:           warnings,
+		StopReason:         stop,
 	}
 	if len(warnings) > 0 {
 		result.Warning = warnings[0]
@@ -382,6 +398,73 @@ func (o Orchestrator) resultWithStop(
 		result.StopReason = StopReasonBudgetExhausted
 	}
 	return result
+}
+
+func cloneReadFailureReasons(input map[string]int) map[string]int {
+	if len(input) == 0 {
+		return map[string]int{}
+	}
+
+	cloned := make(map[string]int, len(input))
+	for reason, count := range input {
+		if strings.TrimSpace(reason) == "" || count <= 0 {
+			continue
+		}
+		cloned[reason] = count
+	}
+	if len(cloned) == 0 {
+		return map[string]int{}
+	}
+	return cloned
+}
+
+func classifyReadFailure(err error, result ReadResult) string {
+	if err == nil {
+		return "other"
+	}
+
+	status := strings.ToLower(strings.TrimSpace(result.FetchStatus))
+	errText := strings.ToLower(strings.TrimSpace(err.Error()))
+
+	if errors.Is(err, context.DeadlineExceeded) || strings.Contains(errText, "deadline exceeded") || strings.Contains(errText, "timeout") {
+		return "timeout"
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return "timeout"
+	}
+
+	if status == "blocked" ||
+		errors.Is(err, errInvalidURLScheme) ||
+		errors.Is(err, errBlockedURLHost) ||
+		errors.Is(err, errBlockedURLPort) {
+		return "blocked_url"
+	}
+
+	if strings.HasPrefix(status, "http_") {
+		return "http_status"
+	}
+	if status == "unsupported_content_type" || errors.Is(err, errUnsupportedContentType) {
+		return "unsupported_content_type"
+	}
+	if status == "empty_content" || strings.Contains(errText, "empty content") {
+		return "empty_content"
+	}
+	if status == "fetch_failed" || status == "request_failed" {
+		return "network_error"
+	}
+	if errors.As(err, &netErr) {
+		return "network_error"
+	}
+
+	if strings.Contains(errText, "connection") || strings.Contains(errText, "dial") || strings.Contains(errText, "tls") {
+		return "network_error"
+	}
+	if strings.Contains(errText, "parse") || strings.Contains(errText, "invalid") || strings.Contains(errText, "unexpected eof") {
+		return "parse_error"
+	}
+
+	return "other"
 }
 
 func dedupeCandidateCitations(citations []Citation) []Citation {

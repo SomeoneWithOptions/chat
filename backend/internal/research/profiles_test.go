@@ -13,6 +13,9 @@ func TestDefaultProfileValues(t *testing.T) {
 	if chat.Timeout != 20*time.Second {
 		t.Fatalf("unexpected chat timeout: %v", chat.Timeout)
 	}
+	if chat.SourceFetchTimeout != 12*time.Second {
+		t.Fatalf("unexpected chat source fetch timeout: %v", chat.SourceFetchTimeout)
+	}
 
 	deep := DefaultProfile(ModeDeepResearch)
 	if deep.MaxLoops != 6 || deep.MaxSourcesRead != 16 || deep.MaxSearchQueries != 18 || deep.MaxCitations != 12 {
@@ -20,6 +23,9 @@ func TestDefaultProfileValues(t *testing.T) {
 	}
 	if deep.Timeout != 150*time.Second {
 		t.Fatalf("unexpected deep timeout: %v", deep.Timeout)
+	}
+	if deep.SourceFetchTimeout != 12*time.Second {
+		t.Fatalf("unexpected deep source fetch timeout: %v", deep.SourceFetchTimeout)
 	}
 }
 
@@ -41,7 +47,7 @@ func TestResolveProfileAppliesOverridesAndClamps(t *testing.T) {
 	if resolved.Timeout != 11*time.Second {
 		t.Fatalf("expected timeout override to apply, got %v", resolved.Timeout)
 	}
-	if resolved.SourceFetchTimeout <= 0 || resolved.SourceMaxBytes <= 0 {
+	if resolved.SourceFetchTimeout != 12*time.Second || resolved.SourceMaxBytes <= 0 {
 		t.Fatalf("expected source constraints to be positive: %+v", resolved)
 	}
 }

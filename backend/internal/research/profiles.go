@@ -21,7 +21,7 @@ const (
 	defaultDeepMaxCitations            = 12
 	defaultDeepTimeout                 = 150 * time.Second
 	defaultSearchResultsPerQuery       = 6
-	defaultSourceFetchTimeout          = 8 * time.Second
+	defaultSourceFetchTimeout          = 12 * time.Second
 	defaultSourceMaxBytes        int64 = 1_500_000
 )
 

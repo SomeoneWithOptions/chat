@@ -23,7 +23,7 @@ const (
 	defaultGCSUploadPrefix     = "chat-uploads"
 	defaultResearchTimeoutSecs = 150
 	defaultChatResearchTimeout = 20
-	defaultSourceFetchTimeout  = 8
+	defaultSourceFetchTimeout  = 12
 	defaultSourceMaxBytes      = 1_500_000
 	defaultChatMaxLoops        = 2
 	defaultChatMaxSourcesRead  = 4
