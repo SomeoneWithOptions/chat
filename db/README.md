@@ -13,6 +13,7 @@ Database schema and migration scripts for Turso (LibSQL).
 - `migrations/0006_message_usage_metrics.sql`: adds token/cost usage metric columns on messages.
 - `migrations/0007_message_byok_and_throughput_metrics.sql`: adds BYOK inference cost and throughput metrics.
 - `migrations/0008_message_usage_source_metadata.sql`: persists usage-level resolved model/provider metadata for refresh-safe usage details.
+- `migrations/0009_message_thinking_trace.sql`: persists per-message progress trace JSON used by the in-message thinking panel.
 
 ## Turso CLI usage
 

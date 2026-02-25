@@ -89,5 +89,7 @@ Expected response:
 - Chat and deep research can run the shared agentic loop (`plan -> search -> read -> evaluate -> iterate/finalize`) when enabled.
 - Deep research uses larger default budgets than chat and remains bounded by `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - SSE progress events include phases: `planning`, `searching`, `reading`, `evaluating`, `iterating`, `synthesizing`, `finalizing`.
+- Progress is rendered in each assistant message as a compact thinking summary; expand it to view full phase-by-phase trace details.
+- Raw provider reasoning text is available as an opt-in nested section within the message thinking panel when streamed by the model.
 - Timeout and cancellation are enforced server-side via `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - When Brave search partially fails, the request continues with available evidence and warning events.

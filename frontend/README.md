@@ -11,6 +11,7 @@ React + Vite + TypeScript app (dark-mode-only shell).
 - Conversation creation via `POST /v1/conversations`
 - Conversation deletion via `DELETE /v1/conversations/{id}` and `DELETE /v1/conversations`
 - Chat composer with SSE stream handling from `POST /v1/chat/messages`
+- In-message unified thinking panel for streamed responses (persisted progress trace history + opt-in model reasoning section)
 - Attachment upload UX and send with `fileIds`
 - Final auth rollout: session bootstrap via `GET /v1/auth/me`, Google Identity Services sign-in when `VITE_GOOGLE_CLIENT_ID` is configured, and dev sign-in fallback for insecure local mode
 

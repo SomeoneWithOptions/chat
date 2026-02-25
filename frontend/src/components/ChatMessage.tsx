@@ -1,5 +1,5 @@
 import { isValidElement, type HTMLAttributes, type ReactNode, useEffect, useState } from 'react';
-import { type Citation, type Usage } from '../lib/api';
+import { type Citation, type ProgressDecision, type ThinkingTrace, type Usage } from '../lib/api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -8,28 +8,15 @@ type MessageData = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   reasoningContent?: string;
+  thinkingTrace?: ThinkingTrace | null;
   modelId?: string | null;
   usage?: Usage | null;
   citations: Citation[];
 };
 
-type ThinkingTraceStep = {
-  id: string;
-  label: string;
-  detail: string;
-  status: 'pending' | 'active' | 'done';
-};
-
-type ThinkingTrace = {
-  status: 'running' | 'done' | 'stopped';
-  summary: string;
-  steps: ThinkingTraceStep[];
-};
-
 type ChatMessageProps = {
   message: MessageData;
   isStreaming?: boolean;
-  thinkingTrace?: ThinkingTrace | null;
 };
 
 function citationLabel(citation: Citation, index: number): string {
@@ -74,6 +61,22 @@ function formatTotalCostMicros(costMicros?: number, byokCostMicros?: number): st
 function formatTokensPerSecond(tokensPerSecond?: number): string {
   if (tokensPerSecond === undefined) return 'Unavailable';
   return `${tokensPerSecond.toFixed(2)} tok/s`;
+}
+
+function formatTraceCounter(entry: ThinkingTrace['entries'][number]): string | null {
+  const counters: string[] = [];
+  if (entry.loop && entry.maxLoops) counters.push(`loop ${entry.loop}/${entry.maxLoops}`);
+  if (entry.pass && entry.totalPasses) counters.push(`${entry.pass}/${entry.totalPasses}`);
+  if (entry.sourcesRead !== undefined || entry.sourcesConsidered !== undefined) {
+    counters.push(`sources ${entry.sourcesRead ?? 0}/${entry.sourcesConsidered ?? 0}`);
+  }
+  return counters.length > 0 ? counters.join(' · ') : null;
+}
+
+function decisionLabel(decision: ProgressDecision | undefined): string | null {
+  if (decision === 'fallback') return 'Fallback path';
+  if (decision === 'finalize') return 'Ready to finalize';
+  return null;
 }
 
 async function copyToClipboard(text: string): Promise<boolean> {
@@ -148,49 +151,43 @@ const markdownComponents: Components = {
   ),
 };
 
-export default function ChatMessage({ message, isStreaming, thinkingTrace }: ChatMessageProps) {
+export default function ChatMessage({ message, isStreaming }: ChatMessageProps) {
   const isUser = message.role === 'user';
   const renderMarkdown = !isUser;
   const isAssistant = message.role === 'assistant';
-  const showStreamingIndicator = isStreaming && isAssistant && !message.content;
+  const thinkingTrace = message.thinkingTrace ?? null;
+  const hasThinkingTrace = isAssistant && !!thinkingTrace && thinkingTrace.entries.length > 0;
+  const hasReasoningContent = isAssistant && !!message.reasoningContent && message.reasoningContent.length > 0;
+  const showGenerationTrace = hasThinkingTrace || hasReasoningContent;
+  const showStreamingIndicator = isStreaming && isAssistant && !message.content && !showGenerationTrace;
   const [copiedUserMessage, setCopiedUserMessage] = useState(false);
-  const [traceExpanded, setTraceExpanded] = useState(false);
+  const [generationExpanded, setGenerationExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [usageExpanded, setUsageExpanded] = useState(false);
-  const showThinkingTrace = isAssistant && !!thinkingTrace && thinkingTrace.steps.length > 0;
-  const tracePanelID = `${message.id}-thinking-trace`;
+  const generationPanelID = `${message.id}-generation-trace`;
+  const generationStatus = thinkingTrace?.status ?? (isStreaming ? 'running' : 'done');
+  const generationSummary = thinkingTrace?.summary?.trim() || (isStreaming ? 'Working on your request' : 'Thought process');
+  const generationStatusLabel =
+    generationStatus === 'running' ? 'Running' : generationStatus === 'stopped' ? 'Stopped' : 'Complete';
   const reasoningPanelID = `${message.id}-reasoning`;
   const sourcesPanelID = `${message.id}-sources`;
   const usagePanelID = `${message.id}-usage`;
-  
-  // Show reasoning panel if there's reasoning content (either persisted or streaming)
-  const hasReasoningContent = isAssistant && !!message.reasoningContent && message.reasoningContent.length > 0;
-  // Auto-expand reasoning during streaming when no content yet, auto-collapse when content starts
-  const isReasoningStreaming = isStreaming && isAssistant && hasReasoningContent && !message.content;
   const hasUsage = isAssistant && !!message.usage;
 
   useEffect(() => {
-    setTraceExpanded(false);
+    setGenerationExpanded(false);
     setReasoningExpanded(false);
     setSourcesExpanded(false);
     setUsageExpanded(false);
   }, [message.id]);
 
-  // Auto-expand reasoning panel during streaming when reasoning arrives but content hasn't started
   useEffect(() => {
-    if (isReasoningStreaming) {
-      setReasoningExpanded(true);
-    } else if (isStreaming && message.content) {
-      // Auto-collapse when content starts arriving
-      setReasoningExpanded(false);
+    if (thinkingTrace && thinkingTrace.status !== 'running') {
+      setGenerationExpanded(false);
     }
-  }, [isReasoningStreaming, isStreaming, message.content]);
+  }, [thinkingTrace?.status, thinkingTrace]);
 
-  // Generate a preview of reasoning content (first ~100 chars)
-  const reasoningPreview = message.reasoningContent
-    ? message.reasoningContent.slice(0, 100).replace(/\n/g, ' ').trim() + (message.reasoningContent.length > 100 ? '...' : '')
-    : '';
   const usagePreview = message.usage
     ? `${formatTotalCostMicros(message.usage.costMicrosUsd, message.usage.byokInferenceCostMicrosUsd)} / ${formatTokensPerSecond(message.usage.tokensPerSecond)}`
     : '';
@@ -218,84 +215,22 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
         )}
 
         <div className={`message-content ${renderMarkdown ? 'markdown' : 'plain'}`}>
-          {showThinkingTrace && thinkingTrace && (
-            <div className={`thinking-trace ${thinkingTrace.status}`}>
+          {showGenerationTrace && (
+            <div className={`generation-trace ${generationStatus} ${isStreaming ? 'streaming' : ''}`}>
               <button
                 type="button"
-                className="thinking-trace-toggle"
-                onClick={() => setTraceExpanded((open) => !open)}
-                aria-expanded={traceExpanded}
-                aria-controls={tracePanelID}
+                className="generation-trace-toggle"
+                onClick={() => setGenerationExpanded((open) => !open)}
+                aria-expanded={generationExpanded}
+                aria-controls={generationPanelID}
               >
-                <span className="thinking-trace-heading">
-                  <span className="thinking-trace-title">
-                    {thinkingTrace.status === 'running' ? 'Thinking' : 'Thought Process'}
-                  </span>
-                  <span className="thinking-trace-summary">{thinkingTrace.summary}</span>
+                <span className="generation-trace-heading">
+                  <span className="generation-trace-title">Thinking</span>
+                  <span className="generation-trace-summary">{generationSummary}</span>
                 </span>
+                <span className={`generation-trace-status ${generationStatus}`}>{generationStatusLabel}</span>
                 <svg
-                  className={`thinking-trace-chevron ${traceExpanded ? 'open' : ''}`}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden="true"
-                >
-                  <polyline points="6 9 12 15 18 9" />
-                </svg>
-              </button>
-
-              {traceExpanded && (
-                <ol id={tracePanelID} className="thinking-trace-steps">
-                  {thinkingTrace.steps.map((step) => (
-                    <li key={step.id} className={`thinking-trace-step ${step.status}`}>
-                      <span className="thinking-trace-step-dot" />
-                      <div className="thinking-trace-step-content">
-                        <span className="thinking-trace-step-label">{step.label}</span>
-                        <span className="thinking-trace-step-detail">{step.detail}</span>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-              )}
-            </div>
-          )}
-
-          {hasReasoningContent && (
-            <div className={`reasoning-trace ${isReasoningStreaming ? 'streaming' : ''}`}>
-              <button
-                type="button"
-                className="reasoning-trace-toggle"
-                onClick={() => setReasoningExpanded((open) => !open)}
-                aria-expanded={reasoningExpanded}
-                aria-controls={reasoningPanelID}
-              >
-                <span className="reasoning-trace-heading">
-                  <svg
-                    className="reasoning-trace-icon"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <path d="M12 2a7 7 0 0 1 7 7c0 2.38-1.19 4.47-3 5.74V17a1 1 0 0 1-1 1H9a1 1 0 0 1-1-1v-2.26C6.19 13.47 5 11.38 5 9a7 7 0 0 1 7-7z" />
-                    <path d="M9 21h6" />
-                    <path d="M9 18h6" />
-                  </svg>
-                  <span className="reasoning-trace-title">
-                    {isReasoningStreaming ? 'Reasoning' : 'Model Reasoning'}
-                  </span>
-                  {!reasoningExpanded && (
-                    <span className="reasoning-trace-preview">{reasoningPreview}</span>
-                  )}
-                </span>
-                <svg
-                  className={`reasoning-trace-chevron ${reasoningExpanded ? 'open' : ''}`}
+                  className={`generation-trace-chevron ${generationExpanded ? 'open' : ''}`}
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -309,18 +244,74 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
               </button>
 
               <div
-                id={reasoningPanelID}
-                className={`reasoning-trace-content ${reasoningExpanded ? 'expanded' : 'collapsed'}`}
+                id={generationPanelID}
+                className={`generation-trace-content ${generationExpanded ? 'expanded' : 'collapsed'}`}
               >
-                <div className="reasoning-trace-markdown">
-                  <ReactMarkdown
-                    remarkPlugins={[remarkGfm]}
-                    skipHtml
-                    components={markdownComponents}
-                  >
-                    {message.reasoningContent || ''}
-                  </ReactMarkdown>
-                </div>
+                {generationExpanded && (
+                  <>
+                    {hasThinkingTrace && thinkingTrace && (
+                      <ol className="generation-trace-entries">
+                        {thinkingTrace.entries.map((entry, index) => {
+                          const counter = formatTraceCounter(entry);
+                          const decision = decisionLabel(entry.decision);
+                          return (
+                            <li key={`${message.id}-trace-${index}`} className="generation-trace-entry">
+                              <div className="generation-trace-entry-row">
+                                <span className="generation-trace-entry-title">{entry.title}</span>
+                                {counter && <span className="generation-trace-entry-counter">{counter}</span>}
+                              </div>
+                              {entry.detail && <p className="generation-trace-entry-detail">{entry.detail}</p>}
+                              {decision && <p className="generation-trace-entry-decision">{decision}</p>}
+                            </li>
+                          );
+                        })}
+                      </ol>
+                    )}
+
+                    {hasReasoningContent && (
+                      <div className="generation-reasoning">
+                        <button
+                          type="button"
+                          className="generation-reasoning-toggle"
+                          onClick={() => setReasoningExpanded((open) => !open)}
+                          aria-expanded={reasoningExpanded}
+                          aria-controls={reasoningPanelID}
+                        >
+                          <span className="generation-reasoning-title">Model reasoning</span>
+                          <svg
+                            className={`generation-reasoning-chevron ${reasoningExpanded ? 'open' : ''}`}
+                            viewBox="0 0 24 24"
+                            fill="none"
+                            stroke="currentColor"
+                            strokeWidth="2"
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            aria-hidden="true"
+                          >
+                            <polyline points="6 9 12 15 18 9" />
+                          </svg>
+                        </button>
+
+                        <div
+                          id={reasoningPanelID}
+                          className={`generation-reasoning-content ${reasoningExpanded ? 'expanded' : 'collapsed'}`}
+                        >
+                          {reasoningExpanded && (
+                            <div className="generation-reasoning-markdown">
+                              <ReactMarkdown
+                                remarkPlugins={[remarkGfm]}
+                                skipHtml
+                                components={markdownComponents}
+                              >
+                                {message.reasoningContent || ''}
+                              </ReactMarkdown>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           )}
@@ -538,4 +529,4 @@ export default function ChatMessage({ message, isStreaming, thinkingTrace }: Cha
   );
 }
 
-export type { MessageData, ThinkingTrace, ThinkingTraceStep };
+export type { MessageData };

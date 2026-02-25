@@ -51,6 +51,7 @@ export type ConversationMessage = {
   role: 'system' | 'user' | 'assistant' | 'tool';
   content: string;
   reasoningContent?: string | null;
+  thinkingTrace?: ThinkingTrace | null;
   modelId?: string | null;
   usage?: Usage | null;
   groundingEnabled: boolean;
@@ -98,6 +99,26 @@ export type ChatRequest = {
 
 export type ResearchPhase = 'planning' | 'searching' | 'reading' | 'evaluating' | 'iterating' | 'synthesizing' | 'finalizing';
 export type ProgressDecision = 'search_more' | 'finalize' | 'fallback';
+
+export type ThinkingTraceEntry = {
+  phase: ResearchPhase;
+  title: string;
+  detail?: string;
+  isQuickStep?: boolean;
+  decision?: ProgressDecision;
+  pass?: number;
+  totalPasses?: number;
+  loop?: number;
+  maxLoops?: number;
+  sourcesConsidered?: number;
+  sourcesRead?: number;
+};
+
+export type ThinkingTrace = {
+  status: 'running' | 'done' | 'stopped';
+  summary: string;
+  entries: ThinkingTraceEntry[];
+};
 
 export type StreamEvent =
   | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; reasoningEffort?: ReasoningEffort; conversationId?: string }

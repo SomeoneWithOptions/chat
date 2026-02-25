@@ -148,8 +148,8 @@ describe('Deep research streaming UX', () => {
     });
 
     expect(screen.getByText('First prompt')).toBeInTheDocument();
-    expect(screen.getAllByText('Thinking').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: /thinking/i })).toBeInTheDocument();
+    expect(screen.getByText('Thinking', { selector: '.message-streaming-label' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /thought process/i })).not.toBeInTheDocument();
 
     if (typeof releaseStream === 'function') {
       releaseStream();
@@ -223,6 +223,7 @@ describe('Deep research streaming UX', () => {
   });
 
   it('renders research phases and completion state from progress events', async () => {
+    let releaseStream: (() => void) | undefined;
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: true, modelId: 'openrouter/free', conversationId: 'conv-1' });
       onEvent({
@@ -287,7 +288,12 @@ describe('Deep research streaming UX', () => {
         title: 'Finalizing answer',
         detail: 'Ordering citations and sending response',
       });
-      onEvent({ type: 'done' });
+      await new Promise<void>((resolve) => {
+        releaseStream = () => {
+          onEvent({ type: 'done' });
+          resolve();
+        };
+      });
     });
 
     const user = userEvent.setup();
@@ -303,14 +309,12 @@ describe('Deep research streaming UX', () => {
       expect(streamMessageMock).toHaveBeenCalledTimes(1);
     });
 
-    // Panel is visible and collapsed by default — shows only the active step
-    const panel = await screen.findByTestId('research-timeline');
-    expect(panel).toBeInTheDocument();
-    expect(screen.getByText('Finalizing answer')).toBeInTheDocument();
-    expect(screen.getByText('Complete')).toBeInTheDocument();
+    expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
+    expect(screen.getByText('Finalizing answer: Ordering citations and sending response')).toBeInTheDocument();
+    expect(screen.getByText('Running')).toBeInTheDocument();
 
-    // Expand the panel to see all phases
-    await user.click(screen.getByRole('button', { name: /research activity/i }));
+    // Expand the in-message panel to see all phases
+    await user.click(screen.getByRole('button', { name: /thinking/i }));
 
     expect(screen.getByText('Planning next step')).toBeInTheDocument();
     expect(screen.getByText('Searching trusted sources')).toBeInTheDocument();
@@ -319,6 +323,8 @@ describe('Deep research streaming UX', () => {
     expect(screen.getByText('Running another pass')).toBeInTheDocument();
     expect(screen.getByText('Drafting response')).toBeInTheDocument();
     expect(screen.getByText('Finalizing answer')).toBeInTheDocument();
+
+    if (releaseStream) releaseStream();
   });
 
   it('renders usage details after sources when usage events are streamed', async () => {
@@ -382,10 +388,16 @@ describe('Deep research streaming UX', () => {
   });
 
   it('renders compact one-line progress for non-deep-research sends', async () => {
+    let releaseStream: (() => void) | undefined;
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
       onEvent({ type: 'progress', phase: 'searching', title: 'Getting grounding results', isQuickStep: true });
-      onEvent({ type: 'done' });
+      await new Promise<void>((resolve) => {
+        releaseStream = () => {
+          onEvent({ type: 'done' });
+          resolve();
+        };
+      });
     });
 
     const user = userEvent.setup();
@@ -399,11 +411,107 @@ describe('Deep research streaming UX', () => {
       expect(streamMessageMock).toHaveBeenCalledTimes(1);
     });
 
-    const panel = await screen.findByTestId('research-timeline');
-    expect(panel).toBeInTheDocument();
-    expect(screen.getByText('Research Progress')).toBeInTheDocument();
+    expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
     expect(screen.getByText('Getting grounding results')).toBeInTheDocument();
-    expect(panel.querySelector('.research-step-message')).toBeNull();
+    expect(screen.queryByText('Searching trusted sources for corroboration')).not.toBeInTheDocument();
+
+    if (releaseStream) releaseStream();
+  });
+
+  it('keeps model reasoning collapsed by default and expands it on demand', async () => {
+    let releaseStream: (() => void) | undefined;
+    streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
+      onEvent({ type: 'progress', phase: 'planning', title: 'Planning next step', detail: 'Checking what evidence is still missing' });
+      onEvent({ type: 'reasoning', delta: 'I am validating evidence consistency.' });
+      await new Promise<void>((resolve) => {
+        releaseStream = () => {
+          onEvent({ type: 'done' });
+          resolve();
+        };
+      });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Show reasoning section');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    await user.click(screen.getByRole('button', { name: /thinking/i }));
+
+    expect(screen.getByText('Model reasoning')).toBeInTheDocument();
+    expect(screen.queryByText('I am validating evidence consistency.')).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /model reasoning/i }));
+
+    expect(screen.getByText('I am validating evidence consistency.')).toBeInTheDocument();
+
+    if (releaseStream) releaseStream();
+  });
+
+  it('renders persisted thinking traces from conversation history', async () => {
+    const existingConversation: api.Conversation = {
+      id: 'conv-existing',
+      title: 'Existing Chat',
+      createdAt: '2026-02-10T00:00:00Z',
+      updatedAt: '2026-02-10T00:00:00Z',
+    };
+
+    listConversationsMock.mockResolvedValue([existingConversation]);
+    listConversationMessagesMock.mockResolvedValue([
+      {
+        id: 'msg-user',
+        conversationId: 'conv-existing',
+        role: 'user',
+        content: 'What changed?',
+        groundingEnabled: true,
+        deepResearchEnabled: false,
+        citations: [],
+        createdAt: '2026-02-10T00:00:00Z',
+      },
+      {
+        id: 'msg-assistant',
+        conversationId: 'conv-existing',
+        role: 'assistant',
+        content: 'Here is the answer.',
+        reasoningContent: 'Checking release note chronology.',
+        thinkingTrace: {
+          status: 'done',
+          summary: 'Finalizing answer: Ordering citations and sending response',
+          entries: [
+            {
+              phase: 'planning',
+              title: 'Planning next step',
+              detail: 'Checking what evidence is still missing',
+            },
+          ],
+        },
+        groundingEnabled: true,
+        deepResearchEnabled: false,
+        citations: [],
+        createdAt: '2026-02-10T00:00:01Z',
+      },
+    ]);
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByText('Existing Chat');
+    await user.click(screen.getByText('Existing Chat'));
+
+    await waitFor(() => {
+      expect(listConversationMessagesMock).toHaveBeenCalledWith('conv-existing');
+    });
+    expect(screen.getByText('Finalizing answer: Ordering citations and sending response')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /thinking/i }));
+    expect(screen.getByText('Planning next step')).toBeInTheDocument();
   });
 
   it('includes selected reasoning effort in chat requests when model supports reasoning', async () => {

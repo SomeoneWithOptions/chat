@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS messages (
   role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
   content TEXT NOT NULL,
   reasoning_content TEXT,
+  thinking_trace_json TEXT,
   model_id TEXT,
   prompt_tokens INTEGER,
   completion_tokens INTEGER,

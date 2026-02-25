@@ -568,6 +568,7 @@ type messageResponse struct {
 	Role                string             `json:"role"`
 	Content             string             `json:"content"`
 	ReasoningContent    *string            `json:"reasoningContent,omitempty"`
+	ThinkingTrace       *thinkingTrace     `json:"thinkingTrace,omitempty"`
 	ModelID             *string            `json:"modelId,omitempty"`
 	Usage               *usageResponse     `json:"usage,omitempty"`
 	GroundingEnabled    bool               `json:"groundingEnabled"`
@@ -675,7 +676,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -691,6 +692,7 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 	for rows.Next() {
 		var message messageResponse
 		var reasoningContent sql.NullString
+		var thinkingTraceJSON sql.NullString
 		var modelID sql.NullString
 		var promptTokens sql.NullInt64
 		var completionTokens sql.NullInt64
@@ -710,6 +712,7 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&message.Role,
 			&message.Content,
 			&reasoningContent,
+			&thinkingTraceJSON,
 			&modelID,
 			&promptTokens,
 			&completionTokens,
@@ -729,6 +732,11 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		}
 
 		message.ReasoningContent = nullableStringPointer(reasoningContent)
+		if thinkingTraceJSON.Valid {
+			if trace, ok := decodeThinkingTraceJSON(thinkingTraceJSON.String); ok {
+				message.ThinkingTrace = trace
+			}
+		}
 		message.ModelID = nullableStringPointer(modelID)
 		if promptTokens.Valid && completionTokens.Valid && totalTokens.Valid {
 			message.Usage = &usageResponse{
@@ -1053,12 +1061,15 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 	flusher.Flush()
 
+	traceCollector := newThinkingTraceCollector()
+
 	groundingCitations, groundingWarning := h.resolveGroundingContext(
 		r.Context(),
 		req.Message,
 		grounding,
 		timeSensitive,
 		func(progress research.Progress) {
+			traceCollector.AppendProgress(progress)
 			_ = writeSSEEvent(w, progressEventData(progress))
 			flusher.Flush()
 		},
@@ -1073,12 +1084,14 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if grounding {
-		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+		synthesizingProgress := summarizedProgress(research.Progress{
 			Phase:   research.PhaseSynthesizing,
 			Message: "Preparing grounded response",
 		}, research.ProgressSummaryInput{
 			Phase: research.PhaseSynthesizing,
-		})))
+		})
+		traceCollector.AppendProgress(synthesizingProgress)
+		_ = writeSSEEvent(w, progressEventData(synthesizingProgress))
 		flusher.Flush()
 	}
 
@@ -1160,13 +1173,21 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	)
 
 	if grounding {
-		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+		finalizingProgress := summarizedProgress(research.Progress{
 			Phase:   research.PhaseFinalizing,
 			Message: "Finalizing citations and response",
 		}, research.ProgressSummaryInput{
 			Phase: research.PhaseFinalizing,
-		})))
+		})
+		traceCollector.AppendProgress(finalizingProgress)
+		_ = writeSSEEvent(w, progressEventData(finalizingProgress))
 		flusher.Flush()
+	}
+
+	if streamErr != nil {
+		traceCollector.MarkStopped("Stopped due to an error")
+	} else {
+		traceCollector.MarkDone()
 	}
 
 	var persistedCitations []citationResponse
@@ -1186,6 +1207,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			grounding,
 			deepResearch,
 			persistedCitations,
+			traceCollector.Snapshot(),
 			messageUsageFromOpenRouter(assistantUsage),
 		)
 		if err != nil {
@@ -1557,6 +1579,7 @@ func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role
 		deepResearchEnabled,
 		nil,
 		nil,
+		nil,
 	)
 	return err
 }
@@ -1578,6 +1601,7 @@ func (h Handler) insertMessageWithCitations(
 	userID, conversationID, role, content, reasoningContent, modelID string,
 	groundingEnabled, deepResearchEnabled bool,
 	citations []citationResponse,
+	thinkingTrace *thinkingTrace,
 	usage *messageUsage,
 ) (string, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
@@ -1601,6 +1625,10 @@ func (h Handler) insertMessageWithCitations(
 	var tokensPerSecondValue any
 	var usageModelIDValue any
 	var usageProviderNameValue any
+	thinkingTraceJSON, err := encodeThinkingTraceJSON(thinkingTrace)
+	if err != nil {
+		return "", err
+	}
 	if usage != nil {
 		promptTokensValue = usage.PromptTokens
 		completionTokensValue = usage.CompletionTokens
@@ -1620,6 +1648,7 @@ INSERT INTO messages (
   role,
   content,
   reasoning_content,
+  thinking_trace_json,
   model_id,
   prompt_tokens,
   completion_tokens,
@@ -1633,8 +1662,8 @@ INSERT INTO messages (
   grounding_enabled,
   deep_research_enabled
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), thinkingTraceJSON, nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
 		return "", err
 	}
 

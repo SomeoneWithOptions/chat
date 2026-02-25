@@ -77,6 +77,8 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	_ = writeSSEEvent(w, metadataEvent)
 	flusher.Flush()
 
+	traceCollector := newThinkingTraceCollector()
+
 	timeSensitive := isTimeSensitivePrompt(input.Message)
 	citations := make([]citationResponse, 0, maxDeepResearchCitations)
 	searchWarning := ""
@@ -88,24 +90,29 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			input.ConversationID,
 			input.UserMessageID,
 		)
-		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+		planningProgress := summarizedProgress(research.Progress{
 			Phase:   research.PhasePlanning,
 			Message: "Planning deep research response",
 		}, research.ProgressSummaryInput{
 			Phase: research.PhasePlanning,
-		})))
-		_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+		})
+		traceCollector.AppendProgress(planningProgress)
+		_ = writeSSEEvent(w, progressEventData(planningProgress))
+		searchingProgress := summarizedProgress(research.Progress{
 			Phase:   research.PhaseSearching,
 			Message: "Grounding disabled; skipping web search",
 		}, research.ProgressSummaryInput{
 			Phase:      research.PhaseSearching,
 			QueryCount: 1,
-		})))
+		})
+		traceCollector.AppendProgress(searchingProgress)
+		_ = writeSSEEvent(w, progressEventData(searchingProgress))
 		flusher.Flush()
 	} else {
 		searchStartedAt := time.Now()
 		if h.cfg.AgenticResearchDeepEnabled {
 			researchResult, err := h.runResearchOrchestrator(researchCtx, research.ModeDeepResearch, input.Message, timeSensitive, func(progress research.Progress) {
+				traceCollector.AppendProgress(progress)
 				_ = writeSSEEvent(w, progressEventData(progress))
 				flusher.Flush()
 			})
@@ -155,6 +162,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 				MinSearchInterval: braveFreeTierSpacing,
 			})
 			researchResult, err := runner.Run(researchCtx, input.Message, timeSensitive, func(progress research.Progress) {
+				traceCollector.AppendProgress(progress)
 				_ = writeSSEEvent(w, progressEventData(progress))
 				flusher.Flush()
 			})
@@ -217,12 +225,14 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		flusher.Flush()
 	}
 
-	_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+	synthesizingProgress := summarizedProgress(research.Progress{
 		Phase:   research.PhaseSynthesizing,
 		Message: "Synthesizing evidence into final answer",
 	}, research.ProgressSummaryInput{
 		Phase: research.PhaseSynthesizing,
-	})))
+	})
+	traceCollector.AppendProgress(synthesizingProgress)
+	_ = writeSSEEvent(w, progressEventData(synthesizingProgress))
 	flusher.Flush()
 
 	promptMessages := []openrouter.Message{
@@ -291,13 +301,21 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		},
 	)
 
-	_ = writeSSEEvent(w, progressEventData(summarizedProgress(research.Progress{
+	finalizingProgress := summarizedProgress(research.Progress{
 		Phase:   research.PhaseFinalizing,
 		Message: "Finalizing citations and response",
 	}, research.ProgressSummaryInput{
 		Phase: research.PhaseFinalizing,
-	})))
+	})
+	traceCollector.AppendProgress(finalizingProgress)
+	_ = writeSSEEvent(w, progressEventData(finalizingProgress))
 	flusher.Flush()
+
+	if streamErr != nil {
+		traceCollector.MarkStopped("Stopped due to an error")
+	} else {
+		traceCollector.MarkDone()
+	}
 
 	orderedCitations := orderCitationsByClaims(citations, assistantContent.String())
 	if len(orderedCitations) > maxDeepResearchCitations {
@@ -316,6 +334,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			input.Grounding,
 			true,
 			orderedCitations,
+			traceCollector.Snapshot(),
 			messageUsageFromOpenRouter(assistantUsage),
 		)
 		if err != nil {

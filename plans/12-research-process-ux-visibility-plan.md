@@ -8,6 +8,7 @@ Primary requirement from product:
 
 - Show **up to 2 lines of text** about what the LLM is about to do / currently doing.
 - For simple steps (for example: quick grounding/search fetch), show a **short one-line update**.
+- Use a **single in-message thinking surface** (no duplicated top-of-chat progress panel).
 
 ## Why this is needed
 
@@ -45,7 +46,8 @@ Out of scope:
 - Avoid uncertainty theater; be concrete and brief.
 
 3. Safety:
-- Never expose internal reasoning traces.
+- Never expose unrestricted chain-of-thought internals.
+- If provider reasoning text is available, expose it only behind an explicit user expand action.
 - Never leak secrets, API keys, or full source content.
 
 4. Stability:
@@ -53,34 +55,12 @@ Out of scope:
 
 ## Proposed UX Model
 
-### A) Progress Strip (always visible while running)
+### Unified In-Message Panel
 
-For both chat and deep research:
-
-- Line 1: current step label + short action.
-- Line 2 (optional): quick detail such as loop/counter.
-
-Examples:
-
-- `Planning next search`  
-  `Checking what evidence is still missing`
-
-- `Searching trusted sources`
-
-- `Reading top 3 pages`  
-  `2 of 3 processed`
-
-- `Evidence looks conflicting`  
-  `Running one more pass`
-
-### B) Expandable Detail Panel
-
-- Keep timeline/phases for deep research.
-- Add same panel for chat when grounding is on.
-- Show compact counters:
-  - loop `x/y`
-  - sources considered/read
-  - stop reason (if ended early)
+- One compact summary line in each assistant message while running/completed.
+- Expandable details show ordered phase entries and counters.
+- Nested opt-in section shows provider reasoning text when present.
+- Panel collapses back to summary after completion.
 
 ## Backend Implementation Plan
 

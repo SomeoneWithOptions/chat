@@ -20,14 +20,15 @@ import {
   type ReasoningEffort,
   type ReasoningMode,
   type ReasoningPreset,
-  type ProgressDecision,
   type ResearchPhase,
+  type ThinkingTrace,
+  type ThinkingTraceEntry,
   type UploadedFile,
   type User,
 } from './lib/api';
 import Sidebar from './components/Sidebar';
 import ModelSelector from './components/ModelSelector';
-import ChatMessage, { type MessageData, type ThinkingTrace } from './components/ChatMessage';
+import ChatMessage, { type MessageData } from './components/ChatMessage';
 import Composer from './components/Composer';
 import useVirtualKeyboard from './hooks/useVirtualKeyboard';
 
@@ -113,31 +114,7 @@ function loadGoogleIdentityScript(): Promise<void> {
   return googleIdentityScriptLoadPromise;
 }
 
-type ResearchActivity = {
-  phase: ResearchPhase;
-  title: string;
-  detail?: string;
-  isQuickStep?: boolean;
-  decision?: ProgressDecision;
-  pass?: number;
-  totalPasses?: number;
-  loop?: number;
-  maxLoops?: number;
-  sourcesConsidered?: number;
-  sourcesRead?: number;
-};
-
-const researchPhases: ResearchPhase[] = ['planning', 'searching', 'reading', 'evaluating', 'iterating', 'synthesizing', 'finalizing'];
-
-const researchPhaseLabels: Record<ResearchPhase, string> = {
-  planning: 'Planning',
-  searching: 'Searching',
-  reading: 'Reading',
-  evaluating: 'Evaluating',
-  iterating: 'Iterating',
-  synthesizing: 'Synthesizing',
-  finalizing: 'Finalizing',
-};
+const maxThinkingTraceEntries = 60;
 
 const researchPhaseTitleDefaults: Record<ResearchPhase, string> = {
   planning: 'Planning next step',
@@ -182,23 +159,6 @@ function resolveResearchDetail(
   return researchPhaseDetailDefaults[phase];
 }
 
-function formatResearchCounter(activity: ResearchActivity | undefined): string | null {
-  if (!activity) return null;
-  const counters: string[] = [];
-  if (activity.loop && activity.maxLoops) counters.push(`loop ${activity.loop}/${activity.maxLoops}`);
-  if (activity.pass && activity.totalPasses) counters.push(`${activity.pass}/${activity.totalPasses}`);
-  if (activity.sourcesRead !== undefined || activity.sourcesConsidered !== undefined) {
-    counters.push(`sources ${activity.sourcesRead ?? 0}/${activity.sourcesConsidered ?? 0}`);
-  }
-  return counters.length > 0 ? counters.join(' · ') : null;
-}
-
-function formatDecisionLabel(decision: ProgressDecision | undefined): string | null {
-  if (decision === 'fallback') return 'Fallback path';
-  if (decision === 'finalize') return 'Ready to finalize';
-  return null;
-}
-
 const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> = [
   { value: 'low', label: 'Low' },
   { value: 'medium', label: 'Medium' },
@@ -228,45 +188,31 @@ function upsertReasoningPreset(
   return [...filtered, next];
 }
 
-function buildInitialThinkingTrace(options: { grounding: boolean; deepResearch: boolean }): ThinkingTrace {
-  if (options.deepResearch) {
-    return {
-      status: 'running',
-      summary: researchPhaseTitleDefaults.planning,
-      steps: researchPhases.map((phase, index) => ({
-        id: phase,
-        label: researchPhaseLabels[phase],
-        detail: researchPhaseDetailDefaults[phase],
-        status: index === 0 ? 'active' : 'pending',
-      })),
-    };
-  }
+function buildTraceSummary(entry: ThinkingTraceEntry): string {
+  if (entry.detail?.trim()) return `${entry.title}: ${entry.detail}`;
+  return entry.title;
+}
 
+function appendThinkingTraceEntry(existing: ThinkingTrace | null | undefined, entry: ThinkingTraceEntry): ThinkingTrace {
+  const previousEntries = existing?.entries ?? [];
+  const entries = [...previousEntries, entry].slice(-maxThinkingTraceEntries);
   return {
     status: 'running',
-    summary: 'Reviewing your request',
-    steps: [
-      {
-        id: 'understand',
-        label: 'Understand request',
-        detail: 'Reading your prompt and recent thread context.',
-        status: 'active',
-      },
-      {
-        id: 'grounding',
-        label: 'Check sources',
-        detail: options.grounding
-          ? 'Grounding is on, gathering useful web context.'
-          : 'Grounding is off for this message.',
-        status: options.grounding ? 'pending' : 'done',
-      },
-      {
-        id: 'compose',
-        label: 'Compose response',
-        detail: 'Preparing a clear final response.',
-        status: 'pending',
-      },
-    ],
+    summary: buildTraceSummary(entry),
+    entries,
+  };
+}
+
+function updateThinkingTraceStatus(
+  existing: ThinkingTrace | null | undefined,
+  status: 'done' | 'stopped',
+  fallbackSummary: string,
+): ThinkingTrace | null {
+  if (!existing || existing.entries.length === 0) return null;
+  return {
+    ...existing,
+    status,
+    summary: existing.summary?.trim() ? existing.summary : fallbackSummary,
   };
 }
 
@@ -303,11 +249,6 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [researchActivity, setResearchActivity] = useState<ResearchActivity[]>([]);
-  const [researchActivityMode, setResearchActivityMode] = useState<ReasoningMode | null>(null);
-  const [researchCompleted, setResearchCompleted] = useState(false);
-  const [researchPanelExpanded, setResearchPanelExpanded] = useState(false);
-  const [thinkingTrace, setThinkingTrace] = useState<ThinkingTrace | null>(null);
   const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<string | null>(null);
 
   // ─── Conversation State ───────────────────────
@@ -330,6 +271,7 @@ export default function App() {
   const shouldAutoScrollRef = useRef(true);
   const previousMessagesRef = useRef<MessageData[]>(messages);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
+  const isStreamingRef = useRef(isStreaming);
 
   // ─── Virtual keyboard handling (mobile) ─────
   useVirtualKeyboard();
@@ -440,10 +382,6 @@ export default function App() {
       setConversationAPISupported(true);
       setMessages([]);
       setStreamWarning(null);
-      setResearchActivity([]);
-      setResearchActivityMode(null);
-      setResearchCompleted(false);
-      setThinkingTrace(null);
       setActiveAssistantMessageId(null);
       setPendingAttachments([]);
       setUploadingAttachments(false);
@@ -493,7 +431,7 @@ export default function App() {
         }
         return fallbackToFirstConversation ? (availableConversations[0]?.id ?? null) : null;
       });
-      if (availableConversations.length === 0) {
+      if (availableConversations.length === 0 && !isStreamingRef.current) {
         setMessages([]);
       }
     } catch (err) {
@@ -520,7 +458,6 @@ export default function App() {
     if (!activeConversationId) {
       if (!isStreaming) {
         setMessages([]);
-        setThinkingTrace(null);
         setActiveAssistantMessageId(null);
       }
       return;
@@ -539,12 +476,12 @@ export default function App() {
             role: m.role,
             content: m.content,
             reasoningContent: m.reasoningContent ?? '',
+            thinkingTrace: m.thinkingTrace ?? null,
             modelId: m.modelId ?? null,
             usage: m.usage ?? null,
             citations: m.citations ?? [],
           })),
         );
-        setThinkingTrace(null);
         setActiveAssistantMessageId(null);
       } catch (err) {
         if (isConversationNotFoundError(err)) {
@@ -565,6 +502,10 @@ export default function App() {
 
     return () => { cancelled = true; };
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
+
+  useEffect(() => {
+    isStreamingRef.current = isStreaming;
+  }, [isStreaming]);
 
   // Keep auto-scroll enabled only while user is near the bottom.
   useEffect(() => {
@@ -656,39 +597,6 @@ export default function App() {
     [activeMode, reasoningPresets, selectedModel],
   );
 
-  const latestResearchByPhase = useMemo(() => {
-    const byPhase = new Map<ResearchPhase, ResearchActivity>();
-    for (const entry of researchActivity) {
-      byPhase.set(entry.phase, entry);
-    }
-    return byPhase;
-  }, [researchActivity]);
-
-  const latestResearchPhaseIndex = useMemo(() => {
-    let highest = -1;
-    for (const entry of researchActivity) {
-      const index = researchPhases.indexOf(entry.phase);
-      if (index > highest) highest = index;
-    }
-    return highest;
-  }, [researchActivity]);
-
-  const researchStatus = useMemo(() => {
-    if (isStreaming && (researchActivity.length > 0 || researchActivityMode !== null)) return 'Running';
-    if (researchCompleted) return 'Complete';
-    if (researchActivity.length > 0) return 'Stopped';
-    return 'Ready';
-  }, [isStreaming, researchActivity.length, researchActivityMode, researchCompleted]);
-
-  const showResearchPanel = useMemo(() => {
-    if (researchActivityMode === 'deep_research') {
-      return deepResearch || researchActivity.length > 0;
-    }
-    return researchActivity.length > 0;
-  }, [deepResearch, researchActivity.length, researchActivityMode]);
-
-  const showResearchTimeline = researchActivityMode === 'deep_research';
-
   // ─── Handlers ─────────────────────────────────
 
   async function handleDevLogin(event: FormEvent<HTMLFormElement>) {
@@ -720,10 +628,6 @@ export default function App() {
       setSelectedModel('openrouter/free');
       setMessages([]);
       setStreamWarning(null);
-      setResearchActivity([]);
-      setResearchActivityMode(null);
-      setResearchCompleted(false);
-      setThinkingTrace(null);
       setActiveAssistantMessageId(null);
       setConversations([]);
       setActiveConversationId(null);
@@ -798,10 +702,6 @@ export default function App() {
     setSidebarCollapsed(true);
     setActiveConversationId(null);
     setMessages([]);
-    setResearchActivity([]);
-    setResearchActivityMode(null);
-    setResearchCompleted(false);
-    setThinkingTrace(null);
     setActiveAssistantMessageId(null);
   }
 
@@ -815,7 +715,6 @@ export default function App() {
     setDeletingConversationId(conversationId);
     if (activeConversationId === conversationId) {
       setMessages([]);
-      setThinkingTrace(null);
       setActiveAssistantMessageId(null);
     }
 
@@ -850,7 +749,6 @@ export default function App() {
       setConversations([]);
       setActiveConversationId(null);
       setMessages([]);
-      setThinkingTrace(null);
       setActiveAssistantMessageId(null);
     } catch (err) {
       if (isNotFoundError(err)) {
@@ -899,7 +797,6 @@ export default function App() {
     event.preventDefault();
     if (!prompt.trim() || isStreaming || uploadingAttachments) return;
 
-    const isDeepResearchRequest = deepResearch;
     const attachmentIDs = pendingAttachments.map((a) => a.id);
     const userMessage: MessageData = {
       id: crypto.randomUUID(),
@@ -915,6 +812,7 @@ export default function App() {
       role: 'assistant',
       content: '',
       reasoningContent: '',
+      thinkingTrace: null,
       modelId: selectedModel,
       usage: null,
       citations: [],
@@ -926,12 +824,7 @@ export default function App() {
     shouldAutoScrollRef.current = true;
     setStreamWarning(null);
     setError(null);
-    setResearchActivity([]);
-    setResearchActivityMode(isDeepResearchRequest ? 'deep_research' : grounding ? 'chat' : null);
-    setResearchCompleted(false);
-    setResearchPanelExpanded(false);
     setActiveAssistantMessageId(assistantMessage.id);
-    setThinkingTrace(buildInitialThinkingTrace({ grounding, deepResearch: isDeepResearchRequest }));
 
     let resolvedConversationID = activeConversationId;
     const abortController = new AbortController();
@@ -951,27 +844,11 @@ export default function App() {
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
-            setResearchActivityMode(eventData.deepResearch ? 'deep_research' : eventData.grounding ? 'chat' : null);
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === assistantMessage.id ? { ...m, modelId: eventData.modelId } : m,
               ),
             );
-            if (!eventData.deepResearch) {
-              setThinkingTrace((existing) => {
-                if (!existing) return existing;
-                return {
-                  ...existing,
-                  summary: eventData.grounding ? 'Gathering grounded context' : 'Drafting response',
-                  steps: existing.steps.map((step) => {
-                    if (step.id === 'understand') return { ...step, status: 'done' };
-                    if (step.id === 'grounding') return { ...step, status: eventData.grounding ? 'active' : 'done' };
-                    if (step.id === 'compose') return { ...step, status: eventData.grounding ? 'pending' : 'active' };
-                    return step;
-                  }),
-                };
-              });
-            }
             if (eventData.conversationId) {
               resolvedConversationID = eventData.conversationId;
               setActiveConversationId(eventData.conversationId);
@@ -983,57 +860,42 @@ export default function App() {
             return;
           }
           if (eventData.type === 'progress') {
-            const currentPhaseIndex = researchPhases.indexOf(eventData.phase);
             const progressTitle = resolveResearchTitle(eventData.phase, eventData.title, eventData.message);
             const progressDetail = resolveResearchDetail(eventData.phase, eventData.detail, eventData.isQuickStep);
-            setResearchActivity((existing) =>
-              [
-                ...existing,
-                {
-                  phase: eventData.phase,
-                  title: progressTitle,
-                  detail: progressDetail,
-                  isQuickStep: eventData.isQuickStep,
-                  decision: eventData.decision,
-                  pass: eventData.pass,
-                  totalPasses: eventData.totalPasses,
-                  loop: eventData.loop,
-                  maxLoops: eventData.maxLoops,
-                  sourcesConsidered: eventData.sourcesConsidered,
-                  sourcesRead: eventData.sourcesRead,
-                },
-              ].slice(-30),
+            const traceEntry: ThinkingTraceEntry = {
+              phase: eventData.phase,
+              title: progressTitle,
+              detail: progressDetail,
+              isQuickStep: eventData.isQuickStep,
+              decision: eventData.decision,
+              pass: eventData.pass,
+              totalPasses: eventData.totalPasses,
+              loop: eventData.loop,
+              maxLoops: eventData.maxLoops,
+              sourcesConsidered: eventData.sourcesConsidered,
+              sourcesRead: eventData.sourcesRead,
+            };
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === assistantMessage.id
+                  ? { ...m, thinkingTrace: appendThinkingTraceEntry(m.thinkingTrace, traceEntry) }
+                  : m,
+              ),
             );
-            if (isDeepResearchRequest) {
-              setThinkingTrace((existing) => {
-                const previous = new Map(existing?.steps.map((step) => [step.id, step]));
-                return {
-                  status: 'running',
-                  summary: progressDetail ? `${progressTitle}: ${progressDetail}` : progressTitle,
-                  steps: researchPhases.map((phase, index) => ({
-                    id: phase,
-                    label: researchPhaseLabels[phase],
-                    detail:
-                      phase === eventData.phase
-                        ? progressDetail ?? progressTitle
-                        : previous.get(phase)?.detail ?? researchPhaseDetailDefaults[phase],
-                    status: index < currentPhaseIndex ? 'done' : index === currentPhaseIndex ? 'active' : 'pending',
-                  })),
-                };
-              });
-            } else {
-              setThinkingTrace((existing) => {
-                if (!existing) return existing;
-                return {
-                  ...existing,
-                  summary: progressDetail ? `${progressTitle}: ${progressDetail}` : progressTitle,
-                };
-              });
-            }
             return;
           }
           if (eventData.type === 'warning') { setStreamWarning(eventData.message); return; }
-          if (eventData.type === 'error') { setError(eventData.message); return; }
+          if (eventData.type === 'error') {
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === assistantMessage.id
+                  ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped due to an error') }
+                  : m,
+              ),
+            );
+            setError(eventData.message);
+            return;
+          }
           if (eventData.type === 'citations') {
             setMessages((existing) =>
               existing.map((m) => m.id === assistantMessage.id ? { ...m, citations: eventData.citations } : m),
@@ -1041,32 +903,16 @@ export default function App() {
             return;
           }
           if (eventData.type === 'done') {
-            setResearchCompleted(true);
-            setThinkingTrace((existing) => {
-              if (!existing) return existing;
-              return {
-                ...existing,
-                status: 'done',
-                summary: 'Thought process complete',
-                steps: existing.steps.map((step) => ({ ...step, status: 'done' })),
-              };
-            });
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === assistantMessage.id
+                  ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Thought process complete') }
+                  : m,
+              ),
+            );
             return;
           }
           if (eventData.type === 'token') {
-            if (!isDeepResearchRequest) {
-              setThinkingTrace((existing) => {
-                if (!existing) return existing;
-                return {
-                  ...existing,
-                  summary: 'Writing response',
-                  steps: existing.steps.map((step) => {
-                    if (step.id === 'compose') return { ...step, status: 'active' };
-                    return { ...step, status: 'done' };
-                  }),
-                };
-              });
-            }
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === assistantMessage.id ? { ...m, content: `${m.content}${eventData.delta}` } : m,
@@ -1099,16 +945,22 @@ export default function App() {
     } catch (err) {
       if (isAbortError(err)) {
         setStreamWarning('Response stopped.');
-        setThinkingTrace((existing) => {
-          if (!existing) return existing;
-          return { ...existing, status: 'stopped', summary: 'Stopped by user' };
-        });
+        setMessages((existing) =>
+          existing.map((m) =>
+            m.id === assistantMessage.id
+              ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped by user') }
+              : m,
+          ),
+        );
         return;
       }
-      setThinkingTrace((existing) => {
-        if (!existing) return existing;
-        return { ...existing, status: 'stopped', summary: 'Stopped due to an error' };
-      });
+      setMessages((existing) =>
+        existing.map((m) =>
+          m.id === assistantMessage.id
+            ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped due to an error') }
+            : m,
+        ),
+      );
       setError((err as Error).message);
     } finally {
       if (streamAbortControllerRef.current === abortController) {
@@ -1243,112 +1095,6 @@ export default function App() {
           </div>
 
         </header>
-
-        {showResearchPanel && (
-          <section className={`research-panel ${researchPanelExpanded ? 'expanded' : 'collapsed'}`} data-testid="research-timeline">
-            {showResearchTimeline ? (
-              <button
-                type="button"
-                className="research-panel-header"
-                onClick={() => setResearchPanelExpanded((open) => !open)}
-                aria-expanded={researchPanelExpanded}
-              >
-                <span className="research-panel-title">Research Activity</span>
-                <span className="research-panel-header-right">
-                  <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
-                    {researchStatus}
-                  </span>
-                  <svg
-                    className={`research-panel-chevron ${researchPanelExpanded ? 'open' : ''}`}
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    aria-hidden="true"
-                  >
-                    <polyline points="6 9 12 15 18 9" />
-                  </svg>
-                </span>
-              </button>
-            ) : (
-              <div className="research-panel-header static">
-                <span className="research-panel-title">Research Progress</span>
-                <span className={`research-panel-status ${isStreaming ? 'running' : researchCompleted ? 'done' : ''}`}>
-                  {researchStatus}
-                </span>
-              </div>
-            )}
-
-            {(!showResearchTimeline || !researchPanelExpanded) && (() => {
-              const activeIndex = latestResearchPhaseIndex >= 0 ? latestResearchPhaseIndex : 0;
-              const activePhase = researchPhases[activeIndex];
-              const latest = latestResearchByPhase.get(activePhase);
-              const counterText = formatResearchCounter(latest);
-              const decisionLabel = formatDecisionLabel(latest?.decision);
-              const title = latest?.title ?? researchPhaseTitleDefaults[activePhase];
-              const detail = latest?.isQuickStep ? undefined : (latest?.detail ?? researchPhaseDetailDefaults[activePhase]);
-              let state: 'pending' | 'active' | 'done' = 'pending';
-              if (researchActivity.length > 0) {
-                state = researchCompleted ? 'done' : 'active';
-              }
-
-              return (
-                <div className={`research-active-step ${detail ? 'two-line' : 'one-line'}`}>
-                  <span className={`research-step-marker ${state}`} />
-                  <div className="research-step-content">
-                    <div className="research-step-row">
-                      <span className="research-step-title">{title}</span>
-                      {counterText ? (
-                        <span className="research-step-pass">
-                          {counterText}
-                        </span>
-                      ) : null}
-                    </div>
-                    {detail ? <p className="research-step-message">{detail}</p> : null}
-                    {decisionLabel ? <p className="research-step-decision">{decisionLabel}</p> : null}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {showResearchTimeline && researchPanelExpanded && (
-              <ol className="research-timeline">
-                {researchPhases.map((phase, index) => {
-                  const latest = latestResearchByPhase.get(phase);
-                  const counterText = formatResearchCounter(latest);
-                  const decisionLabel = formatDecisionLabel(latest?.decision);
-                  const title = latest?.title ?? researchPhaseTitleDefaults[phase];
-                  const detail = latest?.isQuickStep ? undefined : (latest?.detail ?? researchPhaseDetailDefaults[phase]);
-                  let state: 'pending' | 'active' | 'done' = 'pending';
-                  if (index < latestResearchPhaseIndex) state = 'done';
-                  if (index === latestResearchPhaseIndex) state = researchCompleted ? 'done' : 'active';
-                  if (!isStreaming && researchCompleted && index <= latestResearchPhaseIndex) state = 'done';
-
-                  return (
-                    <li key={phase} className={`research-step ${state}`}>
-                      <span className="research-step-marker" />
-                      <div className="research-step-content">
-                        <div className="research-step-row">
-                          <span className="research-step-title">{title}</span>
-                          {counterText ? (
-                            <span className="research-step-pass">
-                              {counterText}
-                            </span>
-                          ) : null}
-                        </div>
-                        {detail ? <p className="research-step-message">{detail}</p> : null}
-                        {decisionLabel ? <p className="research-step-decision">{decisionLabel}</p> : null}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ol>
-            )}
-          </section>
-        )}
-
         {/* Messages */}
         <div ref={messagesContainerRef} className="messages-container">
           {loadingMessages && messages.length === 0 && (
@@ -1373,7 +1119,6 @@ export default function App() {
                 key={message.id}
                 message={message}
                 isStreaming={isStreaming && isActiveAssistant}
-                thinkingTrace={isActiveAssistant ? thinkingTrace : null}
               />
             );
           })}

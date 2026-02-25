@@ -1585,6 +1585,151 @@ func TestChatMessagesStreamsProgressBeforeTokensForGroundedChat(t *testing.T) {
 	}
 }
 
+func TestChatMessagesPersistsThinkingTraceDone(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Grounded", " answer"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/one", Title: "Example One", Snippet: "First snippet"},
+			{URL: "https://example.com/two", Title: "Example Two", Snippet: "Second snippet"},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Ground this response","modelId":"openrouter/free","grounding":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var traceJSON sql.NullString
+	if err := db.QueryRow(`
+SELECT thinking_trace_json
+FROM messages
+WHERE user_id = ? AND role = 'assistant'
+ORDER BY rowid DESC
+LIMIT 1;
+`, user.ID).Scan(&traceJSON); err != nil {
+		t.Fatalf("query thinking trace: %v", err)
+	}
+	if !traceJSON.Valid || strings.TrimSpace(traceJSON.String) == "" {
+		t.Fatalf("expected thinking_trace_json to be persisted")
+	}
+
+	var persisted thinkingTrace
+	if err := json.Unmarshal([]byte(traceJSON.String), &persisted); err != nil {
+		t.Fatalf("unmarshal thinking trace: %v", err)
+	}
+	if persisted.Status != thinkingTraceStatusDone {
+		t.Fatalf("expected done status, got %q", persisted.Status)
+	}
+	if len(persisted.Entries) == 0 {
+		t.Fatalf("expected persisted entries, got %+v", persisted)
+	}
+	if len(persisted.Entries) > maxThinkingTraceEntries {
+		t.Fatalf("expected capped entries <= %d, got %d", maxThinkingTraceEntries, len(persisted.Entries))
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? ORDER BY rowid DESC LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation id: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+conversationID+"/messages", nil)
+	listReq = requestWithSessionUser(listReq, user)
+	listReq = requestWithConversationID(listReq, conversationID)
+	listResp := httptest.NewRecorder()
+
+	handler.ListConversationMessages(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected list status %d, got %d (%s)", http.StatusOK, listResp.Code, listResp.Body.String())
+	}
+
+	var payload struct {
+		Messages []messageResponse `json:"messages"`
+	}
+	decodeJSONBody(t, listResp, &payload)
+	if len(payload.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(payload.Messages))
+	}
+	if payload.Messages[1].ThinkingTrace == nil {
+		t.Fatalf("expected assistant thinkingTrace in list response, got %+v", payload.Messages[1])
+	}
+	if payload.Messages[1].ThinkingTrace.Status != thinkingTraceStatusDone {
+		t.Fatalf("expected done status in list response, got %+v", payload.Messages[1].ThinkingTrace)
+	}
+}
+
+func TestChatMessagesPersistsThinkingTraceStoppedOnStreamError(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{
+		tokens: []string{"Partial"},
+		err:    errors.New("stream failed"),
+	})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/one", Title: "Example One", Snippet: "First snippet"},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Ground this response","modelId":"openrouter/free","grounding":true}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	var traceJSON sql.NullString
+	if err := db.QueryRow(`
+SELECT thinking_trace_json
+FROM messages
+WHERE user_id = ? AND role = 'assistant'
+ORDER BY rowid DESC
+LIMIT 1;
+`, user.ID).Scan(&traceJSON); err != nil {
+		t.Fatalf("query thinking trace: %v", err)
+	}
+	if !traceJSON.Valid || strings.TrimSpace(traceJSON.String) == "" {
+		t.Fatalf("expected thinking_trace_json to be persisted")
+	}
+
+	var persisted thinkingTrace
+	if err := json.Unmarshal([]byte(traceJSON.String), &persisted); err != nil {
+		t.Fatalf("unmarshal thinking trace: %v", err)
+	}
+	if persisted.Status != thinkingTraceStatusStopped {
+		t.Fatalf("expected stopped status, got %q", persisted.Status)
+	}
+	if len(persisted.Entries) == 0 {
+		t.Fatalf("expected persisted entries, got %+v", persisted)
+	}
+}
+
 func TestChatMessagesDeepResearchFeatureFlagOffUsesLegacyPhases(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Legacy", " answer [1]"}})
 	t.Cleanup(func() { _ = db.Close() })
@@ -2387,6 +2532,7 @@ CREATE TABLE messages (
   role TEXT NOT NULL CHECK (role IN ('system', 'user', 'assistant', 'tool')),
   content TEXT NOT NULL,
   reasoning_content TEXT,
+  thinking_trace_json TEXT,
   model_id TEXT,
   prompt_tokens INTEGER,
   completion_tokens INTEGER,

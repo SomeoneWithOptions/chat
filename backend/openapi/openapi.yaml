@@ -548,6 +548,11 @@ components:
           enum: [system, user, assistant, tool]
         content:
           type: string
+        reasoningContent:
+          type: string
+          nullable: true
+        thinkingTrace:
+          $ref: '#/components/schemas/ThinkingTrace'
         modelId:
           type: string
           nullable: true
@@ -661,12 +666,59 @@ components:
         - $ref: '#/components/schemas/StreamEventProgress'
         - $ref: '#/components/schemas/StreamEventWarning'
         - $ref: '#/components/schemas/StreamEventToken'
+        - $ref: '#/components/schemas/StreamEventReasoning'
         - $ref: '#/components/schemas/StreamEventUsage'
         - $ref: '#/components/schemas/StreamEventCitations'
         - $ref: '#/components/schemas/StreamEventError'
         - $ref: '#/components/schemas/StreamEventDone'
       discriminator:
         propertyName: type
+    ThinkingTrace:
+      type: object
+      required: [status, summary, entries]
+      properties:
+        status:
+          type: string
+          enum: [running, done, stopped]
+        summary:
+          type: string
+        entries:
+          type: array
+          items:
+            $ref: '#/components/schemas/ThinkingTraceEntry'
+    ThinkingTraceEntry:
+      type: object
+      required: [phase, title]
+      properties:
+        phase:
+          type: string
+          enum: [planning, searching, reading, evaluating, iterating, synthesizing, finalizing]
+        title:
+          type: string
+        detail:
+          type: string
+        isQuickStep:
+          type: boolean
+        decision:
+          $ref: '#/components/schemas/ProgressDecision'
+        pass:
+          type: integer
+          minimum: 0
+        totalPasses:
+          type: integer
+          minimum: 0
+        loop:
+          type: integer
+          minimum: 0
+        maxLoops:
+          type: integer
+          minimum: 0
+        sourcesConsidered:
+          type: integer
+          minimum: 0
+        sourcesRead:
+          type: integer
+          minimum: 0
     Usage:
       type: object
       required: [promptTokens, completionTokens, totalTokens]
@@ -769,6 +821,15 @@ components:
         type:
           type: string
           enum: [token]
+        delta:
+          type: string
+    StreamEventReasoning:
+      type: object
+      required: [type, delta]
+      properties:
+        type:
+          type: string
+          enum: [reasoning]
         delta:
           type: string
     StreamEventUsage:
