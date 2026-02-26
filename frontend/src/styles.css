@@ -1796,15 +1796,19 @@ code {
 }
 
 .composer-mode-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   padding: 6px 10px;
   background: transparent;
   border: none;
+  border-radius: var(--radius-sm);
   font-family: var(--font-body);
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition: color var(--duration-fast) ease;
+  transition: all var(--duration-fast) ease;
 }
 
 .composer-mode-button.active {
@@ -1812,15 +1816,17 @@ code {
 }
 
 .composer-mode-button.inactive {
-  color: var(--text-secondary);
+  color: var(--text-tertiary);
 }
 
 .composer-mode-button:hover {
-  color: var(--text-primary);
+  color: var(--text-secondary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .composer-mode-button.active:hover {
-  color: var(--accent-muted);
+  color: var(--accent);
+  background: rgba(0, 166, 226, 0.08);
 }
 
 .composer-mode-button:focus-visible {
@@ -1830,7 +1836,6 @@ code {
 }
 
 .mode-icon {
-  display: none;
   width: 16px;
   height: 16px;
   flex-shrink: 0;
