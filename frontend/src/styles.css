@@ -216,15 +216,17 @@ code {
 
 .sidebar-brand {
   font-family: var(--font-display);
-  font-size: 24px;
+  font-size: 20px;
+  font-weight: 600;
   color: var(--text-primary);
-  letter-spacing: -0.01em;
+  letter-spacing: -0.02em;
   white-space: nowrap;
   user-select: none;
 }
 
 .sidebar-brand em {
-  color: var(--accent);
+  font-style: normal;
+  color: var(--text-primary);
 }
 
 .btn-new-chat {
@@ -232,12 +234,12 @@ code {
   align-items: center;
   gap: 8px;
   width: calc(100% - 40px);
-  margin: 12px 20px;
+  margin: 16px 20px 8px;
   padding: 10px 14px;
-  background: var(--accent-dim);
-  border: 1px solid rgba(0, 166, 226, 0.2);
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  color: var(--accent);
+  color: var(--text-primary);
   font-family: var(--font-body);
   font-size: 13px;
   font-weight: 500;
@@ -248,8 +250,8 @@ code {
 }
 
 .btn-new-chat:hover {
-  background: rgba(0, 166, 226, 0.16);
-  border-color: rgba(0, 166, 226, 0.3);
+  background: rgba(255, 255, 255, 0.06);
+  border-color: var(--border-focus);
 }
 
 .btn-new-chat svg {
@@ -275,15 +277,14 @@ code {
   align-items: center;
   justify-content: space-between;
   width: 100%;
-  padding: 10px 20px;
+  padding: 16px 20px 8px;
   background: none;
   border: none;
-  border-bottom: 1px solid var(--border-subtle);
   color: var(--text-tertiary);
   font-family: var(--font-body);
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 600;
-  letter-spacing: 0.1em;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
   cursor: pointer;
   transition: color var(--duration-fast) ease;
@@ -323,7 +324,7 @@ code {
 /* Conversation List */
 .conversation-list {
   overflow-y: auto;
-  padding: 4px 8px;
+  padding: 4px 12px;
   flex: 1;
   min-height: 0;
 }
@@ -334,9 +335,10 @@ code {
   justify-content: space-between;
   gap: 4px;
   padding: 8px 12px;
+  margin-bottom: 2px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  transition: background var(--duration-fast) ease;
+  transition: all var(--duration-fast) ease;
   border: none;
   background: none;
   width: 100%;
@@ -349,23 +351,26 @@ code {
 }
 
 .conversation-item:hover {
-  background: rgba(255, 255, 255, 0.03);
+  background: rgba(255, 255, 255, 0.04);
   color: var(--text-primary);
 }
 
 .conversation-item.active {
-  background: var(--accent-dim);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--text-primary);
+  font-weight: 500;
 }
 
 .conversation-item.active::before {
   content: '';
   position: absolute;
-  left: 8px;
-  width: 2px;
-  height: 20px;
+  left: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 16px;
   background: var(--accent);
-  border-radius: 2px;
+  border-radius: 0 2px 2px 0;
 }
 
 .conversation-title {
