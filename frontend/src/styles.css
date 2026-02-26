@@ -1829,6 +1829,13 @@ code {
   text-decoration-color: var(--accent);
 }
 
+.mode-icon {
+  display: none;
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+}
+
 .btn-send {
   display: inline-flex;
   align-items: center;
@@ -2290,6 +2297,21 @@ code {
 @media (min-width: 900px) {
   .composer-wrapper {
     --composer-lane-max-width: 44rem;
+  }
+}
+
+@media (max-width: 450px) {
+  .mode-text, .attach-text {
+    display: none;
+  }
+  
+  .mode-icon {
+    display: block;
+  }
+  
+  .composer-mode-button, .btn-attach {
+    padding: 6px;
+    justify-content: center;
   }
 }
 
