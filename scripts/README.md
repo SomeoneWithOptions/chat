@@ -4,7 +4,7 @@ Utility scripts for local development, DB lifecycle, and deployment.
 
 ## Local dev
 
-- `./scripts/dev_backend.sh`: run Go API from `/backend` (loads `backend/.env` if present).
+- `./scripts/dev_backend.sh`: run Go API from `/backend` (loads `backend/.env` if present), then forces local auth bypass (`AUTH_REQUIRED=true`, `AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true`) so the frontend dev login form works without Google token verification.
 - `./scripts/dev_frontend.sh`: install frontend deps if needed and run Vite.
 
 ## Turso

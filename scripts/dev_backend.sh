@@ -6,6 +6,13 @@ REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cd "${REPO_ROOT}/backend"
 
+if [[ -f .env ]]; then
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 # Fetch Turso credentials if not provided
 if [ -z "${TURSO_DATABASE_URL:-}" ]; then
   echo "Fetching Turso Database URL for 'chat-prod'..."
@@ -24,16 +31,9 @@ if [ -z "${TURSO_AUTH_TOKEN:-}" ]; then
   export TURSO_AUTH_TOKEN
 fi
 
-# Configure Auth for Local Dev (Bypass Google Verification)
+# Configure auth for local dev (bypass Google token verification)
 export AUTH_REQUIRED=true
 export AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true
-
-if [[ -f .env ]]; then
-  set -a
-  # shellcheck disable=SC1091
-  source .env
-  set +a
-fi
 
 echo "Starting Backend..."
 echo "  Database: ${TURSO_DATABASE_URL}"
