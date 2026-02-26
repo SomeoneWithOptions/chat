@@ -22,6 +22,7 @@ type ComposerProps = {
   onRemoveAttachment: (fileId: string) => void;
   error: string | null;
   streamWarning: string | null;
+  sendDisabled?: boolean;
 };
 
 const acceptedAttachmentTypes = '.txt,.md,.pdf,.csv,.json';
@@ -53,6 +54,7 @@ export default function Composer({
   onRemoveAttachment,
   error,
   streamWarning,
+  sendDisabled = false,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -65,7 +67,7 @@ export default function Composer({
     el.style.height = `${el.scrollHeight}px`; // expand to fit content
   }, [prompt]);
 
-  const canSend = prompt.trim().length > 0 && !isStreaming && !uploadingAttachments;
+  const canSend = prompt.trim().length > 0 && !isStreaming && !uploadingAttachments && !sendDisabled;
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     const isMobile = window.innerWidth < 768;

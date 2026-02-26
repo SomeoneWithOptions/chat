@@ -17,6 +17,13 @@ type MessageData = {
 type ChatMessageProps = {
   message: MessageData;
   isStreaming?: boolean;
+  isEditing?: boolean;
+  editDraft?: string;
+  disableUserActions?: boolean;
+  onStartEdit?: (messageID: string, content: string) => void;
+  onEditDraftChange?: (value: string) => void;
+  onSaveEdit?: () => void;
+  onCancelEdit?: () => void;
 };
 
 function citationLabel(citation: Citation, index: number): string {
@@ -151,7 +158,17 @@ const markdownComponents: Components = {
   ),
 };
 
-export default function ChatMessage({ message, isStreaming }: ChatMessageProps) {
+export default function ChatMessage({
+  message,
+  isStreaming,
+  isEditing = false,
+  editDraft = '',
+  disableUserActions = false,
+  onStartEdit,
+  onEditDraftChange,
+  onSaveEdit,
+  onCancelEdit,
+}: ChatMessageProps) {
   const isUser = message.role === 'user';
   const renderMarkdown = !isUser;
   const isAssistant = message.role === 'assistant';
@@ -204,6 +221,12 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
     const didCopy = await copyToClipboard(message.content);
     if (didCopy) setCopiedUserMessage(true);
   }
+
+  function handleStartEdit() {
+    onStartEdit?.(message.id, message.content);
+  }
+
+  const canSaveEdit = editDraft.trim().length > 0 && !disableUserActions;
 
   return (
     <div className={`message ${message.role}`}>
@@ -316,7 +339,17 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
             </div>
           )}
 
-          {renderMarkdown ? (
+          {isUser && isEditing ? (
+            <div className="message-user-edit-shell">
+              <textarea
+                className="message-user-edit-textarea"
+                value={editDraft}
+                onChange={(event) => onEditDraftChange?.(event.target.value)}
+                disabled={disableUserActions}
+                aria-label="Edit message"
+              />
+            </div>
+          ) : renderMarkdown ? (
             <div className="message-markdown">
               <ReactMarkdown
                 remarkPlugins={[remarkGfm]}
@@ -347,7 +380,7 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
               type="button"
               className={`message-user-copy-button ${copiedUserMessage ? 'copied' : ''}`}
               onClick={handleCopyUserMessage}
-              disabled={!message.content}
+              disabled={!message.content || isEditing}
               aria-label={copiedUserMessage ? 'Message copied' : 'Copy message'}
               title={copiedUserMessage ? 'Message copied' : 'Copy message'}
             >
@@ -362,6 +395,39 @@ export default function ChatMessage({ message, isStreaming }: ChatMessageProps) 
                 </svg>
               )}
             </button>
+            <button
+              type="button"
+              className={`message-user-edit-button ${isEditing ? 'editing' : ''}`}
+              onClick={handleStartEdit}
+              disabled={disableUserActions || isEditing}
+              aria-label={isEditing ? 'Editing message' : 'Edit message'}
+              title={isEditing ? 'Editing message' : 'Edit message'}
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="M12 20h9" />
+                <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4 12.5-12.5z" />
+              </svg>
+            </button>
+            {isEditing && (
+              <div className="message-user-edit-controls">
+                <button
+                  type="button"
+                  className="message-user-edit-cancel"
+                  onClick={onCancelEdit}
+                  disabled={disableUserActions}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className="message-user-edit-save"
+                  onClick={onSaveEdit}
+                  disabled={!canSaveEdit}
+                >
+                  Save &amp; Resend
+                </button>
+              </div>
+            )}
           </div>
         )}
 

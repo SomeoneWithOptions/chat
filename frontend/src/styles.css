@@ -923,6 +923,9 @@ code {
   right: 0;
   bottom: -32px;
   display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
   justify-content: flex-end;
 }
 
@@ -946,7 +949,33 @@ code {
   height: 14px;
 }
 
+.message-user-edit-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.message-user-edit-button svg {
+  width: 13px;
+  height: 13px;
+}
+
 .message-user-copy-button:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: var(--border-focus);
+  color: var(--text-primary);
+}
+
+.message-user-edit-button:hover:not(:disabled) {
   background: rgba(255, 255, 255, 0.08);
   border-color: var(--border-focus);
   color: var(--text-primary);
@@ -958,7 +987,18 @@ code {
   box-shadow: 0 0 0 2px rgba(0, 166, 226, 0.2);
 }
 
+.message-user-edit-button:focus-visible {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(0, 166, 226, 0.2);
+}
+
 .message-user-copy-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.message-user-edit-button:disabled {
   opacity: 0.5;
   cursor: default;
 }
@@ -967,6 +1007,70 @@ code {
   color: var(--success);
   border-color: rgba(16, 185, 129, 0.38);
   background: rgba(16, 185, 129, 0.12);
+}
+
+.message-user-edit-button.editing {
+  color: var(--border-focus);
+  border-color: rgba(0, 166, 226, 0.45);
+  background: rgba(0, 166, 226, 0.16);
+}
+
+.message-user-edit-controls {
+  display: inline-flex;
+  gap: 8px;
+}
+
+.message-user-edit-cancel,
+.message-user-edit-save {
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: rgba(255, 255, 255, 0.02);
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1;
+  padding: 6px 10px;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.message-user-edit-save {
+  border-color: rgba(0, 166, 226, 0.45);
+  color: var(--text-primary);
+  background: rgba(0, 166, 226, 0.16);
+}
+
+.message-user-edit-cancel:hover:not(:disabled),
+.message-user-edit-save:hover:not(:disabled) {
+  border-color: var(--border-focus);
+  color: var(--text-primary);
+}
+
+.message-user-edit-cancel:disabled,
+.message-user-edit-save:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.message-user-edit-shell {
+  display: flex;
+}
+
+.message-user-edit-textarea {
+  width: 100%;
+  min-height: 88px;
+  resize: vertical;
+  border: 1px solid var(--border-focus);
+  border-radius: var(--radius-md);
+  background: rgba(13, 20, 28, 0.86);
+  color: var(--text-primary);
+  font: inherit;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+
+.message-user-edit-textarea:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(0, 166, 226, 0.22);
 }
 
 .generation-trace {

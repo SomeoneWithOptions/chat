@@ -26,6 +26,7 @@ import (
 var (
 	errInvalidReasoningEffort    = errors.New("invalid reasoning effort")
 	errReasoningUnsupportedModel = errors.New("model does not support reasoning")
+	errEditTargetNotUserMessage  = errors.New("edit target is not a user message")
 )
 
 type Handler struct {
@@ -904,6 +905,7 @@ WHERE user_id = ?;
 
 type chatMessageRequest struct {
 	ConversationID  string   `json:"conversationId"`
+	EditMessageID   string   `json:"editMessageId"`
 	Message         string   `json:"message"`
 	ModelID         string   `json:"modelId"`
 	ReasoningEffort string   `json:"reasoningEffort"`
@@ -921,6 +923,10 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	if strings.TrimSpace(req.Message) == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "message is required")
+		return
+	}
+	if strings.TrimSpace(req.EditMessageID) != "" && strings.TrimSpace(req.ConversationID) == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "conversationId is required when editMessageId is provided")
 		return
 	}
 
@@ -998,6 +1004,35 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	editMessageID := strings.TrimSpace(req.EditMessageID)
+	if editMessageID != "" {
+		editTargetRowID, err := h.resolveConversationMessageRowID(r.Context(), user.ID, conversationID, editMessageID)
+		if err != nil {
+			switch {
+			case errors.Is(err, sql.ErrNoRows):
+				writeError(w, http.StatusNotFound, "message_not_found", "message not found")
+			case errors.Is(err, errEditTargetNotUserMessage):
+				writeError(w, http.StatusBadRequest, "invalid_request", "editMessageId must reference a user message")
+			default:
+				writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve edit target")
+			}
+			return
+		}
+
+		candidates, err := h.listConversationBlobRefsFromMessageRow(r.Context(), user.ID, conversationID, editTargetRowID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "db_error", "failed to load attachment references")
+			return
+		}
+
+		if err := h.deleteConversationMessagesFromRow(r.Context(), user.ID, conversationID, editTargetRowID); err != nil {
+			writeError(w, http.StatusInternalServerError, "db_error", "failed to truncate conversation history")
+			return
+		}
+
+		h.cleanupOrphanedFileBlobs(r.Context(), user.ID, candidates)
+	}
+
 	historyMessages, err := h.listConversationPromptMessages(r.Context(), user.ID, conversationID, maxConversationHistoryMessages)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to load conversation history")
@@ -1051,6 +1086,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		"deepResearch":   deepResearch,
 		"modelId":        modelID,
 		"conversationId": conversationID,
+		"userMessageId":  userMessageID,
 	}
 	if reasoningEffort != "" {
 		metadataEvent["reasoningEffort"] = reasoningEffort
@@ -1554,6 +1590,33 @@ func (h Handler) resolveConversationID(ctx context.Context, userID, requestedCon
 		return "", sql.ErrNoRows
 	}
 	return conversationID, nil
+}
+
+func (h Handler) resolveConversationMessageRowID(ctx context.Context, userID, conversationID, messageID string) (int64, error) {
+	var rowID int64
+	var role string
+	err := h.db.QueryRowContext(ctx, `
+SELECT m.rowid, m.role
+FROM messages m
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.id = ? AND m.conversation_id = ? AND c.user_id = ?
+LIMIT 1;
+`, messageID, conversationID, userID).Scan(&rowID, &role)
+	if err != nil {
+		return 0, err
+	}
+	if role != "user" {
+		return 0, errEditTargetNotUserMessage
+	}
+	return rowID, nil
+}
+
+func (h Handler) deleteConversationMessagesFromRow(ctx context.Context, userID, conversationID string, fromRowID int64) error {
+	_, err := h.db.ExecContext(ctx, `
+DELETE FROM messages
+WHERE conversation_id = ? AND user_id = ? AND rowid >= ?;
+`, conversationID, userID, fromRowID)
+	return err
 }
 
 func (h Handler) listConversationPromptMessages(ctx context.Context, userID, conversationID string, limit int) ([]openrouter.Message, error) {

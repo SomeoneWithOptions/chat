@@ -644,6 +644,9 @@ components:
         conversationId:
           type: string
           description: Existing conversation id. If omitted, the backend creates a new conversation.
+        editMessageId:
+          type: string
+          description: Existing user message id to edit in-place. Requires conversationId; backend deletes this message and all later messages before regenerating.
         message:
           type: string
         modelId:
@@ -764,6 +767,8 @@ components:
         reasoningEffort:
           $ref: '#/components/schemas/ReasoningEffort'
         conversationId:
+          type: string
+        userMessageId:
           type: string
     StreamEventProgress:
       type: object

@@ -215,6 +215,9 @@ describe('Deep research streaming UX', () => {
 
     const sidebar = container.querySelector('aside.sidebar');
     expect(sidebar).not.toBeNull();
+    expect(sidebar).toHaveClass('collapsed');
+
+    await user.click(screen.getByRole('button', { name: /toggle sidebar/i }));
     expect(sidebar).not.toHaveClass('collapsed');
 
     await user.click(screen.getByRole('button', { name: /new conversation/i }));
@@ -609,6 +612,102 @@ describe('Deep research streaming UX', () => {
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: /^stop$/i })).not.toBeInTheDocument();
     });
+  });
+});
+
+describe('User message edit + resend', () => {
+  it('sends editMessageId, truncates future messages, and renders regenerated answer', async () => {
+    const createdConversation: api.Conversation = {
+      id: 'conv-1',
+      title: 'New Chat',
+      createdAt: '2026-02-10T00:00:00Z',
+      updatedAt: '2026-02-10T00:00:00Z',
+    };
+    let persistedMessages: api.ConversationMessage[] = [];
+    listConversationsMock.mockResolvedValue([createdConversation]);
+    listConversationMessagesMock.mockImplementation(async () => persistedMessages);
+
+    let streamCallCount = 0;
+    streamMessageMock.mockImplementation(async (request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      streamCallCount += 1;
+      const nextUserMessageID = streamCallCount === 1 ? 'user-1' : streamCallCount === 2 ? 'user-2' : 'user-3';
+      const assistantContent = streamCallCount === 1 ? 'First answer' : streamCallCount === 2 ? 'Second answer' : 'Edited answer';
+
+      if (request.editMessageId) {
+        const editIndex = persistedMessages.findIndex((message) => message.id === request.editMessageId);
+        persistedMessages = editIndex >= 0 ? persistedMessages.slice(0, editIndex) : persistedMessages;
+      }
+      persistedMessages = [
+        ...persistedMessages,
+        {
+          id: nextUserMessageID,
+          conversationId: createdConversation.id,
+          role: 'user',
+          content: request.message,
+          groundingEnabled: true,
+          deepResearchEnabled: false,
+          citations: [],
+          createdAt: '2026-02-10T00:00:00Z',
+        },
+        {
+          id: `assistant-${streamCallCount}`,
+          conversationId: createdConversation.id,
+          role: 'assistant',
+          content: assistantContent,
+          groundingEnabled: true,
+          deepResearchEnabled: false,
+          citations: [],
+          createdAt: '2026-02-10T00:00:00Z',
+        },
+      ];
+
+      if (streamCallCount === 3) {
+        expect(request.editMessageId).toBe('user-2');
+        expect(request.message).toBe('Second prompt edited');
+        expect(request.conversationId).toBe('conv-1');
+      }
+
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1', userMessageId: nextUserMessageID });
+      onEvent({ type: 'token', delta: assistantContent });
+      onEvent({ type: 'done' });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'First prompt');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+    await screen.findByText('First answer');
+
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Second prompt');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(2);
+    });
+    await screen.findByText('Second answer');
+
+    const editButtons = screen.getAllByRole('button', { name: /edit message/i });
+    await user.click(editButtons[1]);
+
+    const editTextarea = screen.getByRole('textbox', { name: /edit message/i });
+    await user.clear(editTextarea);
+    await user.type(editTextarea, 'Second prompt edited');
+    await user.click(screen.getByRole('button', { name: /save & resend/i }));
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(3);
+    });
+    await screen.findByText('Edited answer');
+
+    expect(screen.getByText('First prompt')).toBeInTheDocument();
+    expect(screen.queryByText('Second answer')).not.toBeInTheDocument();
+    expect(screen.queryByText(/^Second prompt$/)).not.toBeInTheDocument();
+    expect(screen.getByText('Second prompt edited')).toBeInTheDocument();
   });
 });
 

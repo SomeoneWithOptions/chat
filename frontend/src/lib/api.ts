@@ -89,6 +89,7 @@ export type UploadedFile = {
 
 export type ChatRequest = {
   conversationId?: string;
+  editMessageId?: string;
   message: string;
   modelId: string;
   reasoningEffort?: ReasoningEffort;
@@ -121,7 +122,15 @@ export type ThinkingTrace = {
 };
 
 export type StreamEvent =
-  | { type: 'metadata'; grounding: boolean; deepResearch: boolean; modelId: string; reasoningEffort?: ReasoningEffort; conversationId?: string }
+  | {
+      type: 'metadata';
+      grounding: boolean;
+      deepResearch: boolean;
+      modelId: string;
+      reasoningEffort?: ReasoningEffort;
+      conversationId?: string;
+      userMessageId?: string;
+    }
   | {
       type: 'progress';
       phase: ResearchPhase;

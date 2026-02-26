@@ -802,6 +802,9 @@ func TestChatMessagesPersistsConversationAndMessages(t *testing.T) {
 	if !strings.Contains(body, `"conversationId":"`) {
 		t.Fatalf("expected conversationId in metadata event: %s", body)
 	}
+	if !strings.Contains(body, `"userMessageId":"`) {
+		t.Fatalf("expected userMessageId in metadata event: %s", body)
+	}
 
 	var conversationID string
 	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
@@ -841,6 +844,29 @@ ORDER BY rowid ASC;
 	}
 	if messages[1].Role != "assistant" || messages[1].Content != "Hi there" {
 		t.Fatalf("unexpected second message: %+v", messages[1])
+	}
+
+	events := decodeSSEEvents(t, body)
+	if len(events) == 0 || events[0].Type != "metadata" {
+		t.Fatalf("expected first SSE event to be metadata, got %+v", events)
+	}
+	userMessageID, _ := events[0].Data["userMessageId"].(string)
+	if strings.TrimSpace(userMessageID) == "" {
+		t.Fatalf("expected non-empty userMessageId in metadata event: %+v", events[0].Data)
+	}
+
+	var persistedFirstUserMessageID string
+	if err := db.QueryRow(`
+SELECT id
+FROM messages
+WHERE conversation_id = ? AND role = 'user'
+ORDER BY rowid ASC
+LIMIT 1;
+`, conversationID).Scan(&persistedFirstUserMessageID); err != nil {
+		t.Fatalf("query first user message id: %v", err)
+	}
+	if userMessageID != persistedFirstUserMessageID {
+		t.Fatalf("expected metadata userMessageId %q to match persisted user id %q", userMessageID, persistedFirstUserMessageID)
 	}
 
 	var lastUsedModelID sql.NullString
@@ -1344,6 +1370,262 @@ func TestChatMessagesIncludesConversationHistoryInPrompt(t *testing.T) {
 	current := secondPrompt[len(secondPrompt)-1]
 	if current.Role != "user" || current.Content != "What fruit do I love?" {
 		t.Fatalf("unexpected current message in second prompt: %+v", current)
+	}
+}
+
+func TestChatMessagesEditMessageTruncatesFutureAndRegenerates(t *testing.T) {
+	capturedRequests := make([]openrouter.StreamRequest, 0, 4)
+	streamer := stubStreamer{
+		tokens: []string{"Ack"},
+		onRequest: func(req openrouter.StreamRequest) {
+			capturedRequests = append(capturedRequests, req)
+		},
+	}
+	handler, db := newTestHandler(t, streamer)
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Turn one","modelId":"openrouter/free"}`),
+	)
+	firstReq = requestWithSessionUser(firstReq, user)
+	firstResp := httptest.NewRecorder()
+	handler.ChatMessages(firstResp, firstReq)
+	if firstResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, firstResp.Code, firstResp.Body.String())
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","message":"Turn two","modelId":"openrouter/free"}`),
+	)
+	secondReq = requestWithSessionUser(secondReq, user)
+	secondResp := httptest.NewRecorder()
+	handler.ChatMessages(secondResp, secondReq)
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, secondResp.Code, secondResp.Body.String())
+	}
+
+	var turnTwoMessageID string
+	if err := db.QueryRow(`
+SELECT id
+FROM messages
+WHERE conversation_id = ? AND role = 'user'
+ORDER BY rowid ASC
+LIMIT 1 OFFSET 1;
+`, conversationID).Scan(&turnTwoMessageID); err != nil {
+		t.Fatalf("query second user message id: %v", err)
+	}
+
+	editReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","editMessageId":"`+turnTwoMessageID+`","message":"Turn two edited","modelId":"openrouter/free"}`),
+	)
+	editReq = requestWithSessionUser(editReq, user)
+	editResp := httptest.NewRecorder()
+	handler.ChatMessages(editResp, editReq)
+	if editResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, editResp.Code, editResp.Body.String())
+	}
+
+	if len(capturedRequests) != 3 {
+		t.Fatalf("expected 3 streamed requests, got %d", len(capturedRequests))
+	}
+
+	thirdPrompt := capturedRequests[2].Messages
+	historyStart := -1
+	for i, message := range thirdPrompt {
+		if message.Role == "user" && message.Content == "Turn one" {
+			historyStart = i
+			break
+		}
+	}
+	if historyStart == -1 {
+		t.Fatalf("expected turn one in edited prompt history, got %+v", thirdPrompt)
+	}
+	if historyStart+1 >= len(thirdPrompt) || thirdPrompt[historyStart+1].Role != "assistant" || thirdPrompt[historyStart+1].Content != "Ack" {
+		t.Fatalf("expected turn one assistant history in edited prompt, got %+v", thirdPrompt)
+	}
+	if thirdPrompt[len(thirdPrompt)-1].Role != "user" || thirdPrompt[len(thirdPrompt)-1].Content != "Turn two edited" {
+		t.Fatalf("expected edited user prompt at end, got %+v", thirdPrompt[len(thirdPrompt)-1])
+	}
+	for _, promptMessage := range thirdPrompt {
+		if promptMessage.Content == "Turn two" {
+			t.Fatalf("expected old edited message to be removed from prompt history, got %+v", thirdPrompt)
+		}
+	}
+
+	rows, err := db.Query(`
+SELECT role, content
+FROM messages
+WHERE conversation_id = ?
+ORDER BY rowid ASC;
+`, conversationID)
+	if err != nil {
+		t.Fatalf("query persisted messages: %v", err)
+	}
+	defer rows.Close()
+
+	type storedMessage struct {
+		Role    string
+		Content string
+	}
+	persisted := make([]storedMessage, 0, 4)
+	for rows.Next() {
+		var message storedMessage
+		if err := rows.Scan(&message.Role, &message.Content); err != nil {
+			t.Fatalf("scan persisted message: %v", err)
+		}
+		persisted = append(persisted, message)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("iterate persisted messages: %v", err)
+	}
+
+	if len(persisted) != 4 {
+		t.Fatalf("expected 4 persisted messages after edit, got %d (%+v)", len(persisted), persisted)
+	}
+	if persisted[0].Role != "user" || persisted[0].Content != "Turn one" {
+		t.Fatalf("unexpected first persisted message: %+v", persisted[0])
+	}
+	if persisted[1].Role != "assistant" || persisted[1].Content != "Ack" {
+		t.Fatalf("unexpected second persisted message: %+v", persisted[1])
+	}
+	if persisted[2].Role != "user" || persisted[2].Content != "Turn two edited" {
+		t.Fatalf("unexpected third persisted message: %+v", persisted[2])
+	}
+	if persisted[3].Role != "assistant" || persisted[3].Content != "Ack" {
+		t.Fatalf("unexpected fourth persisted message: %+v", persisted[3])
+	}
+}
+
+func TestChatMessagesEditMessageRequiresConversationID(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Should not stream"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"editMessageId":"message-1","message":"Edited","modelId":"openrouter/free"}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusBadRequest, resp.Code, resp.Body.String())
+	}
+	if !strings.Contains(resp.Body.String(), "conversationId is required when editMessageId is provided") {
+		t.Fatalf("expected missing conversationId error, got %s", resp.Body.String())
+	}
+}
+
+func TestChatMessagesEditMessageRejectsNonUserTarget(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Ack"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	initialReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Hello","modelId":"openrouter/free"}`),
+	)
+	initialReq = requestWithSessionUser(initialReq, user)
+	initialResp := httptest.NewRecorder()
+	handler.ChatMessages(initialResp, initialReq)
+	if initialResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, initialResp.Code, initialResp.Body.String())
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	var assistantMessageID string
+	if err := db.QueryRow(`
+SELECT id
+FROM messages
+WHERE conversation_id = ? AND role = 'assistant'
+ORDER BY rowid ASC
+LIMIT 1;
+`, conversationID).Scan(&assistantMessageID); err != nil {
+		t.Fatalf("query assistant message id: %v", err)
+	}
+
+	editReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","editMessageId":"`+assistantMessageID+`","message":"Edited","modelId":"openrouter/free"}`),
+	)
+	editReq = requestWithSessionUser(editReq, user)
+	editResp := httptest.NewRecorder()
+	handler.ChatMessages(editResp, editReq)
+
+	if editResp.Code != http.StatusBadRequest {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusBadRequest, editResp.Code, editResp.Body.String())
+	}
+	if !strings.Contains(editResp.Body.String(), "editMessageId must reference a user message") {
+		t.Fatalf("expected non-user target error, got %s", editResp.Body.String())
+	}
+}
+
+func TestChatMessagesEditMessageReturnsNotFoundForUnknownMessageID(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{tokens: []string{"Ack"}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	initialReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Hello","modelId":"openrouter/free"}`),
+	)
+	initialReq = requestWithSessionUser(initialReq, user)
+	initialResp := httptest.NewRecorder()
+	handler.ChatMessages(initialResp, initialReq)
+	if initialResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, initialResp.Code, initialResp.Body.String())
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	editReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","editMessageId":"does-not-exist","message":"Edited","modelId":"openrouter/free"}`),
+	)
+	editReq = requestWithSessionUser(editReq, user)
+	editResp := httptest.NewRecorder()
+	handler.ChatMessages(editResp, editReq)
+
+	if editResp.Code != http.StatusNotFound {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusNotFound, editResp.Code, editResp.Body.String())
 	}
 }
 
@@ -2245,6 +2527,98 @@ WHERE mf.file_id = ? AND m.role = 'user';
 	}
 	if !strings.Contains(capturedRequest.Messages[1].Content, "Attached facts go here.") {
 		t.Fatalf("expected attachment text in prompt, got: %q", capturedRequest.Messages[1].Content)
+	}
+}
+
+func TestChatMessagesEditMessageCleansOrphanedAttachmentBlobAndMetadata(t *testing.T) {
+	store := &stubFileStore{objects: make(map[string][]byte)}
+	handler, db := newTestHandlerWithFileStore(t, stubStreamer{tokens: []string{"ok"}}, store)
+	t.Cleanup(func() { _ = db.Close() })
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	storagePath := "chat-uploads/users/user-1/file-1/notes.md"
+	store.objects[storagePath] = []byte("blob-data")
+	if _, err := db.Exec(`
+INSERT INTO files (
+  id,
+  user_id,
+  filename,
+  media_type,
+  size_bytes,
+  storage_backend,
+  storage_path,
+  extracted_text
+)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+`, "file-1", user.ID, "notes.md", "text/markdown", 42, "gcs", storagePath, "Attached facts go here."); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	firstReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Original with file","modelId":"openrouter/free","fileIds":["file-1"]}`),
+	)
+	firstReq = requestWithSessionUser(firstReq, user)
+	firstResp := httptest.NewRecorder()
+	handler.ChatMessages(firstResp, firstReq)
+	if firstResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, firstResp.Code, firstResp.Body.String())
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	secondReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","message":"Second turn","modelId":"openrouter/free"}`),
+	)
+	secondReq = requestWithSessionUser(secondReq, user)
+	secondResp := httptest.NewRecorder()
+	handler.ChatMessages(secondResp, secondReq)
+	if secondResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, secondResp.Code, secondResp.Body.String())
+	}
+
+	var originalUserMessageID string
+	if err := db.QueryRow(`
+SELECT id
+FROM messages
+WHERE conversation_id = ? AND role = 'user'
+ORDER BY rowid ASC
+LIMIT 1;
+`, conversationID).Scan(&originalUserMessageID); err != nil {
+		t.Fatalf("query original user message id: %v", err)
+	}
+
+	editReq := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"conversationId":"`+conversationID+`","editMessageId":"`+originalUserMessageID+`","message":"Original edited","modelId":"openrouter/free"}`),
+	)
+	editReq = requestWithSessionUser(editReq, user)
+	editResp := httptest.NewRecorder()
+	handler.ChatMessages(editResp, editReq)
+	if editResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, editResp.Code, editResp.Body.String())
+	}
+
+	var fileCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM files WHERE id = ?;`, "file-1").Scan(&fileCount); err != nil {
+		t.Fatalf("count files: %v", err)
+	}
+	if fileCount != 0 {
+		t.Fatalf("expected orphaned file metadata deletion, got %d rows", fileCount)
+	}
+
+	if len(store.deletedPaths) != 1 || store.deletedPaths[0] != storagePath {
+		t.Fatalf("expected blob delete path %q, got %+v", storagePath, store.deletedPaths)
 	}
 }
 

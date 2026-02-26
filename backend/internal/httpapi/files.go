@@ -427,6 +427,34 @@ WHERE c.user_id = ? AND c.id = ? AND f.user_id = ?;
 	return refs, nil
 }
 
+func (h Handler) listConversationBlobRefsFromMessageRow(ctx context.Context, userID, conversationID string, fromMessageRowID int64) ([]storedBlobRef, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT DISTINCT f.id, f.storage_path
+FROM files f
+JOIN message_files mf ON mf.file_id = f.id
+JOIN messages m ON m.id = mf.message_id
+JOIN conversations c ON c.id = m.conversation_id
+WHERE c.user_id = ? AND c.id = ? AND f.user_id = ? AND m.rowid >= ?;
+`, userID, conversationID, userID, fromMessageRowID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	refs := make([]storedBlobRef, 0, 8)
+	for rows.Next() {
+		var ref storedBlobRef
+		if err := rows.Scan(&ref.FileID, &ref.StoragePath); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
 func (h Handler) listAllUserConversationBlobRefs(ctx context.Context, userID string) ([]storedBlobRef, error) {
 	rows, err := h.db.QueryContext(ctx, `
 SELECT DISTINCT f.id, f.storage_path

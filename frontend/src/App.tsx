@@ -250,6 +250,8 @@ export default function App() {
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<string | null>(null);
+  const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
+  const [editingDraft, setEditingDraft] = useState('');
 
   // ─── Conversation State ───────────────────────
   const [conversations, setConversations] = useState<Conversation[]>([]);
@@ -383,6 +385,8 @@ export default function App() {
       setMessages([]);
       setStreamWarning(null);
       setActiveAssistantMessageId(null);
+      setEditingMessageId(null);
+      setEditingDraft('');
       setPendingAttachments([]);
       setUploadingAttachments(false);
       return;
@@ -433,6 +437,8 @@ export default function App() {
       });
       if (availableConversations.length === 0 && !isStreamingRef.current) {
         setMessages([]);
+        setEditingMessageId(null);
+        setEditingDraft('');
       }
     } catch (err) {
       if (isNotFoundError(err)) {
@@ -440,6 +446,8 @@ export default function App() {
         setConversations([]);
         setActiveConversationId(null);
         setMessages([]);
+        setEditingMessageId(null);
+        setEditingDraft('');
         return;
       }
       setError((err as Error).message);
@@ -459,6 +467,8 @@ export default function App() {
       if (!isStreaming) {
         setMessages([]);
         setActiveAssistantMessageId(null);
+        setEditingMessageId(null);
+        setEditingDraft('');
       }
       return;
     }
@@ -483,6 +493,8 @@ export default function App() {
           })),
         );
         setActiveAssistantMessageId(null);
+        setEditingMessageId(null);
+        setEditingDraft('');
       } catch (err) {
         if (isConversationNotFoundError(err)) {
           await refreshConversations();
@@ -492,6 +504,8 @@ export default function App() {
           setConversationAPISupported(false);
           setConversations([]);
           setActiveConversationId(null);
+          setEditingMessageId(null);
+          setEditingDraft('');
           return;
         }
         if (!cancelled) setError((err as Error).message);
@@ -629,6 +643,8 @@ export default function App() {
       setMessages([]);
       setStreamWarning(null);
       setActiveAssistantMessageId(null);
+      setEditingMessageId(null);
+      setEditingDraft('');
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
@@ -703,6 +719,8 @@ export default function App() {
     setActiveConversationId(null);
     setMessages([]);
     setActiveAssistantMessageId(null);
+    setEditingMessageId(null);
+    setEditingDraft('');
   }
 
   async function handleDeleteConversation(conversationId: string) {
@@ -716,6 +734,8 @@ export default function App() {
     if (activeConversationId === conversationId) {
       setMessages([]);
       setActiveAssistantMessageId(null);
+      setEditingMessageId(null);
+      setEditingDraft('');
     }
 
     try {
@@ -728,6 +748,8 @@ export default function App() {
         setConversations([]);
         setActiveConversationId(null);
         setMessages([]);
+        setEditingMessageId(null);
+        setEditingDraft('');
         return;
       }
       setError((err as Error).message);
@@ -750,12 +772,16 @@ export default function App() {
       setActiveConversationId(null);
       setMessages([]);
       setActiveAssistantMessageId(null);
+      setEditingMessageId(null);
+      setEditingDraft('');
     } catch (err) {
       if (isNotFoundError(err)) {
         setConversationAPISupported(false);
         setConversations([]);
         setActiveConversationId(null);
         setMessages([]);
+        setEditingMessageId(null);
+        setEditingDraft('');
         return;
       }
       setError((err as Error).message);
@@ -793,38 +819,18 @@ export default function App() {
     streamAbortControllerRef.current?.abort();
   }
 
-  async function handleSend(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!prompt.trim() || isStreaming || uploadingAttachments) return;
-
-    const attachmentIDs = pendingAttachments.map((a) => a.id);
-    const userMessage: MessageData = {
-      id: crypto.randomUUID(),
-      role: 'user',
-      content: prompt.trim(),
-      reasoningContent: '',
-      modelId: selectedModel,
-      usage: null,
-      citations: [],
-    };
-    const assistantMessage: MessageData = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-      reasoningContent: '',
-      thinkingTrace: null,
-      modelId: selectedModel,
-      usage: null,
-      citations: [],
-    };
-
-    setMessages((existing) => [...existing, userMessage, assistantMessage]);
-    setPrompt('');
+  async function submitMessage(options: {
+    content: string;
+    editMessageId?: string;
+    attachmentIDs: string[];
+    optimisticUserMessageID: string;
+    assistantMessageID: string;
+  }) {
     setIsStreaming(true);
     shouldAutoScrollRef.current = true;
     setStreamWarning(null);
     setError(null);
-    setActiveAssistantMessageId(assistantMessage.id);
+    setActiveAssistantMessageId(options.assistantMessageID);
 
     let resolvedConversationID = activeConversationId;
     const abortController = new AbortController();
@@ -835,19 +841,26 @@ export default function App() {
       await streamMessage(
         {
           conversationId: activeConversationId ?? undefined,
-          message: userMessage.content,
+          editMessageId: options.editMessageId,
+          message: options.content,
           modelId: selectedModel,
           reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined,
           grounding,
           deepResearch,
-          fileIds: attachmentIDs.length > 0 ? attachmentIDs : undefined,
+          fileIds: options.attachmentIDs.length > 0 ? options.attachmentIDs : undefined,
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
             setMessages((existing) =>
-              existing.map((m) =>
-                m.id === assistantMessage.id ? { ...m, modelId: eventData.modelId } : m,
-              ),
+              existing.map((m) => {
+                if (m.id === options.assistantMessageID) {
+                  return { ...m, modelId: eventData.modelId };
+                }
+                if (eventData.userMessageId && m.id === options.optimisticUserMessageID) {
+                  return { ...m, id: eventData.userMessageId };
+                }
+                return m;
+              }),
             );
             if (eventData.conversationId) {
               resolvedConversationID = eventData.conversationId;
@@ -877,7 +890,7 @@ export default function App() {
             };
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === assistantMessage.id
+                m.id === options.assistantMessageID
                   ? { ...m, thinkingTrace: appendThinkingTraceEntry(m.thinkingTrace, traceEntry) }
                   : m,
               ),
@@ -888,7 +901,7 @@ export default function App() {
           if (eventData.type === 'error') {
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === assistantMessage.id
+                m.id === options.assistantMessageID
                   ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped due to an error') }
                   : m,
               ),
@@ -898,14 +911,14 @@ export default function App() {
           }
           if (eventData.type === 'citations') {
             setMessages((existing) =>
-              existing.map((m) => m.id === assistantMessage.id ? { ...m, citations: eventData.citations } : m),
+              existing.map((m) => m.id === options.assistantMessageID ? { ...m, citations: eventData.citations } : m),
             );
             return;
           }
           if (eventData.type === 'done') {
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === assistantMessage.id
+                m.id === options.assistantMessageID
                   ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Thought process complete') }
                   : m,
               ),
@@ -915,7 +928,7 @@ export default function App() {
           if (eventData.type === 'token') {
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === assistantMessage.id ? { ...m, content: `${m.content}${eventData.delta}` } : m,
+                m.id === options.assistantMessageID ? { ...m, content: `${m.content}${eventData.delta}` } : m,
               ),
             );
             return;
@@ -923,7 +936,7 @@ export default function App() {
           if (eventData.type === 'reasoning') {
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === assistantMessage.id ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${eventData.delta}` } : m,
+                m.id === options.assistantMessageID ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${eventData.delta}` } : m,
               ),
             );
             return;
@@ -931,7 +944,7 @@ export default function App() {
           if (eventData.type === 'usage') {
             setMessages((existing) =>
               existing.map((m) => (
-                m.id === assistantMessage.id ? { ...m, usage: eventData.usage } : m
+                m.id === options.assistantMessageID ? { ...m, usage: eventData.usage } : m
               )),
             );
           }
@@ -941,13 +954,15 @@ export default function App() {
       if (resolvedConversationID && conversationAPISupported) {
         await refreshConversations(resolvedConversationID);
       }
-      setPendingAttachments([]);
+      if (options.attachmentIDs.length > 0) {
+        setPendingAttachments([]);
+      }
     } catch (err) {
       if (isAbortError(err)) {
         setStreamWarning('Response stopped.');
         setMessages((existing) =>
           existing.map((m) =>
-            m.id === assistantMessage.id
+            m.id === options.assistantMessageID
               ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped by user') }
               : m,
           ),
@@ -956,7 +971,7 @@ export default function App() {
       }
       setMessages((existing) =>
         existing.map((m) =>
-          m.id === assistantMessage.id
+          m.id === options.assistantMessageID
             ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped due to an error') }
             : m,
         ),
@@ -968,6 +983,110 @@ export default function App() {
       }
       setIsStreaming(false);
     }
+  }
+
+  async function handleSend(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!prompt.trim() || isStreaming || uploadingAttachments || editingMessageId !== null) return;
+
+    const attachmentIDs = pendingAttachments.map((a) => a.id);
+    const userMessage: MessageData = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: prompt.trim(),
+      reasoningContent: '',
+      modelId: selectedModel,
+      usage: null,
+      citations: [],
+    };
+    const assistantMessage: MessageData = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      reasoningContent: '',
+      thinkingTrace: null,
+      modelId: selectedModel,
+      usage: null,
+      citations: [],
+    };
+
+    setMessages((existing) => [...existing, userMessage, assistantMessage]);
+    setPrompt('');
+
+    await submitMessage({
+      content: userMessage.content,
+      attachmentIDs,
+      optimisticUserMessageID: userMessage.id,
+      assistantMessageID: assistantMessage.id,
+    });
+  }
+
+  function handleStartEditMessage(messageID: string, content: string) {
+    if (isStreaming || uploadingAttachments) return;
+    setError(null);
+    setEditingMessageId(messageID);
+    setEditingDraft(content);
+  }
+
+  function handleCancelEditMessage() {
+    if (isStreaming) return;
+    setEditingMessageId(null);
+    setEditingDraft('');
+  }
+
+  async function handleSaveEditedMessage() {
+    if (!editingMessageId || !editingDraft.trim() || isStreaming || uploadingAttachments) return;
+    if (!activeConversationId) {
+      setError('Cannot edit a message without an active conversation.');
+      return;
+    }
+
+    const editTargetID = editingMessageId;
+    const targetMessageIndex = messages.findIndex((message) => message.id === editTargetID && message.role === 'user');
+    if (targetMessageIndex === -1) {
+      setEditingMessageId(null);
+      setEditingDraft('');
+      setError('Selected message is no longer available for editing.');
+      return;
+    }
+
+    const editedContent = editingDraft.trim();
+    const userMessage: MessageData = {
+      id: crypto.randomUUID(),
+      role: 'user',
+      content: editedContent,
+      reasoningContent: '',
+      modelId: selectedModel,
+      usage: null,
+      citations: [],
+    };
+    const assistantMessage: MessageData = {
+      id: crypto.randomUUID(),
+      role: 'assistant',
+      content: '',
+      reasoningContent: '',
+      thinkingTrace: null,
+      modelId: selectedModel,
+      usage: null,
+      citations: [],
+    };
+
+    setMessages((existing) => {
+      const editIndex = existing.findIndex((message) => message.id === editTargetID && message.role === 'user');
+      if (editIndex === -1) return existing;
+      return [...existing.slice(0, editIndex), userMessage, assistantMessage];
+    });
+    setEditingMessageId(null);
+    setEditingDraft('');
+    setStreamWarning(null);
+
+    await submitMessage({
+      content: editedContent,
+      editMessageId: editTargetID,
+      attachmentIDs: [],
+      optimisticUserMessageID: userMessage.id,
+      assistantMessageID: assistantMessage.id,
+    });
   }
 
   // ─── Loading Screen ───────────────────────────
@@ -1114,11 +1233,23 @@ export default function App() {
 
           {messages.map((message) => {
             const isActiveAssistant = message.id === activeAssistantMessageId;
+            const isEditingThisMessage = message.role === 'user' && editingMessageId === message.id;
+            const disableUserActions =
+              isStreaming
+              || uploadingAttachments
+              || (editingMessageId !== null && editingMessageId !== message.id);
             return (
               <ChatMessage
                 key={message.id}
                 message={message}
                 isStreaming={isStreaming && isActiveAssistant}
+                isEditing={isEditingThisMessage}
+                editDraft={isEditingThisMessage ? editingDraft : ''}
+                disableUserActions={disableUserActions}
+                onStartEdit={handleStartEditMessage}
+                onEditDraftChange={setEditingDraft}
+                onSaveEdit={() => void handleSaveEditedMessage()}
+                onCancelEdit={handleCancelEditMessage}
               />
             );
           })}
@@ -1146,6 +1277,7 @@ export default function App() {
           onRemoveAttachment={handleRemoveAttachment}
           error={error}
           streamWarning={streamWarning}
+          sendDisabled={editingMessageId !== null}
         />
       </div>
     </div>
