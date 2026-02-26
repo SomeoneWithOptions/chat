@@ -71,7 +71,7 @@ Expected env vars in the env file:
 - `TURSO_AUTH_TOKEN`
 - `OPENROUTER_API_KEY`
 - `BRAVE_API_KEY`
-- `OPENROUTER_FREE_TIER_DEFAULT_MODEL`
+- `OPENROUTER_FREE_TIER_DEFAULT_MODEL` (first-run/default fallback model; request-selected model is used when provided)
 - `LOCAL_UPLOAD_DIR`
 - `DEEP_RESEARCH_TIMEOUT_SECONDS`
 

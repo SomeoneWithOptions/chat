@@ -41,10 +41,13 @@ func (h Handler) runResearchOrchestrator(
 	profile research.ModeProfile,
 	question string,
 	timeSensitive bool,
+	plannerModelID string,
+	plannerReasoningEffort string,
 	onProgress func(research.Progress),
 ) (research.OrchestratorResult, error) {
 	cfg := h.buildResearchConfig(profile)
-	planner := research.NewJSONPlanner(h.researchPlannerResponder)
+	plannerResponder := newOpenRouterPlannerResponder(h.openrouter, plannerModelID, plannerReasoningEffort)
+	planner := research.NewJSONPlanner(plannerResponder)
 	orchestrator := research.NewOrchestrator(h.grounding, planner, h.researchReader, cfg)
 	result, err := orchestrator.Run(ctx, question, timeSensitive, onProgress)
 

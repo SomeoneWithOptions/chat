@@ -10,15 +10,20 @@ import (
 )
 
 type openRouterPlannerResponder struct {
-	streamer chatStreamer
-	modelID  string
+	streamer        chatStreamer
+	modelID         string
+	reasoningEffort string
 }
 
-func newOpenRouterPlannerResponder(streamer chatStreamer, modelID string) research.PromptResponder {
+func newOpenRouterPlannerResponder(streamer chatStreamer, modelID, reasoningEffort string) research.PromptResponder {
 	if streamer == nil || strings.TrimSpace(modelID) == "" {
 		return nil
 	}
-	return openRouterPlannerResponder{streamer: streamer, modelID: strings.TrimSpace(modelID)}
+	return openRouterPlannerResponder{
+		streamer:        streamer,
+		modelID:         strings.TrimSpace(modelID),
+		reasoningEffort: strings.TrimSpace(reasoningEffort),
+	}
 }
 
 func (r openRouterPlannerResponder) Respond(ctx context.Context, prompt string) (string, error) {
@@ -38,7 +43,7 @@ func (r openRouterPlannerResponder) Respond(ctx context.Context, prompt string) 
 				},
 				{Role: "user", Content: prompt},
 			},
-			Reasoning: &openrouter.ReasoningConfig{Effort: "low"},
+			Reasoning: openRouterReasoningConfig(r.reasoningEffort),
 		},
 		nil,
 		func(delta string) error {

@@ -37,7 +37,6 @@ type Handler struct {
 	openrouter               chatStreamer
 	grounding                groundingSearcher
 	researchReader           research.Reader
-	researchPlannerResponder research.PromptResponder
 	models                   modelCataloger
 	files                    fileObjectStore
 }
@@ -1104,6 +1103,8 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		req.Message,
 		grounding,
 		timeSensitive,
+		modelID,
+		plannerReasoningEffort(reasoningEffort),
 		func(progress research.Progress) {
 			traceCollector.AppendProgress(progress)
 			_ = writeSSEEvent(w, progressEventData(progress))
@@ -1301,6 +1302,8 @@ func (h Handler) resolveGroundingContext(
 	ctx context.Context,
 	message string,
 	enabled, timeSensitive bool,
+	plannerModelID string,
+	plannerReasoningEffort string,
 	onProgress func(research.Progress),
 ) ([]citationResponse, string) {
 	if !enabled {
@@ -1308,7 +1311,15 @@ func (h Handler) resolveGroundingContext(
 	}
 
 	if h.cfg.AgenticResearchChatEnabled {
-		result, err := h.runResearchOrchestrator(ctx, research.ModeChat, message, timeSensitive, onProgress)
+		result, err := h.runResearchOrchestrator(
+			ctx,
+			research.ModeChat,
+			message,
+			timeSensitive,
+			plannerModelID,
+			plannerReasoningEffort,
+			onProgress,
+		)
 		if err == nil {
 			citations := convertResearchCitations(result.Citations, maxGroundingResults)
 			warning := researchWarning(result)
@@ -1319,6 +1330,13 @@ func (h Handler) resolveGroundingContext(
 	}
 
 	return h.resolveGroundingContextLegacy(ctx, message, enabled, timeSensitive, onProgress)
+}
+
+func plannerReasoningEffort(finalReasoningEffort string) string {
+	if strings.TrimSpace(finalReasoningEffort) == "" {
+		return ""
+	}
+	return "medium"
 }
 
 func (h Handler) resolveGroundingContextLegacy(

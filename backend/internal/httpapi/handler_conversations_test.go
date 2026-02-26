@@ -1297,6 +1297,116 @@ WHERE user_id = ? AND model_id = ? AND mode = ?;
 	}
 }
 
+func TestChatMessagesGroundingUsesSelectedModelForPlannerAndFinalGeneration(t *testing.T) {
+	capturedRequests := make([]openrouter.StreamRequest, 0, 8)
+	streamer := stubStreamer{
+		tokens: []string{`{"nextAction":"search_more","queries":["latest official update"],"coverageGaps":[],"targetSourceTypes":["official docs"],"confidence":0.5,"reason":"need more corroboration"}`},
+		onRequest: func(req openrouter.StreamRequest) {
+			capturedRequests = append(capturedRequests, req)
+		},
+	}
+	handler, db := newTestHandler(t, streamer)
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.ChatResearchMaxLoops = 1
+	handler.cfg.ChatResearchMaxSearchQ = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/one", Title: "Example One", Snippet: "Grounding snippet."},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	selectedModelID := "openai/gpt-4o-mini"
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, selectedModelID)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Ground this response","modelId":"`+selectedModelID+`","grounding":true}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	plannerRequests := filterPlannerRequests(capturedRequests)
+	generationRequests := filterGenerationRequests(capturedRequests)
+	if len(plannerRequests) == 0 {
+		t.Fatalf("expected planner requests, got %+v", capturedRequests)
+	}
+	if len(generationRequests) != 1 {
+		t.Fatalf("expected 1 final generation request, got %d", len(generationRequests))
+	}
+
+	for _, streamed := range capturedRequests {
+		if streamed.Model != selectedModelID {
+			t.Fatalf("expected streamed model %q, got %q", selectedModelID, streamed.Model)
+		}
+	}
+	for _, plannerRequest := range plannerRequests {
+		if plannerRequest.Reasoning == nil || plannerRequest.Reasoning.Effort != "medium" {
+			t.Fatalf("expected planner reasoning effort medium, got %+v", plannerRequest.Reasoning)
+		}
+	}
+}
+
+func TestChatMessagesDeepResearchUsesSelectedModelForPlannerAndFinalGeneration(t *testing.T) {
+	capturedRequests := make([]openrouter.StreamRequest, 0, 8)
+	streamer := stubStreamer{
+		tokens: []string{`{"nextAction":"search_more","queries":["latest official update"],"coverageGaps":[],"targetSourceTypes":["official docs"],"confidence":0.5,"reason":"need more corroboration"}`},
+		onRequest: func(req openrouter.StreamRequest) {
+			capturedRequests = append(capturedRequests, req)
+		},
+	}
+	handler, db := newTestHandler(t, streamer)
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.DeepResearchMaxLoops = 1
+	handler.cfg.DeepResearchMaxSearchQ = 1
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/one", Title: "Example One", Snippet: "Grounding snippet."},
+		},
+	}
+
+	user := session.User{ID: "user-1"}
+	selectedModelID := "openai/gpt-4o-mini"
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, selectedModelID)
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/chat/messages", strings.NewReader(`{"message":"Research this","modelId":"`+selectedModelID+`","deepResearch":true}`))
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+
+	plannerRequests := filterPlannerRequests(capturedRequests)
+	generationRequests := filterGenerationRequests(capturedRequests)
+	if len(plannerRequests) == 0 {
+		t.Fatalf("expected planner requests, got %+v", capturedRequests)
+	}
+	if len(generationRequests) != 1 {
+		t.Fatalf("expected 1 final generation request, got %d", len(generationRequests))
+	}
+
+	for _, streamed := range capturedRequests {
+		if streamed.Model != selectedModelID {
+			t.Fatalf("expected streamed model %q, got %q", selectedModelID, streamed.Model)
+		}
+	}
+	for _, plannerRequest := range plannerRequests {
+		if plannerRequest.Reasoning == nil || plannerRequest.Reasoning.Effort != "medium" {
+			t.Fatalf("expected planner reasoning effort medium, got %+v", plannerRequest.Reasoning)
+		}
+	}
+}
+
 func TestChatMessagesIncludesConversationHistoryInPrompt(t *testing.T) {
 	capturedRequests := make([]openrouter.StreamRequest, 0, 2)
 	streamer := stubStreamer{
@@ -1344,11 +1454,12 @@ func TestChatMessagesIncludesConversationHistoryInPrompt(t *testing.T) {
 	if secondResp.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, secondResp.Code, secondResp.Body.String())
 	}
-	if len(capturedRequests) != 2 {
-		t.Fatalf("expected 2 streamed requests, got %d", len(capturedRequests))
+	generationRequests := filterGenerationRequests(capturedRequests)
+	if len(generationRequests) != 2 {
+		t.Fatalf("expected 2 generation requests, got %d", len(generationRequests))
 	}
 
-	secondPrompt := capturedRequests[1].Messages
+	secondPrompt := generationRequests[1].Messages
 	if len(secondPrompt) < 4 {
 		t.Fatalf("expected history messages in second prompt, got %+v", secondPrompt)
 	}
@@ -1440,11 +1551,12 @@ LIMIT 1 OFFSET 1;
 		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, editResp.Code, editResp.Body.String())
 	}
 
-	if len(capturedRequests) != 3 {
-		t.Fatalf("expected 3 streamed requests, got %d", len(capturedRequests))
+	generationRequests := filterGenerationRequests(capturedRequests)
+	if len(generationRequests) != 3 {
+		t.Fatalf("expected 3 generation requests, got %d", len(generationRequests))
 	}
 
-	thirdPrompt := capturedRequests[2].Messages
+	thirdPrompt := generationRequests[2].Messages
 	historyStart := -1
 	for i, message := range thirdPrompt {
 		if message.Role == "user" && message.Content == "Turn one" {
@@ -2910,6 +3022,36 @@ func assertContainsPhaseInOrder(t *testing.T, phases []string, phase string, aft
 	}
 	t.Fatalf("expected phase %q in %+v", phase, phases)
 	return -1
+}
+
+func filterPlannerRequests(requests []openrouter.StreamRequest) []openrouter.StreamRequest {
+	filtered := make([]openrouter.StreamRequest, 0, len(requests))
+	for _, request := range requests {
+		if !isPlannerRequest(request) {
+			continue
+		}
+		filtered = append(filtered, request)
+	}
+	return filtered
+}
+
+func filterGenerationRequests(requests []openrouter.StreamRequest) []openrouter.StreamRequest {
+	filtered := make([]openrouter.StreamRequest, 0, len(requests))
+	for _, request := range requests {
+		if isPlannerRequest(request) {
+			continue
+		}
+		filtered = append(filtered, request)
+	}
+	return filtered
+}
+
+func isPlannerRequest(request openrouter.StreamRequest) bool {
+	if len(request.Messages) == 0 {
+		return false
+	}
+	first := request.Messages[0]
+	return first.Role == "system" && strings.Contains(first.Content, "You are a research planner.")
 }
 
 func pointerToInt(value int) *int {

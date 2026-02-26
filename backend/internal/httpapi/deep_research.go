@@ -111,11 +111,19 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 	} else {
 		searchStartedAt := time.Now()
 		if h.cfg.AgenticResearchDeepEnabled {
-			researchResult, err := h.runResearchOrchestrator(researchCtx, research.ModeDeepResearch, input.Message, timeSensitive, func(progress research.Progress) {
-				traceCollector.AppendProgress(progress)
-				_ = writeSSEEvent(w, progressEventData(progress))
-				flusher.Flush()
-			})
+			researchResult, err := h.runResearchOrchestrator(
+				researchCtx,
+				research.ModeDeepResearch,
+				input.Message,
+				timeSensitive,
+				input.ModelID,
+				plannerReasoningEffort(input.ReasoningEffort),
+				func(progress research.Progress) {
+					traceCollector.AppendProgress(progress)
+					_ = writeSSEEvent(w, progressEventData(progress))
+					flusher.Flush()
+				},
+			)
 			if err != nil {
 				message := "deep research interrupted"
 				if errors.Is(err, context.DeadlineExceeded) {

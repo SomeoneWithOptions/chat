@@ -128,9 +128,14 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			Phase: PhasePlanning,
 		}))
 
-		decision, err := o.planner.InitialPlan(runCtx, planInput)
-		decisionUsedFallback := false
-		if loop > 1 {
+		var (
+			decision             PlannerDecision
+			err                  error
+			decisionUsedFallback bool
+		)
+		if loop == 1 {
+			decision, err = o.planner.InitialPlan(runCtx, planInput)
+		} else {
 			decision, err = o.planner.EvaluateEvidence(runCtx, planInput)
 		}
 		if err != nil {

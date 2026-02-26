@@ -87,6 +87,7 @@ Expected response:
 ## Deep Research Behavior (Local)
 
 - Chat and deep research can run the shared agentic loop (`plan -> search -> read -> evaluate -> iterate/finalize`) when enabled.
+- Planner/decision model calls in that loop use the selected model for the request (same model used for final response generation).
 - Deep research uses larger default budgets than chat and remains bounded by `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - SSE progress events include phases: `planning`, `searching`, `reading`, `evaluating`, `iterating`, `synthesizing`, `finalizing`.
 - Progress is rendered in each assistant message as a compact thinking summary; expand it to view full phase-by-phase trace details.

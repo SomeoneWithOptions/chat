@@ -78,5 +78,6 @@ For temporary anonymous testing, set:
 - `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat` or `deep_research`.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Chat and deep research both support iterative agentic web research loops behind independent feature flags.
+- Research planner/decision calls in those loops use the same selected request model as final response generation.
 - Deep research uses larger loop/query/read budgets than normal chat and still respects `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

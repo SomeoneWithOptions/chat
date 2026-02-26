@@ -41,7 +41,6 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 		RequestTimeout: time.Duration(cfg.ResearchSourceTimeoutSecs) * time.Second,
 		MaxBytes:       int64(cfg.ResearchSourceMaxBytes),
 	}, nil)
-	h.researchPlannerResponder = newOpenRouterPlannerResponder(openRouterClient, cfg.OpenRouterDefaultModel)
 
 	r := chi.NewRouter()
 	r.Use(chimw.RequestID)

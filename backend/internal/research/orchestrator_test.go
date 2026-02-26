@@ -23,6 +23,24 @@ func (p plannerStub) EvaluateEvidence(_ context.Context, _ PlannerInput) (Planne
 	return p.eval, nil
 }
 
+type plannerCallCounter struct {
+	initial PlannerDecision
+	eval    PlannerDecision
+
+	initialCalls  int
+	evaluateCalls int
+}
+
+func (p *plannerCallCounter) InitialPlan(_ context.Context, _ PlannerInput) (PlannerDecision, error) {
+	p.initialCalls++
+	return p.initial, nil
+}
+
+func (p *plannerCallCounter) EvaluateEvidence(_ context.Context, _ PlannerInput) (PlannerDecision, error) {
+	p.evaluateCalls++
+	return p.eval, nil
+}
+
 type searcherStub struct {
 	responses map[string][]brave.SearchResult
 	err       error
@@ -146,6 +164,37 @@ func TestOrchestratorConvertsRecoverableErrorsToWarnings(t *testing.T) {
 	}
 	if len(result.Warnings) == 0 {
 		t.Fatalf("expected recoverable warning, got none")
+	}
+}
+
+func TestOrchestratorCallsInitialPlannerOnlyOnFirstLoop(t *testing.T) {
+	counter := &plannerCallCounter{
+		initial: PlannerDecision{NextAction: NextActionSearchMore, Queries: []string{"q1"}},
+		eval:    PlannerDecision{NextAction: NextActionSearchMore, Queries: []string{"q1"}},
+	}
+	orchestrator := NewOrchestrator(
+		searcherStub{responses: map[string][]brave.SearchResult{
+			"q1": {
+				{URL: "https://example.com/a", Title: "A", Snippet: "snippet a"},
+			},
+		}},
+		counter,
+		nil,
+		OrchestratorConfig{MaxLoops: 3, MaxSearchQueries: 6, MaxSourcesRead: 4, MaxCitations: 4, SearchResultsPerQ: 1},
+	)
+
+	result, err := orchestrator.Run(context.Background(), "question", false, nil)
+	if err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if result.Loops != 3 {
+		t.Fatalf("expected 3 loops, got %d", result.Loops)
+	}
+	if counter.initialCalls != 1 {
+		t.Fatalf("expected InitialPlan to run once, got %d", counter.initialCalls)
+	}
+	if counter.evaluateCalls == 0 {
+		t.Fatalf("expected EvaluateEvidence to run on later loops")
 	}
 }
 
