@@ -1647,7 +1647,6 @@ code {
 
 .composer:focus-within {
   border-color: rgba(255, 255, 255, 0.1);
-  box-shadow: var(--shadow-glow);
 }
 
 .composer-reasoning-row {
@@ -1798,46 +1797,36 @@ code {
 
 .composer-mode-button {
   padding: 6px 10px;
-  border-radius: var(--radius-pill);
-  border: 1px solid transparent;
+  background: transparent;
+  border: none;
   font-family: var(--font-body);
   font-size: 12px;
   font-weight: 500;
   line-height: 1;
   cursor: pointer;
-  transition:
-    color var(--duration-fast) ease,
-    background var(--duration-fast) ease,
-    border-color var(--duration-fast) ease,
-    box-shadow var(--duration-fast) ease;
+  transition: color var(--duration-fast) ease;
 }
 
 .composer-mode-button.active {
-  color: var(--text-primary);
-  background: rgba(0, 166, 226, 0.12);
-  border-color: rgba(0, 166, 226, 0.3);
+  color: var(--accent);
 }
 
 .composer-mode-button.inactive {
   color: var(--text-secondary);
-  background: rgba(255, 255, 255, 0.08);
-  border-color: rgba(255, 255, 255, 0.14);
 }
 
 .composer-mode-button:hover {
   color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.14);
 }
 
 .composer-mode-button.active:hover {
-  background: rgba(0, 166, 226, 0.18);
-  border-color: rgba(0, 166, 226, 0.4);
+  color: var(--accent-muted);
 }
 
 .composer-mode-button:focus-visible {
   outline: none;
-  border-color: var(--border-focus);
-  box-shadow: 0 0 0 2px rgba(0, 166, 226, 0.2);
+  text-decoration: underline;
+  text-decoration-color: var(--accent);
 }
 
 .btn-send {
