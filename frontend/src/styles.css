@@ -1784,11 +1784,6 @@ code {
   background: rgba(255, 255, 255, 0.04);
 }
 
-.btn-attach svg {
-  width: 16px;
-  height: 16px;
-}
-
 .composer-mode-buttons {
   display: inline-flex;
   align-items: center;
@@ -1835,6 +1830,7 @@ code {
   text-decoration-color: var(--accent);
 }
 
+.btn-attach svg,
 .mode-icon {
   width: 16px;
   height: 16px;
