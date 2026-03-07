@@ -21,3 +21,6 @@
   - update `AGENTS.md` when repo rules/invariants/tooling standards change
   - include these doc updates in the same PR/commit as the code change when possible
 - Add/adjust tests for new logic and regressions.
+
+
+dont deploy the frontend and backend yourself, tell the user to do so, you are free to run migrations and operations on the database for deployments

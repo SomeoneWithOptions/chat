@@ -3026,8 +3026,15 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 		searchesUsed   int
 		persistedError sql.NullString
 	)
-	if err := db.QueryRow(`SELECT status, searches_used, last_error FROM agent_runs LIMIT 1;`).Scan(&runStatus, &searchesUsed, &persistedError); err != nil {
-		t.Fatalf("load agent run: %v", err)
+	deadline := time.Now().Add(3 * time.Second)
+	for {
+		if err := db.QueryRow(`SELECT status, searches_used, last_error FROM agent_runs LIMIT 1;`).Scan(&runStatus, &searchesUsed, &persistedError); err != nil {
+			t.Fatalf("load agent run: %v", err)
+		}
+		if runStatus == "completed" || runStatus == "failed" || time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(25 * time.Millisecond)
 	}
 	if runStatus != "completed" {
 		t.Fatalf("expected completed agent run, got %q (error=%q)", runStatus, persistedError.String)

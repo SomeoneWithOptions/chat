@@ -246,21 +246,31 @@ func (h Handler) enqueueAgentRun(ctx context.Context, runID string) error {
 		return nil
 	}
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, baseURL+"/internal/agent-runs/"+runID, bytes.NewReader(nil))
-	if err != nil {
-		return err
-	}
-	if token := strings.TrimSpace(h.cfg.InternalWorkerBearerToken); token != "" {
-		req.Header.Set("Authorization", "Bearer "+token)
-	}
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-		return fmt.Errorf("worker enqueue returned %d", resp.StatusCode)
-	}
+	go func() {
+		workerCtx, cancel := context.WithTimeout(context.Background(), time.Duration(h.cfg.AgentTimeoutSeconds+30)*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(workerCtx, http.MethodPost, baseURL+"/internal/agent-runs/"+runID, bytes.NewReader(nil))
+		if err != nil {
+			log.Printf("agent remote worker request build failed: run_id=%s err=%v", runID, err)
+			_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+			return
+		}
+		if token := strings.TrimSpace(h.cfg.InternalWorkerBearerToken); token != "" {
+			req.Header.Set("Authorization", "Bearer "+token)
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			log.Printf("agent remote worker request failed: run_id=%s err=%v", runID, err)
+			_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+			return
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+			log.Printf("agent remote worker returned non-2xx: run_id=%s status=%d", runID, resp.StatusCode)
+			_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+		}
+	}()
 	return nil
 }
 
@@ -277,6 +287,17 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 	if err != nil {
 		traceCollector = newThinkingTraceCollector()
 	}
+	appendStageProgress := func(progress research.Progress) {
+		traceCollector.AppendProgress(progress)
+		if updateErr := h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, "", traceCollector, nil, nil, nil, thinkingTraceStatusRunning); updateErr != nil {
+			log.Printf("agent progress persist failed: run_id=%s err=%v", run.ID, updateErr)
+		}
+	}
+	appendStageProgress(research.Progress{
+		Phase:  research.PhasePlanning,
+		Title:  "Starting agent workflow",
+		Detail: "Worker picked up the queued run",
+	})
 
 	searcher := &distributedBraveSearcher{
 		handler:   &h,
@@ -321,24 +342,33 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 	researchResult, err := orchestrator.Run(ctx, userPrompt, timeSensitive, func(progress research.Progress) {
 		progressMu.Lock()
 		defer progressMu.Unlock()
-		traceCollector.AppendProgress(progress)
-		_ = h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, "", traceCollector, nil, nil, nil, thinkingTraceStatusRunning)
+		appendStageProgress(progress)
 	})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
 		log.Printf("agent research failed: run_id=%s err=%v", run.ID, err)
 	}
 
 	citations := convertResearchCitations(researchResult.Citations, h.cfg.ResearchMaxCitationsDeep)
-	roles, roleErr := h.runAgentRoleDebate(ctx, run.ModelID, run.ReasoningEffort, userPrompt, citations)
+	roles, roleErr := h.runAgentRoleDebate(ctx, run.ModelID, run.ReasoningEffort, userPrompt, citations, appendStageProgress)
 	if roleErr != nil {
 		return h.failAgentRun(ctx, run.ID, "agent debate failed")
 	}
+	appendStageProgress(research.Progress{
+		Phase:  research.PhaseSynthesizing,
+		Title:  "Writing final answer",
+		Detail: "Combining evidence and debate results",
+	})
 	answer, reasoningContent, usage, synthErr := h.runAgentSynthesis(ctx, run.ModelID, run.ReasoningEffort, userPrompt, historyMessages, citations, roles)
 	if synthErr != nil {
 		return h.failAgentRun(ctx, run.ID, "agent synthesis failed")
 	}
 
 	orderedCitations := orderCitationsByClaims(citations, answer)
+	appendStageProgress(research.Progress{
+		Phase:  research.PhaseFinalizing,
+		Title:  "Finalizing response",
+		Detail: "Saving answer, citations, and agent summaries",
+	})
 	traceCollector.MarkDone()
 	if err := h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, answer, traceCollector, orderedCitations, messageUsageFromOpenRouter(usage), toAgentSummaries(roles), thinkingTraceStatusDone); err != nil {
 		return err
@@ -354,7 +384,7 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 	return nil
 }
 
-func (h Handler) runAgentRoleDebate(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse) ([]agentRoleResult, error) {
+func (h Handler) runAgentRoleDebate(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, onProgress func(research.Progress)) ([]agentRoleResult, error) {
 	roles := []agentRoleDefinition{
 		{Name: "Scout", System: "You are Scout. Find the strongest broad answer and the most useful resource directions."},
 		{Name: "Skeptic", System: "You are Skeptic. Look for contradictions, edge cases, and reasons the obvious answer may be incomplete."},
@@ -363,11 +393,29 @@ func (h Handler) runAgentRoleDebate(ctx context.Context, modelID, reasoningEffor
 	}
 
 	firstRound := make([]agentRoleResult, len(roles))
+	if onProgress != nil {
+		onProgress(research.Progress{
+			Phase:       research.PhaseEvaluating,
+			Title:       "Comparing agent viewpoints",
+			Detail:      "Round 1 of 2",
+			Pass:        1,
+			TotalPasses: 2,
+		})
+	}
 	if err := h.runRoleRound(ctx, modelID, reasoningEffort, question, citations, nil, roles, firstRound); err != nil {
 		return nil, err
 	}
 
 	secondRound := make([]agentRoleResult, len(roles))
+	if onProgress != nil {
+		onProgress(research.Progress{
+			Phase:       research.PhaseIterating,
+			Title:       "Running rebuttal round",
+			Detail:      "Round 2 of 2",
+			Pass:        2,
+			TotalPasses: 2,
+		})
+	}
 	if err := h.runRoleRound(ctx, modelID, reasoningEffort, question, citations, firstRound, roles, secondRound); err != nil {
 		return nil, err
 	}

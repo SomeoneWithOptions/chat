@@ -530,7 +530,7 @@ export default function App() {
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
 
   useEffect(() => {
-    if (!user || !conversationAPISupported || !activeConversationId || isStreaming || !hasRunningAgentMessage) return;
+    if (!user || !conversationAPISupported || !activeConversationId || !hasRunningAgentMessage) return;
 
     let cancelled = false;
     const intervalID = window.setInterval(() => {
@@ -550,7 +550,7 @@ export default function App() {
       cancelled = true;
       window.clearInterval(intervalID);
     };
-  }, [activeConversationId, conversationAPISupported, hasRunningAgentMessage, isStreaming, user]);
+  }, [activeConversationId, conversationAPISupported, hasRunningAgentMessage, user]);
 
   useEffect(() => {
     isStreamingRef.current = isStreaming;
