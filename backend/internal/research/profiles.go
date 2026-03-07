@@ -7,26 +7,47 @@ type ModeProfile string
 const (
 	ModeChat         ModeProfile = "chat"
 	ModeDeepResearch ModeProfile = "deep_research"
+	ModeAgent        ModeProfile = "agent"
 )
 
 const (
-	defaultChatMaxLoops                = 2
-	defaultChatMaxSourcesRead          = 4
-	defaultChatMaxSearchQueries        = 4
-	defaultChatMaxCitations            = 8
-	defaultChatTimeout                 = 20 * time.Second
-	defaultDeepMaxLoops                = 6
-	defaultDeepMaxSourcesRead          = 16
-	defaultDeepMaxSearchQueries        = 18
-	defaultDeepMaxCitations            = 12
-	defaultDeepTimeout                 = 150 * time.Second
-	defaultSearchResultsPerQuery       = 6
-	defaultSourceFetchTimeout          = 12 * time.Second
-	defaultSourceMaxBytes        int64 = 1_500_000
+	defaultChatMaxLoops                     = 2
+	defaultChatMaxSourcesRead               = 4
+	defaultChatMaxSearchQueries             = 4
+	defaultChatMaxCitations                 = 8
+	defaultChatTimeout                      = 20 * time.Second
+	defaultDeepMaxLoops                     = 6
+	defaultDeepMaxSourcesRead               = 16
+	defaultDeepMaxSearchQueries             = 18
+	defaultDeepMaxCitations                 = 12
+	defaultDeepTimeout                      = 150 * time.Second
+	defaultAgentMinSearchQueries            = 20
+	defaultAgentMaxLoops                    = 12
+	defaultAgentMaxSourcesRead              = 80
+	defaultAgentMaxSearchQueries            = 60
+	defaultAgentMaxCitations                = 16
+	defaultAgentTimeout                     = 20 * time.Minute
+	defaultAgentSearchResultsPerQuery       = 10
+	defaultSearchResultsPerQuery            = 6
+	defaultSourceFetchTimeout               = 12 * time.Second
+	defaultSourceMaxBytes             int64 = 1_500_000
 )
 
 func DefaultProfile(mode ModeProfile) OrchestratorConfig {
 	switch mode {
+	case ModeAgent:
+		return OrchestratorConfig{
+			MinSearchQueries:   defaultAgentMinSearchQueries,
+			MaxLoops:           defaultAgentMaxLoops,
+			MaxSourcesRead:     defaultAgentMaxSourcesRead,
+			MaxSearchQueries:   defaultAgentMaxSearchQueries,
+			MaxCitations:       defaultAgentMaxCitations,
+			SearchResultsPerQ:  defaultAgentSearchResultsPerQuery,
+			Timeout:            defaultAgentTimeout,
+			MinSearchInterval:  defaultRateLimitRetryDelay,
+			SourceFetchTimeout: defaultSourceFetchTimeout,
+			SourceMaxBytes:     defaultSourceMaxBytes,
+		}
 	case ModeDeepResearch:
 		return OrchestratorConfig{
 			MaxLoops:           defaultDeepMaxLoops,
@@ -60,6 +81,9 @@ func ResolveProfile(mode ModeProfile, overrides OrchestratorConfig) Orchestrator
 	if overrides.MaxLoops > 0 {
 		resolved.MaxLoops = overrides.MaxLoops
 	}
+	if overrides.MinSearchQueries > 0 {
+		resolved.MinSearchQueries = overrides.MinSearchQueries
+	}
 	if overrides.MaxSourcesRead > 0 {
 		resolved.MaxSourcesRead = overrides.MaxSourcesRead
 	}
@@ -88,6 +112,9 @@ func ResolveProfile(mode ModeProfile, overrides OrchestratorConfig) Orchestrator
 	if resolved.MaxLoops < 1 {
 		resolved.MaxLoops = 1
 	}
+	if resolved.MinSearchQueries < 0 {
+		resolved.MinSearchQueries = 0
+	}
 	if resolved.MaxSourcesRead < 1 {
 		resolved.MaxSourcesRead = 1
 	}
@@ -105,6 +132,9 @@ func ResolveProfile(mode ModeProfile, overrides OrchestratorConfig) Orchestrator
 	}
 	if resolved.SourceMaxBytes <= 0 {
 		resolved.SourceMaxBytes = defaultSourceMaxBytes
+	}
+	if resolved.MaxSearchQueries < resolved.MinSearchQueries {
+		resolved.MaxSearchQueries = resolved.MinSearchQueries
 	}
 
 	return resolved

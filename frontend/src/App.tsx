@@ -168,6 +168,7 @@ const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> =
 const defaultReasoningEffortByMode: Record<ReasoningMode, ReasoningEffort> = {
   chat: 'medium',
   deep_research: 'high',
+  agent: 'high',
 };
 
 function resolveReasoningEffort(
@@ -186,6 +187,21 @@ function upsertReasoningPreset(
 ): ReasoningPreset[] {
   const filtered = presets.filter((preset) => !(preset.modelId === next.modelId && preset.mode === next.mode));
   return [...filtered, next];
+}
+
+function toMessageData(message: import('./lib/api').ConversationMessage): MessageData {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content,
+    reasoningContent: message.reasoningContent ?? '',
+    thinkingTrace: message.thinkingTrace ?? null,
+    modelId: message.modelId ?? null,
+    usage: message.usage ?? null,
+    responseMode: message.responseMode ?? (message.deepResearchEnabled ? 'deep_research' : 'chat'),
+    agentSummaries: message.agentSummaries ?? [],
+    citations: message.citations ?? [],
+  };
 }
 
 function buildTraceSummary(entry: ThinkingTraceEntry): string {
@@ -234,6 +250,7 @@ export default function App() {
   const [modelPreferences, setModelPreferences] = useState<ModelPreferences>({
     lastUsedModelId: 'openrouter/free',
     lastUsedDeepResearchModelId: 'openrouter/free',
+    lastUsedAgentModelId: 'openrouter/free',
   });
   const [reasoningPresets, setReasoningPresets] = useState<ReasoningPreset[]>([]);
   const [showAllModels, setShowAllModels] = useState(false);
@@ -246,6 +263,7 @@ export default function App() {
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [grounding, setGrounding] = useState(true);
   const [deepResearch, setDeepResearch] = useState(false);
+  const [agentMode, setAgentMode] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -274,6 +292,9 @@ export default function App() {
   const previousMessagesRef = useRef<MessageData[]>(messages);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const isStreamingRef = useRef(isStreaming);
+  const hasRunningAgentMessage = messages.some(
+    (message) => message.role === 'assistant' && message.responseMode === 'agent' && message.thinkingTrace?.status === 'running',
+  );
 
   // ─── Virtual keyboard handling (mobile) ─────
   useVirtualKeyboard();
@@ -376,7 +397,7 @@ export default function App() {
       setModels([]);
       setCuratedModels([]);
       setFavoriteModelIds([]);
-      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free' });
+      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free', lastUsedAgentModelId: 'openrouter/free' });
       setReasoningPresets([]);
       setShowAllModels(false);
       setConversations([]);
@@ -387,6 +408,8 @@ export default function App() {
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
       setEditingDraft('');
+      setAgentMode(false);
+      setDeepResearch(false);
       setPendingAttachments([]);
       setUploadingAttachments(false);
       return;
@@ -480,18 +503,7 @@ export default function App() {
       try {
         const conversationMessages = await listConversationMessages(activeConversationId);
         if (cancelled) return;
-        setMessages(
-          conversationMessages.map((m) => ({
-            id: m.id,
-            role: m.role,
-            content: m.content,
-            reasoningContent: m.reasoningContent ?? '',
-            thinkingTrace: m.thinkingTrace ?? null,
-            modelId: m.modelId ?? null,
-            usage: m.usage ?? null,
-            citations: m.citations ?? [],
-          })),
-        );
+        setMessages(conversationMessages.map(toMessageData));
         setActiveAssistantMessageId(null);
         setEditingMessageId(null);
         setEditingDraft('');
@@ -516,6 +528,29 @@ export default function App() {
 
     return () => { cancelled = true; };
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
+
+  useEffect(() => {
+    if (!user || !conversationAPISupported || !activeConversationId || isStreaming || !hasRunningAgentMessage) return;
+
+    let cancelled = false;
+    const intervalID = window.setInterval(() => {
+      void (async () => {
+        try {
+          const conversationMessages = await listConversationMessages(activeConversationId);
+          if (!cancelled) {
+            setMessages(conversationMessages.map(toMessageData));
+          }
+        } catch (err) {
+          if (!cancelled) setError((err as Error).message);
+        }
+      })();
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalID);
+    };
+  }, [activeConversationId, conversationAPISupported, hasRunningAgentMessage, isStreaming, user]);
 
   useEffect(() => {
     isStreamingRef.current = isStreaming;
@@ -604,7 +639,7 @@ export default function App() {
     [models, selectedModel],
   );
 
-  const activeMode: ReasoningMode = deepResearch ? 'deep_research' : 'chat';
+  const activeMode: ReasoningMode = agentMode ? 'agent' : deepResearch ? 'deep_research' : 'chat';
   const currentModelSupportsReasoning = currentModel?.supportsReasoning === true;
   const selectedReasoningEffort = useMemo(
     () => resolveReasoningEffort(reasoningPresets, selectedModel, activeMode),
@@ -636,7 +671,7 @@ export default function App() {
       setModels([]);
       setCuratedModels([]);
       setFavoriteModelIds([]);
-      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free' });
+      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free', lastUsedAgentModelId: 'openrouter/free' });
       setReasoningPresets([]);
       setShowAllModels(false);
       setSelectedModel('openrouter/free');
@@ -645,6 +680,8 @@ export default function App() {
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
       setEditingDraft('');
+      setAgentMode(false);
+      setDeepResearch(false);
       setConversations([]);
       setActiveConversationId(null);
       setConversationAPISupported(true);
@@ -655,7 +692,7 @@ export default function App() {
     }
   }
 
-  async function persistModelSelection(mode: 'chat' | 'deep_research', modelId: string) {
+  async function persistModelSelection(mode: ReasoningMode, modelId: string) {
     if (!user) return;
     setUpdatingModelPreference(true);
     try {
@@ -671,10 +708,11 @@ export default function App() {
   function handleModelChange(nextModelId: string) {
     setSelectedModel(nextModelId);
     setError(null);
-    void persistModelSelection(deepResearch ? 'deep_research' : 'chat', nextModelId);
+    void persistModelSelection(activeMode, nextModelId);
   }
 
   function handleDeepResearchChange(next: boolean) {
+    setAgentMode(false);
     setDeepResearch(next);
     setError(null);
     const preferredModelID = next ? modelPreferences.lastUsedDeepResearchModelId : modelPreferences.lastUsedModelId;
@@ -682,6 +720,18 @@ export default function App() {
       preferredModelID && models.some((m) => m.id === preferredModelID) ? preferredModelID : selectedModel;
     if (resolvedModelID !== selectedModel && resolvedModelID) setSelectedModel(resolvedModelID);
     if (resolvedModelID) void persistModelSelection(next ? 'deep_research' : 'chat', resolvedModelID);
+  }
+
+  function handleAgentModeChange(next: boolean) {
+    setAgentMode(next);
+    if (next) setDeepResearch(false);
+    setError(null);
+    const preferredModelID = next ? modelPreferences.lastUsedAgentModelId : modelPreferences.lastUsedModelId;
+    const resolvedModelID =
+      preferredModelID && models.some((m) => m.id === preferredModelID) ? preferredModelID : selectedModel;
+    if (resolvedModelID !== selectedModel && resolvedModelID) setSelectedModel(resolvedModelID);
+    if (next) setGrounding(true);
+    if (resolvedModelID) void persistModelSelection(next ? 'agent' : 'chat', resolvedModelID);
   }
 
   async function handleReasoningEffortChange(next: ReasoningEffort) {
@@ -844,9 +894,10 @@ export default function App() {
           editMessageId: options.editMessageId,
           message: options.content,
           modelId: selectedModel,
+          mode: activeMode,
           reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined,
           grounding,
-          deepResearch,
+          deepResearch: activeMode === 'deep_research',
           fileIds: options.attachmentIDs.length > 0 ? options.attachmentIDs : undefined,
         },
         (eventData) => {
@@ -854,7 +905,11 @@ export default function App() {
             setMessages((existing) =>
               existing.map((m) => {
                 if (m.id === options.assistantMessageID) {
-                  return { ...m, modelId: eventData.modelId };
+                  return {
+                    ...m,
+                    modelId: eventData.modelId,
+                    responseMode: eventData.responseMode ?? (eventData.deepResearch ? 'deep_research' : activeMode),
+                  };
                 }
                 if (eventData.userMessageId && m.id === options.optimisticUserMessageID) {
                   return { ...m, id: eventData.userMessageId };
@@ -919,9 +974,22 @@ export default function App() {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === options.assistantMessageID
-                  ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Thought process complete') }
+                  ? {
+                    ...m,
+                    thinkingTrace: m.responseMode === 'agent'
+                      ? (m.thinkingTrace ?? { status: 'running', summary: 'Queued agent workflow', entries: [] })
+                      : updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Thought process complete'),
+                  }
                   : m,
               ),
+            );
+            return;
+          }
+          if (eventData.type === 'agent_summaries') {
+            setMessages((existing) =>
+              existing.map((m) => (
+                m.id === options.assistantMessageID ? { ...m, agentSummaries: eventData.agentSummaries } : m
+              )),
             );
             return;
           }
@@ -997,6 +1065,8 @@ export default function App() {
       reasoningContent: '',
       modelId: selectedModel,
       usage: null,
+      responseMode: activeMode,
+      agentSummaries: [],
       citations: [],
     };
     const assistantMessage: MessageData = {
@@ -1007,6 +1077,8 @@ export default function App() {
       thinkingTrace: null,
       modelId: selectedModel,
       usage: null,
+      responseMode: activeMode,
+      agentSummaries: [],
       citations: [],
     };
 
@@ -1058,6 +1130,8 @@ export default function App() {
       reasoningContent: '',
       modelId: selectedModel,
       usage: null,
+      responseMode: activeMode,
+      agentSummaries: [],
       citations: [],
     };
     const assistantMessage: MessageData = {
@@ -1068,6 +1142,8 @@ export default function App() {
       thinkingTrace: null,
       modelId: selectedModel,
       usage: null,
+      responseMode: activeMode,
+      agentSummaries: [],
       citations: [],
     };
 
@@ -1268,8 +1344,14 @@ export default function App() {
           onReasoningEffortChange={(effort) => void handleReasoningEffortChange(effort)}
           grounding={grounding}
           deepResearch={deepResearch}
-          onToggleGrounding={() => setGrounding((enabled) => !enabled)}
+          agentMode={agentMode}
+          groundingLocked={agentMode}
+          onToggleGrounding={() => {
+            if (agentMode) return;
+            setGrounding((enabled) => !enabled);
+          }}
           onToggleDeepResearch={() => handleDeepResearchChange(!deepResearch)}
+          onToggleAgentMode={() => handleAgentModeChange(!agentMode)}
           isStreaming={isStreaming}
           uploadingAttachments={uploadingAttachments}
           pendingAttachments={pendingAttachments}

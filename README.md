@@ -1,6 +1,6 @@
 # Chat
 
-A modern, privacy-focused AI chat assistant with web grounding and deep research capabilities.
+A modern, privacy-focused AI chat assistant with web grounding, deep research, and async multi-agent answer capabilities.
 
 ## Features
 
@@ -18,6 +18,11 @@ A modern, privacy-focused AI chat assistant with web grounding and deep research
 - Extended multi-pass analysis
 - More comprehensive citations
 - Ideal for complex questions (up to 150s timeout)
+
+### Agent Mode
+- Async 4-agent debate workflow with shared evidence gathering
+- Brave-grounded high-volume web research with quota-aware pacing
+- Collapsible per-agent summaries once the run completes
 
 ### File Attachments
 - Upload .txt, .md, .pdf, .csv, .json files

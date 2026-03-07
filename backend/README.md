@@ -47,6 +47,10 @@ cp backend/.env.example backend/.env
 - `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
 - `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read safety limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
+- `AGENT_MODE_ENABLED` (optional; default `true`)
+- `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional async agent budgets)
+- `BRAVE_MONTHLY_QUERY_LIMIT`, `BRAVE_MONTHLY_QUERY_RESERVE` (optional Brave free-tier quota guardrails)
+- `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings for remote/background agent execution)
 
 Auth sequencing:
 
@@ -75,9 +79,10 @@ For temporary anonymous testing, set:
 - `GET /v1/models` returns model capability metadata (`supportsReasoning`) and user reasoning presets.
 - `POST /v1/models/sync` performs an on-demand OpenRouter sync into the local `models` cache and returns the synced row count.
   - Requires `Authorization: Bearer <MODEL_SYNC_BEARER_TOKEN>`.
-- `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat` or `deep_research`.
+- `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat`, `deep_research`, or `agent`.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Chat and deep research both support iterative agentic web research loops behind independent feature flags.
+- Agent mode creates a placeholder assistant message immediately, then completes in the background and is surfaced to the UI through message polling.
 - Research planner/decision calls in those loops use the same selected request model as final response generation.
 - Deep research uses larger loop/query/read budgets than normal chat and still respects `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

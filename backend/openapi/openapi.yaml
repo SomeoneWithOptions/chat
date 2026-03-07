@@ -430,16 +430,18 @@ components:
           type: string
         mode:
           type: string
-          enum: [chat, deep_research]
+          enum: [chat, deep_research, agent]
         effort:
           $ref: '#/components/schemas/ReasoningEffort'
     ModelPreferences:
       type: object
-      required: [lastUsedModelId, lastUsedDeepResearchModelId]
+      required: [lastUsedModelId, lastUsedDeepResearchModelId, lastUsedAgentModelId]
       properties:
         lastUsedModelId:
           type: string
         lastUsedDeepResearchModelId:
+          type: string
+        lastUsedAgentModelId:
           type: string
     ListModelsResponse:
       type: object
@@ -476,7 +478,7 @@ components:
       properties:
         mode:
           type: string
-          enum: [chat, deep_research]
+          enum: [chat, deep_research, agent]
         modelId:
           type: string
     UpdateModelPreferencesResponse:
@@ -509,7 +511,7 @@ components:
           type: string
         mode:
           type: string
-          enum: [chat, deep_research]
+          enum: [chat, deep_research, agent]
         effort:
           $ref: '#/components/schemas/ReasoningEffort'
     UpdateReasoningPresetResponse:
@@ -562,6 +564,13 @@ components:
           type: boolean
         deepResearchEnabled:
           type: boolean
+        responseMode:
+          type: string
+          enum: [chat, deep_research, agent]
+        agentSummaries:
+          type: array
+          items:
+            $ref: '#/components/schemas/AgentSummary'
         citations:
           type: array
           items:
@@ -651,6 +660,9 @@ components:
           type: string
         modelId:
           type: string
+        mode:
+          type: string
+          enum: [chat, deep_research, agent]
         reasoningEffort:
           $ref: '#/components/schemas/ReasoningEffort'
         grounding:
@@ -659,6 +671,9 @@ components:
         deepResearch:
           type: boolean
           default: false
+        mode:
+          type: string
+          enum: [chat, deep_research, agent]
         fileIds:
           type: array
           items:
@@ -751,6 +766,24 @@ components:
           type: string
         providerName:
           type: string
+    AgentSummary:
+      type: object
+      required: [role, summary]
+      properties:
+        role:
+          type: string
+        summary:
+          type: string
+        objections:
+          type: array
+          items:
+            type: string
+        confidence:
+          type: number
+        evidenceIds:
+          type: array
+          items:
+            type: integer
     StreamEventMetadata:
       type: object
       required: [type, grounding, deepResearch, modelId]
@@ -762,6 +795,9 @@ components:
           type: boolean
         deepResearch:
           type: boolean
+        responseMode:
+          type: string
+          enum: [chat, deep_research, agent]
         modelId:
           type: string
         reasoningEffort:

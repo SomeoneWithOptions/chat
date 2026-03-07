@@ -60,6 +60,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	r.Get("/health", h.Healthz)
 	r.Get("/healthz", h.Healthz)
 	r.Get("/healthz/", h.Healthz)
+	r.Post("/internal/agent-runs/{id}", h.InternalRunAgent)
 
 	r.Route("/v1", func(v1 chi.Router) {
 		v1.Route("/auth", func(authR chi.Router) {

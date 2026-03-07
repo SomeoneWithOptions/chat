@@ -150,7 +150,7 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 			coverageGaps = decision.CoverageGaps
 		}
 
-		if decision.NextAction == NextActionFinalize && len(rankedEvidence) > 0 {
+		if decision.NextAction == NextActionFinalize && len(rankedEvidence) > 0 && usedQueries >= o.cfg.MinSearchQueries {
 			stopReason = StopReasonSufficient
 			break
 		}

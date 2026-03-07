@@ -249,7 +249,7 @@ WHERE user_id = ? AND id IN (%s);
 	return query, args
 }
 
-func (h Handler) insertUserMessageWithFiles(ctx context.Context, userID, conversationID, content, modelID string, groundingEnabled, deepResearchEnabled bool, fileIDs []string) (string, error) {
+func (h Handler) insertUserMessageWithFiles(ctx context.Context, userID, conversationID, content, modelID string, groundingEnabled, deepResearchEnabled bool, responseMode string, fileIDs []string) (string, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return "", err
@@ -271,10 +271,11 @@ INSERT INTO messages (
   content,
   model_id,
   grounding_enabled,
-  deep_research_enabled
+  deep_research_enabled,
+  response_mode
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, "user", content, nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, "user", content, nullableModelID, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled), normalizeResponseMode(responseMode, deepResearchEnabled)); err != nil {
 		return "", err
 	}
 
@@ -389,6 +390,36 @@ func (h Handler) appendFileContextToPrompt(message string, files []storedFile) s
 	}
 
 	return strings.TrimSpace(builder.String())
+}
+
+func (h Handler) listFilesForMessage(ctx context.Context, userID, messageID string) ([]storedFile, error) {
+	rows, err := h.db.QueryContext(ctx, `
+SELECT f.id, f.filename, f.media_type, f.size_bytes, f.extracted_text
+FROM files f
+JOIN message_files mf ON mf.file_id = f.id
+JOIN messages m ON m.id = mf.message_id
+JOIN conversations c ON c.id = m.conversation_id
+WHERE m.id = ? AND m.user_id = ? AND c.user_id = ? AND f.user_id = ?
+ORDER BY mf.rowid ASC;
+`, messageID, userID, userID, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	files := make([]storedFile, 0, maxFilesPerMessage)
+	for rows.Next() {
+		var file storedFile
+		if err := rows.Scan(&file.ID, &file.Filename, &file.MediaType, &file.SizeBytes, &file.ExtractedText); err != nil {
+			return nil, err
+		}
+		files = append(files, file)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return files, nil
 }
 
 func (h Handler) buildObjectPath(userID, fileID, filename string) string {

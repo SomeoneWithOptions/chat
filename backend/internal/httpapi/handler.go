@@ -30,15 +30,23 @@ var (
 )
 
 type Handler struct {
-	cfg                      config.Config
-	db                       *sql.DB
-	sessions                 session.Store
-	verifier                 auth.Verifier
-	openrouter               chatStreamer
-	grounding                groundingSearcher
-	researchReader           research.Reader
-	models                   modelCataloger
-	files                    fileObjectStore
+	cfg            config.Config
+	db             *sql.DB
+	sessions       session.Store
+	verifier       auth.Verifier
+	openrouter     chatStreamer
+	grounding      groundingSearcher
+	researchReader research.Reader
+	models         modelCataloger
+	files          fileObjectStore
+}
+
+type agentSummary struct {
+	Role        string   `json:"role"`
+	Summary     string   `json:"summary"`
+	Objections  []string `json:"objections,omitempty"`
+	Confidence  float64  `json:"confidence,omitempty"`
+	EvidenceIDs []int    `json:"evidenceIds,omitempty"`
 }
 
 type chatStreamer interface {
@@ -106,6 +114,7 @@ type modelResponse struct {
 type modelPreferencesResponse struct {
 	LastUsedModelID             string `json:"lastUsedModelId"`
 	LastUsedDeepResearchModelID string `json:"lastUsedDeepResearchModelId"`
+	LastUsedAgentModelID        string `json:"lastUsedAgentModelId"`
 }
 
 type reasoningPresetResponse struct {
@@ -414,8 +423,8 @@ func (h Handler) UpdateModelPreferences(w http.ResponseWriter, r *http.Request) 
 	}
 
 	mode := strings.TrimSpace(req.Mode)
-	if mode != "chat" && mode != "deep_research" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research")
+	if !isValidResponseMode(mode) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, agent")
 		return
 	}
 
@@ -503,8 +512,8 @@ func (h Handler) UpdateModelReasoningPreset(w http.ResponseWriter, r *http.Reque
 	}
 
 	mode := strings.TrimSpace(req.Mode)
-	if mode != "chat" && mode != "deep_research" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research")
+	if !isValidResponseMode(mode) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, agent")
 		return
 	}
 
@@ -573,6 +582,8 @@ type messageResponse struct {
 	Usage               *usageResponse     `json:"usage,omitempty"`
 	GroundingEnabled    bool               `json:"groundingEnabled"`
 	DeepResearchEnabled bool               `json:"deepResearchEnabled"`
+	ResponseMode        string             `json:"responseMode"`
+	AgentSummaries      []agentSummary     `json:"agentSummaries,omitempty"`
 	Citations           []citationResponse `json:"citations"`
 	CreatedAt           string             `json:"createdAt"`
 }
@@ -676,7 +687,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.response_mode, m.agent_summaries_json, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -703,6 +714,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		var tokensPerSecond sql.NullFloat64
 		var usageModelID sql.NullString
 		var usageProviderName sql.NullString
+		var responseMode sql.NullString
+		var agentSummariesJSON sql.NullString
 		var groundingEnabled int
 		var deepResearchEnabled int
 
@@ -725,6 +738,8 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&usageProviderName,
 			&groundingEnabled,
 			&deepResearchEnabled,
+			&responseMode,
+			&agentSummariesJSON,
 			&message.CreatedAt,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "db_error", "failed to parse messages")
@@ -753,6 +768,10 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		}
 		message.GroundingEnabled = groundingEnabled == 1
 		message.DeepResearchEnabled = deepResearchEnabled == 1
+		message.ResponseMode = normalizeResponseMode(responseMode.String, message.DeepResearchEnabled)
+		if agentSummaries, ok := decodeAgentSummariesJSON(agentSummariesJSON.String); ok {
+			message.AgentSummaries = agentSummaries
+		}
 		message.Citations = make([]citationResponse, 0)
 		messages = append(messages, message)
 	}
@@ -907,6 +926,7 @@ type chatMessageRequest struct {
 	EditMessageID   string   `json:"editMessageId"`
 	Message         string   `json:"message"`
 	ModelID         string   `json:"modelId"`
+	Mode            string   `json:"mode"`
 	ReasoningEffort string   `json:"reasoningEffort"`
 	Grounding       *bool    `json:"grounding"`
 	DeepResearch    *bool    `json:"deepResearch"`
@@ -960,27 +980,32 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	responseMode := normalizeRequestedResponseMode(req.Mode, req.DeepResearch)
+	if !isValidResponseMode(responseMode) {
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, agent")
+		return
+	}
+	if responseMode == "agent" && !h.cfg.AgentModeEnabled {
+		writeError(w, http.StatusBadRequest, "invalid_request", "agent mode is disabled")
+		return
+	}
+
 	grounding := true
 	if req.Grounding != nil {
 		grounding = *req.Grounding
 	}
-
-	deepResearch := false
-	if req.DeepResearch != nil {
-		deepResearch = *req.DeepResearch
+	if responseMode == "agent" {
+		grounding = true
 	}
+	deepResearch := responseMode == "deep_research"
 
 	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
-	mode := "chat"
-	if deepResearch {
-		mode = "deep_research"
-	}
-	if _, err := h.persistModelSelection(r.Context(), user.ID, mode, modelID); err != nil {
+	if _, err := h.persistModelSelection(r.Context(), user.ID, responseMode, modelID); err != nil {
 		writeError(w, http.StatusInternalServerError, "db_error", "failed to persist model preferences")
 		return
 	}
 
-	reasoningEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, modelID, mode, req.ReasoningEffort)
+	reasoningEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, modelID, responseMode, req.ReasoningEffort)
 	if err != nil {
 		switch {
 		case errors.Is(err, errInvalidReasoningEffort):
@@ -1046,6 +1071,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		modelID,
 		grounding,
 		deepResearch,
+		responseMode,
 		normalizedFileIDs,
 	)
 	if err != nil {
@@ -1074,6 +1100,20 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
+	if responseMode == "agent" {
+		h.streamAgentQueuedResponse(r.Context(), w, flusher, agentQueuedStreamInput{
+			UserID:          user.ID,
+			UserMessageID:   userMessageID,
+			ConversationID:  conversationID,
+			ModelID:         modelID,
+			ReasoningEffort: reasoningEffort,
+			Message:         req.Message,
+			Prompt:          userPrompt,
+			Grounding:       true,
+			History:         historyMessages,
+		})
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
@@ -1083,6 +1123,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		"type":           "metadata",
 		"grounding":      grounding,
 		"deepResearch":   deepResearch,
+		"responseMode":   responseMode,
 		"modelId":        modelID,
 		"conversationId": conversationID,
 		"userMessageId":  userMessageID,
@@ -1243,9 +1284,11 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			modelID,
 			grounding,
 			deepResearch,
+			responseMode,
 			persistedCitations,
 			traceCollector.Snapshot(),
 			messageUsageFromOpenRouter(assistantUsage),
+			nil,
 		)
 		if err != nil {
 			if !started {
@@ -1683,7 +1726,7 @@ LIMIT ?;
 	return messages, nil
 }
 
-func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role, content, modelID string, groundingEnabled, deepResearchEnabled bool) error {
+func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role, content, modelID string, groundingEnabled, deepResearchEnabled bool, responseMode string) error {
 	_, err := h.insertMessageWithCitations(
 		ctx,
 		userID,
@@ -1694,6 +1737,8 @@ func (h Handler) insertMessage(ctx context.Context, userID, conversationID, role
 		modelID,
 		groundingEnabled,
 		deepResearchEnabled,
+		responseMode,
+		nil,
 		nil,
 		nil,
 		nil,
@@ -1717,9 +1762,11 @@ func (h Handler) insertMessageWithCitations(
 	ctx context.Context,
 	userID, conversationID, role, content, reasoningContent, modelID string,
 	groundingEnabled, deepResearchEnabled bool,
+	responseMode string,
 	citations []citationResponse,
 	thinkingTrace *thinkingTrace,
 	usage *messageUsage,
+	agentSummaries []agentSummary,
 ) (string, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1743,6 +1790,10 @@ func (h Handler) insertMessageWithCitations(
 	var usageModelIDValue any
 	var usageProviderNameValue any
 	thinkingTraceJSON, err := encodeThinkingTraceJSON(thinkingTrace)
+	if err != nil {
+		return "", err
+	}
+	agentSummariesJSON, err := encodeAgentSummariesJSON(agentSummaries)
 	if err != nil {
 		return "", err
 	}
@@ -1777,10 +1828,12 @@ INSERT INTO messages (
   usage_model_id,
   usage_provider_name,
   grounding_enabled,
-  deep_research_enabled
+  deep_research_enabled,
+  response_mode,
+  agent_summaries_json
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), thinkingTraceJSON, nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled)); err != nil {
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), thinkingTraceJSON, nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled), normalizeResponseMode(responseMode, deepResearchEnabled), agentSummariesJSON); err != nil {
 		return "", err
 	}
 
@@ -1832,12 +1885,13 @@ func (h Handler) persistModelSelection(ctx context.Context, userID, mode, modelI
 
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
+	var lastUsedAgentModelID sql.NullString
 	err = tx.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID)
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, err
 	}
@@ -1845,6 +1899,7 @@ LIMIT 1;
 	preferences := modelPreferencesResponse{
 		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
 		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
+		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
 	}
 
 	switch mode {
@@ -1853,10 +1908,24 @@ LIMIT 1;
 		if preferences.LastUsedDeepResearchModelID == "" {
 			preferences.LastUsedDeepResearchModelID = resolvedModelID
 		}
+		if preferences.LastUsedAgentModelID == "" {
+			preferences.LastUsedAgentModelID = resolvedModelID
+		}
 	case "deep_research":
 		preferences.LastUsedDeepResearchModelID = resolvedModelID
 		if preferences.LastUsedModelID == "" {
 			preferences.LastUsedModelID = resolvedModelID
+		}
+		if preferences.LastUsedAgentModelID == "" {
+			preferences.LastUsedAgentModelID = resolvedModelID
+		}
+	case "agent":
+		preferences.LastUsedAgentModelID = resolvedModelID
+		if preferences.LastUsedModelID == "" {
+			preferences.LastUsedModelID = resolvedModelID
+		}
+		if preferences.LastUsedDeepResearchModelID == "" {
+			preferences.LastUsedDeepResearchModelID = resolvedModelID
 		}
 	}
 
@@ -1962,12 +2031,13 @@ ORDER BY f.created_at DESC, f.model_id ASC;
 func (h Handler) readUserModelPreferences(ctx context.Context, userID string) (modelPreferencesResponse, error) {
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
+	var lastUsedAgentModelID sql.NullString
 	err := h.db.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID)
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, nil
 	}
@@ -1978,6 +2048,7 @@ LIMIT 1;
 	return modelPreferencesResponse{
 		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
 		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
+		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
 	}, nil
 }
 
@@ -2077,20 +2148,23 @@ LIMIT 1;
 func upsertUserModelPreferences(ctx context.Context, tx *sql.Tx, userID string, preferences modelPreferencesResponse) error {
 	normalModelID := nullableString(preferences.LastUsedModelID)
 	deepModelID := nullableString(preferences.LastUsedDeepResearchModelID)
+	agentModelID := nullableString(preferences.LastUsedAgentModelID)
 
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO user_model_preferences (
   user_id,
   last_used_model_id,
   last_used_deep_research_model_id,
+  last_used_agent_model_id,
   updated_at
 )
-VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(user_id) DO UPDATE SET
   last_used_model_id = excluded.last_used_model_id,
   last_used_deep_research_model_id = excluded.last_used_deep_research_model_id,
+  last_used_agent_model_id = excluded.last_used_agent_model_id,
   updated_at = CURRENT_TIMESTAMP;
-`, userID, normalModelID, deepModelID)
+`, userID, normalModelID, deepModelID, agentModelID)
 	return err
 }
 
@@ -2251,6 +2325,12 @@ func normalizeModelPreferences(preferences modelPreferencesResponse, available m
 	if preferences.LastUsedDeepResearchModelID == "" {
 		preferences.LastUsedDeepResearchModelID = preferences.LastUsedModelID
 	}
+	if _, ok := available[preferences.LastUsedAgentModelID]; !ok {
+		preferences.LastUsedAgentModelID = preferences.LastUsedModelID
+	}
+	if preferences.LastUsedAgentModelID == "" {
+		preferences.LastUsedAgentModelID = preferences.LastUsedModelID
+	}
 
 	return preferences
 }
@@ -2319,7 +2399,7 @@ func normalizeReasoningEffort(raw string) (string, bool) {
 }
 
 func (h Handler) defaultReasoningEffortForMode(mode string) string {
-	if mode == "deep_research" {
+	if mode == "deep_research" || mode == "agent" {
 		effort, ok := normalizeReasoningEffort(h.cfg.DefaultDeepReasoningEffort)
 		if ok {
 			return effort
@@ -2656,6 +2736,63 @@ func nullableFloatPointer(value sql.NullFloat64) *float64 {
 	}
 	out := value.Float64
 	return &out
+}
+
+func isValidResponseMode(mode string) bool {
+	switch strings.TrimSpace(mode) {
+	case "chat", "deep_research", "agent":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizeRequestedResponseMode(mode string, deepResearch *bool) string {
+	trimmed := strings.TrimSpace(mode)
+	if isValidResponseMode(trimmed) {
+		return trimmed
+	}
+	if deepResearch != nil && *deepResearch {
+		return "deep_research"
+	}
+	return "chat"
+}
+
+func normalizeResponseMode(mode string, deepResearchEnabled bool) string {
+	trimmed := strings.TrimSpace(mode)
+	if isValidResponseMode(trimmed) {
+		return trimmed
+	}
+	if deepResearchEnabled {
+		return "deep_research"
+	}
+	return "chat"
+}
+
+func encodeAgentSummariesJSON(summaries []agentSummary) (any, error) {
+	if len(summaries) == 0 {
+		return nil, nil
+	}
+	encoded, err := json.Marshal(summaries)
+	if err != nil {
+		return nil, err
+	}
+	return string(encoded), nil
+}
+
+func decodeAgentSummariesJSON(raw string) ([]agentSummary, bool) {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return nil, false
+	}
+	var parsed []agentSummary
+	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
+		return nil, false
+	}
+	if len(parsed) == 0 {
+		return nil, false
+	}
+	return parsed, true
 }
 
 func anonymousUser() session.User {

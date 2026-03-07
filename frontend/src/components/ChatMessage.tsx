@@ -1,5 +1,5 @@
 import { isValidElement, type HTMLAttributes, type ReactNode, useEffect, useState } from 'react';
-import { type Citation, type ProgressDecision, type ThinkingTrace, type Usage } from '../lib/api';
+import { type AgentSummary, type Citation, type ProgressDecision, type ThinkingTrace, type Usage } from '../lib/api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -11,6 +11,8 @@ type MessageData = {
   thinkingTrace?: ThinkingTrace | null;
   modelId?: string | null;
   usage?: Usage | null;
+  responseMode?: 'chat' | 'deep_research' | 'agent';
+  agentSummaries?: AgentSummary[];
   citations: Citation[];
 };
 
@@ -180,6 +182,7 @@ export default function ChatMessage({
   const [copiedUserMessage, setCopiedUserMessage] = useState(false);
   const [generationExpanded, setGenerationExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
+  const [agentsExpanded, setAgentsExpanded] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [usageExpanded, setUsageExpanded] = useState(false);
   const generationPanelID = `${message.id}-generation-trace`;
@@ -188,13 +191,16 @@ export default function ChatMessage({
   const generationStatusLabel =
     generationStatus === 'running' ? 'Running' : generationStatus === 'stopped' ? 'Stopped' : 'Complete';
   const reasoningPanelID = `${message.id}-reasoning`;
+  const agentsPanelID = `${message.id}-agents`;
   const sourcesPanelID = `${message.id}-sources`;
   const usagePanelID = `${message.id}-usage`;
   const hasUsage = isAssistant && !!message.usage;
+  const hasAgentSummaries = isAssistant && !!message.agentSummaries && message.agentSummaries.length > 0;
 
   useEffect(() => {
     setGenerationExpanded(false);
     setReasoningExpanded(false);
+    setAgentsExpanded(false);
     setSourcesExpanded(false);
     setUsageExpanded(false);
   }, [message.id]);
@@ -495,6 +501,62 @@ export default function ChatMessage({
                   </li>
                 ))}
               </ol>
+            </div>
+          </div>
+        )}
+
+        {hasAgentSummaries && message.agentSummaries && (
+          <div className="agent-summaries">
+            <button
+              type="button"
+              className="agent-summaries-toggle"
+              onClick={() => setAgentsExpanded((open) => !open)}
+              aria-expanded={agentsExpanded}
+              aria-controls={agentsPanelID}
+            >
+              <span className="agent-summaries-heading">
+                <span className="agent-summaries-title">Agents</span>
+                {!agentsExpanded && (
+                  <span className="agent-summaries-count">
+                    {message.agentSummaries.length} summaries
+                  </span>
+                )}
+              </span>
+              <svg
+                className={`agent-summaries-chevron ${agentsExpanded ? 'open' : ''}`}
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <polyline points="6 9 12 15 18 9" />
+              </svg>
+            </button>
+            <div
+              id={agentsPanelID}
+              className={`agent-summaries-content ${agentsExpanded ? 'expanded' : 'collapsed'}`}
+            >
+              {agentsExpanded && (
+                <ol className="agent-summaries-list">
+                  {message.agentSummaries.map((summary) => (
+                    <li key={`${message.id}-${summary.role}`} className="agent-summary-item">
+                      <div className="agent-summary-head">
+                        <span className="agent-summary-role">{summary.role}</span>
+                        {typeof summary.confidence === 'number' && (
+                          <span className="agent-summary-confidence">{Math.round(summary.confidence * 100)}%</span>
+                        )}
+                      </div>
+                      <p className="agent-summary-text">{summary.summary}</p>
+                      {summary.objections && summary.objections.length > 0 && (
+                        <p className="agent-summary-objections">{summary.objections.join(' · ')}</p>
+                      )}
+                    </li>
+                  ))}
+                </ol>
+              )}
             </div>
           </div>
         )}

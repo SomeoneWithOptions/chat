@@ -33,6 +33,13 @@ const (
 	defaultDeepMaxSearchQ      = 18
 	defaultChatMaxCitations    = 8
 	defaultDeepMaxCitations    = 12
+	defaultAgentMinSearchQ     = 20
+	defaultAgentSoftMaxSearchQ = 60
+	defaultAgentHardMaxSearchQ = 200
+	defaultAgentMaxSourcesRead = 80
+	defaultAgentTimeoutSecs    = 1200
+	defaultBraveMonthlyLimit   = 2000
+	defaultBraveMonthlyReserve = 200
 )
 
 type Config struct {
@@ -63,6 +70,7 @@ type Config struct {
 	DeepResearchTimeoutSeconds int
 	AgenticResearchChatEnabled bool
 	AgenticResearchDeepEnabled bool
+	AgentModeEnabled           bool
 	ChatResearchMaxLoops       int
 	ChatResearchMaxSourcesRead int
 	ChatResearchMaxSearchQ     int
@@ -74,6 +82,15 @@ type Config struct {
 	ResearchSourceMaxBytes     int
 	ResearchMaxCitationsChat   int
 	ResearchMaxCitationsDeep   int
+	AgentMinSearchQueries      int
+	AgentSoftMaxSearchQueries  int
+	AgentHardMaxSearchQueries  int
+	AgentMaxSourcesRead        int
+	AgentTimeoutSeconds        int
+	BraveMonthlyQueryLimit     int
+	BraveMonthlyQueryReserve   int
+	InternalWorkerBaseURL      string
+	InternalWorkerBearerToken  string
 }
 
 func (c Config) ListenAddress() string {
@@ -106,6 +123,7 @@ func Load() (Config, error) {
 		DeepResearchTimeoutSeconds: intOrDefault("DEEP_RESEARCH_TIMEOUT_SECONDS", defaultResearchTimeoutSecs),
 		AgenticResearchChatEnabled: boolOrDefault("AGENTIC_RESEARCH_CHAT_ENABLED", true),
 		AgenticResearchDeepEnabled: boolOrDefault("AGENTIC_RESEARCH_DEEP_ENABLED", true),
+		AgentModeEnabled:           boolOrDefault("AGENT_MODE_ENABLED", true),
 		ChatResearchMaxLoops:       intOrDefault("CHAT_RESEARCH_MAX_LOOPS", defaultChatMaxLoops),
 		ChatResearchMaxSourcesRead: intOrDefault("CHAT_RESEARCH_MAX_SOURCES_READ", defaultChatMaxSourcesRead),
 		ChatResearchMaxSearchQ:     intOrDefault("CHAT_RESEARCH_MAX_SEARCH_QUERIES", defaultChatMaxSearchQ),
@@ -117,6 +135,15 @@ func Load() (Config, error) {
 		ResearchSourceMaxBytes:     intOrDefault("RESEARCH_SOURCE_MAX_BYTES", defaultSourceMaxBytes),
 		ResearchMaxCitationsChat:   intOrDefault("RESEARCH_MAX_CITATIONS_CHAT", defaultChatMaxCitations),
 		ResearchMaxCitationsDeep:   intOrDefault("RESEARCH_MAX_CITATIONS_DEEP", defaultDeepMaxCitations),
+		AgentMinSearchQueries:      intOrDefault("AGENT_MIN_SEARCH_QUERIES", defaultAgentMinSearchQ),
+		AgentSoftMaxSearchQueries:  intOrDefault("AGENT_SOFT_MAX_SEARCH_QUERIES", defaultAgentSoftMaxSearchQ),
+		AgentHardMaxSearchQueries:  intOrDefault("AGENT_HARD_MAX_SEARCH_QUERIES", defaultAgentHardMaxSearchQ),
+		AgentMaxSourcesRead:        intOrDefault("AGENT_MAX_SOURCES_READ", defaultAgentMaxSourcesRead),
+		AgentTimeoutSeconds:        intOrDefault("AGENT_TIMEOUT_SECONDS", defaultAgentTimeoutSecs),
+		BraveMonthlyQueryLimit:     intOrDefault("BRAVE_MONTHLY_QUERY_LIMIT", defaultBraveMonthlyLimit),
+		BraveMonthlyQueryReserve:   intOrDefault("BRAVE_MONTHLY_QUERY_RESERVE", defaultBraveMonthlyReserve),
+		InternalWorkerBaseURL:      strings.TrimSpace(os.Getenv("INTERNAL_WORKER_BASE_URL")),
+		InternalWorkerBearerToken:  strings.TrimSpace(os.Getenv("INTERNAL_WORKER_BEARER_TOKEN")),
 	}
 
 	if cfg.Environment == "production" {
@@ -166,6 +193,25 @@ func Load() (Config, error) {
 	cfg.ResearchSourceMaxBytes = ensurePositiveInt(cfg.ResearchSourceMaxBytes, defaultSourceMaxBytes)
 	cfg.ResearchMaxCitationsChat = ensurePositiveInt(cfg.ResearchMaxCitationsChat, defaultChatMaxCitations)
 	cfg.ResearchMaxCitationsDeep = ensurePositiveInt(cfg.ResearchMaxCitationsDeep, defaultDeepMaxCitations)
+	cfg.AgentMinSearchQueries = ensurePositiveInt(cfg.AgentMinSearchQueries, defaultAgentMinSearchQ)
+	cfg.AgentSoftMaxSearchQueries = ensurePositiveInt(cfg.AgentSoftMaxSearchQueries, defaultAgentSoftMaxSearchQ)
+	cfg.AgentHardMaxSearchQueries = ensurePositiveInt(cfg.AgentHardMaxSearchQueries, defaultAgentHardMaxSearchQ)
+	cfg.AgentMaxSourcesRead = ensurePositiveInt(cfg.AgentMaxSourcesRead, defaultAgentMaxSourcesRead)
+	cfg.AgentTimeoutSeconds = ensurePositiveInt(cfg.AgentTimeoutSeconds, defaultAgentTimeoutSecs)
+	cfg.BraveMonthlyQueryLimit = ensurePositiveInt(cfg.BraveMonthlyQueryLimit, defaultBraveMonthlyLimit)
+	cfg.BraveMonthlyQueryReserve = ensurePositiveInt(cfg.BraveMonthlyQueryReserve, defaultBraveMonthlyReserve)
+	if cfg.AgentSoftMaxSearchQueries < cfg.AgentMinSearchQueries {
+		cfg.AgentSoftMaxSearchQueries = cfg.AgentMinSearchQueries
+	}
+	if cfg.AgentHardMaxSearchQueries < cfg.AgentSoftMaxSearchQueries {
+		cfg.AgentHardMaxSearchQueries = cfg.AgentSoftMaxSearchQueries
+	}
+	if cfg.BraveMonthlyQueryReserve >= cfg.BraveMonthlyQueryLimit {
+		cfg.BraveMonthlyQueryReserve = defaultBraveMonthlyReserve
+		if cfg.BraveMonthlyQueryReserve >= cfg.BraveMonthlyQueryLimit {
+			cfg.BraveMonthlyQueryReserve = cfg.BraveMonthlyQueryLimit / 10
+		}
+	}
 
 	return cfg, nil
 }

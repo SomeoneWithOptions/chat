@@ -72,11 +72,13 @@ beforeEach(() => {
     preferences: {
       lastUsedModelId: 'openrouter/free',
       lastUsedDeepResearchModelId: 'openrouter/free',
+      lastUsedAgentModelId: 'openrouter/free',
     },
   });
   updateModelPreferenceMock.mockResolvedValue({
     lastUsedModelId: 'openrouter/free',
     lastUsedDeepResearchModelId: 'openrouter/free',
+    lastUsedAgentModelId: 'openrouter/free',
   });
   updateModelFavoriteMock.mockResolvedValue([]);
   updateModelReasoningPresetMock.mockImplementation(async (_modelId: string, mode: api.ReasoningMode, effort: api.ReasoningEffort) => [
@@ -540,6 +542,36 @@ describe('Deep research streaming UX', () => {
     });
   });
 
+  it('sends mode=agent, keeps grounding on, and leaves the placeholder running after queue confirmation', async () => {
+    streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
+      onEvent({ type: 'metadata', grounding: true, deepResearch: false, responseMode: 'agent', modelId: 'openrouter/free', conversationId: 'conv-1' });
+      onEvent({ type: 'progress', phase: 'planning', title: 'Queueing agent run', detail: 'Preparing multi-agent workflow' });
+      onEvent({ type: 'done' });
+    });
+
+    const user = userEvent.setup();
+    render(<App />);
+
+    await screen.findByPlaceholderText('Ask anything...');
+
+    const groundingButton = screen.getByRole('button', { name: /grounding/i });
+    await user.click(screen.getByRole('button', { name: /agent/i }));
+    expect(groundingButton).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText('Ask anything...'), 'Run the agent workflow');
+    await user.click(screen.getAllByRole('button', { name: /send/i })[0]);
+
+    await waitFor(() => {
+      expect(streamMessageMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(streamMessageMock.mock.calls[0][0]).toMatchObject({
+      mode: 'agent',
+      grounding: true,
+      deepResearch: false,
+    });
+  });
+
   it('stops auto-scrolling when user scrolls up while streaming', async () => {
     let emitEvent: ((event: api.StreamEvent) => void) | null = null;
     let releaseStream: (() => void) | undefined;
@@ -823,6 +855,7 @@ describe('Model selector filtering', () => {
       preferences: {
         lastUsedModelId: 'openrouter/latest-used',
         lastUsedDeepResearchModelId: 'openrouter/latest-used',
+        lastUsedAgentModelId: 'openrouter/latest-used',
       },
     });
 
@@ -888,6 +921,7 @@ describe('Model selector filtering', () => {
       preferences: {
         lastUsedModelId: 'openrouter/million-context',
         lastUsedDeepResearchModelId: 'openrouter/million-context',
+        lastUsedAgentModelId: 'openrouter/million-context',
       },
     });
 

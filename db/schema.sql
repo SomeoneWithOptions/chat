@@ -43,10 +43,12 @@ CREATE TABLE IF NOT EXISTS user_model_preferences (
   user_id TEXT PRIMARY KEY,
   last_used_model_id TEXT,
   last_used_deep_research_model_id TEXT,
+  last_used_agent_model_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (last_used_model_id) REFERENCES models(id) ON DELETE SET NULL,
-  FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL
+  FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL,
+  FOREIGN KEY (last_used_agent_model_id) REFERENCES models(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_model_favorites (
@@ -61,7 +63,7 @@ CREATE TABLE IF NOT EXISTS user_model_favorites (
 CREATE TABLE IF NOT EXISTS user_model_reasoning_presets (
   user_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research')),
+  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research', 'agent')),
   effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high')),
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, model_id, mode),
@@ -100,6 +102,8 @@ CREATE TABLE IF NOT EXISTS messages (
   usage_provider_name TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
+  response_mode TEXT NOT NULL DEFAULT 'chat' CHECK (response_mode IN ('chat', 'deep_research', 'agent')),
+  agent_summaries_json TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -146,3 +150,43 @@ CREATE TABLE IF NOT EXISTS message_files (
 );
 
 CREATE INDEX IF NOT EXISTS idx_message_files_file_id ON message_files(file_id);
+
+CREATE TABLE IF NOT EXISTS agent_runs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  user_message_id TEXT NOT NULL,
+  assistant_message_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  reasoning_effort TEXT,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+  search_budget INTEGER NOT NULL DEFAULT 0,
+  searches_used INTEGER NOT NULL DEFAULT 0,
+  sources_read INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+  FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_agent_runs_status_created ON agent_runs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS brave_monthly_usage (
+  provider TEXT NOT NULL,
+  month_key TEXT NOT NULL,
+  queries_used INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (provider, month_key)
+);
+
+CREATE TABLE IF NOT EXISTS brave_rate_limits (
+  provider TEXT PRIMARY KEY,
+  next_allowed_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

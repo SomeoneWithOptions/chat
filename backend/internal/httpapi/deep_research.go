@@ -68,6 +68,7 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 		"type":           "metadata",
 		"grounding":      input.Grounding,
 		"deepResearch":   true,
+		"responseMode":   "deep_research",
 		"modelId":        input.ModelID,
 		"conversationId": input.ConversationID,
 	}
@@ -341,9 +342,11 @@ func (h Handler) streamDeepResearchResponse(ctx context.Context, w http.Response
 			input.ModelID,
 			input.Grounding,
 			true,
+			"deep_research",
 			orderedCitations,
 			traceCollector.Snapshot(),
 			messageUsageFromOpenRouter(assistantUsage),
+			nil,
 		)
 		if err != nil {
 			log.Printf(

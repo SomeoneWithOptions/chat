@@ -9,6 +9,7 @@ Build a minimal, modern, dark-mode-only chat interface (inspired by T3 Chat) whe
 - Attach files to chats
 - Use web grounding by default
 - Switch to a deeper research mode for richer analysis
+- Trigger an async agent mode for multi-agent debate and synthesis on harder questions
 - Final rollout gate: authenticate with Google before accessing the app
 
 Implementation sequencing note:
@@ -24,11 +25,12 @@ Implementation sequencing note:
 5. File attachment upload + send with prompt
 6. Grounding toggle (default: ON)
 7. "Deep Research" mode toggle
-8. Message citations for web-grounded responses
-9. Persisted chat history in Turso
-10. Delete controls: single chat and delete-all chats
-11. Per-model reasoning-effort presets (thinking level presets) for `chat` and `deep_research`
-12. Final rollout gate: Google sign-in (allowlisted emails, starting with 2 users)
+8. "Agent" mode toggle with async completion
+9. Message citations for web-grounded responses
+10. Persisted chat history in Turso
+11. Delete controls: single chat and delete-all chats
+12. Per-model reasoning-effort presets (thinking level presets) for `chat`, `deep_research`, and `agent`
+13. Final rollout gate: Google sign-in (allowlisted emails, starting with 2 users)
 
 ## Post-MVP Features
 

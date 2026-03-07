@@ -13,8 +13,11 @@ type ComposerProps = {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   grounding: boolean;
   deepResearch: boolean;
+  agentMode: boolean;
+  groundingLocked?: boolean;
   onToggleGrounding: () => void;
   onToggleDeepResearch: () => void;
+  onToggleAgentMode: () => void;
   isStreaming: boolean;
   uploadingAttachments: boolean;
   pendingAttachments: UploadedFile[];
@@ -45,8 +48,11 @@ export default function Composer({
   onReasoningEffortChange,
   grounding,
   deepResearch,
+  agentMode,
+  groundingLocked = false,
   onToggleGrounding,
   onToggleDeepResearch,
+  onToggleAgentMode,
   isStreaming,
   uploadingAttachments,
   pendingAttachments,
@@ -175,6 +181,7 @@ export default function Composer({
                 onClick={onToggleGrounding}
                 aria-pressed={grounding}
                 title="Grounding"
+                disabled={groundingLocked}
               >
               <svg className="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M12 2a10 10 0 1 0 10 10A10 10 0 0 0 12 2Z" />
@@ -202,6 +209,26 @@ export default function Composer({
                   <path d="M19.967 17.484A4 4 0 0 1 18 18"/>
                 </svg>
                 <span className="mode-text">Deep Research</span>
+              </button>
+              <button
+                type="button"
+                className={`composer-mode-button ${agentMode ? 'active' : 'inactive'}`}
+                onClick={onToggleAgentMode}
+                aria-pressed={agentMode}
+                title="Agent"
+              >
+                <svg className="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M4 12h6" />
+                  <path d="M14 12h6" />
+                  <path d="M12 4v6" />
+                  <path d="M12 14v6" />
+                  <circle cx="12" cy="12" r="2.5" />
+                  <circle cx="4" cy="12" r="1.5" />
+                  <circle cx="20" cy="12" r="1.5" />
+                  <circle cx="12" cy="4" r="1.5" />
+                  <circle cx="12" cy="20" r="1.5" />
+                </svg>
+                <span className="mode-text">Agent</span>
               </button>
             </div>
           </div>

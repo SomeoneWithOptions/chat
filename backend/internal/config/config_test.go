@@ -88,6 +88,18 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ResearchMaxCitationsDeep != 12 {
 		t.Fatalf("unexpected deep max citations default: %d", cfg.ResearchMaxCitationsDeep)
 	}
+	if !cfg.AgentModeEnabled {
+		t.Fatalf("expected agent mode enabled by default")
+	}
+	if cfg.AgentMinSearchQueries != 20 || cfg.AgentSoftMaxSearchQueries != 60 || cfg.AgentHardMaxSearchQueries != 200 {
+		t.Fatalf("unexpected agent query defaults: min=%d soft=%d hard=%d", cfg.AgentMinSearchQueries, cfg.AgentSoftMaxSearchQueries, cfg.AgentHardMaxSearchQueries)
+	}
+	if cfg.AgentMaxSourcesRead != 80 || cfg.AgentTimeoutSeconds != 1200 {
+		t.Fatalf("unexpected agent defaults: max_sources=%d timeout=%d", cfg.AgentMaxSourcesRead, cfg.AgentTimeoutSeconds)
+	}
+	if cfg.BraveMonthlyQueryLimit != 2000 || cfg.BraveMonthlyQueryReserve != 200 {
+		t.Fatalf("unexpected brave quota defaults: limit=%d reserve=%d", cfg.BraveMonthlyQueryLimit, cfg.BraveMonthlyQueryReserve)
+	}
 
 	if cfg.ModelSyncBearerToken != "" {
 		t.Fatalf("expected empty model sync bearer token by default")

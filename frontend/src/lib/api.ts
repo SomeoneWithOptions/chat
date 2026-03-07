@@ -16,7 +16,7 @@ export type Model = {
   curated: boolean;
 };
 
-export type ReasoningMode = 'chat' | 'deep_research';
+export type ReasoningMode = 'chat' | 'deep_research' | 'agent';
 export type ReasoningEffort = 'low' | 'medium' | 'high';
 
 export type ReasoningPreset = {
@@ -28,6 +28,15 @@ export type ReasoningPreset = {
 export type ModelPreferences = {
   lastUsedModelId: string;
   lastUsedDeepResearchModelId: string;
+  lastUsedAgentModelId: string;
+};
+
+export type AgentSummary = {
+  role: string;
+  summary: string;
+  objections?: string[];
+  confidence?: number;
+  evidenceIds?: number[];
 };
 
 export type ModelCatalog = {
@@ -56,6 +65,8 @@ export type ConversationMessage = {
   usage?: Usage | null;
   groundingEnabled: boolean;
   deepResearchEnabled: boolean;
+  responseMode?: ReasoningMode;
+  agentSummaries?: AgentSummary[];
   citations: Citation[];
   createdAt: string;
 };
@@ -92,6 +103,7 @@ export type ChatRequest = {
   editMessageId?: string;
   message: string;
   modelId: string;
+  mode?: ReasoningMode;
   reasoningEffort?: ReasoningEffort;
   grounding: boolean;
   deepResearch: boolean;
@@ -126,6 +138,7 @@ export type StreamEvent =
       type: 'metadata';
       grounding: boolean;
       deepResearch: boolean;
+      responseMode?: ReasoningMode;
       modelId: string;
       reasoningEffort?: ReasoningEffort;
       conversationId?: string;
@@ -151,6 +164,7 @@ export type StreamEvent =
   | { type: 'token'; delta: string }
   | { type: 'reasoning'; delta: string }
   | { type: 'usage'; usage: Usage }
+  | { type: 'agent_summaries'; agentSummaries: AgentSummary[] }
   | { type: 'error'; message: string }
   | { type: 'done' };
 

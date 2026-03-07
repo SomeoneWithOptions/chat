@@ -6,10 +6,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -96,7 +98,7 @@ func TestConversationLifecycleCreateListGetAndDelete(t *testing.T) {
 	}
 	decodeJSONBody(t, createResp, &created)
 
-	if err := handler.insertMessage(context.Background(), user.ID, created.Conversation.ID, "user", "hello lifecycle", "", true, false); err != nil {
+	if err := handler.insertMessage(context.Background(), user.ID, created.Conversation.ID, "user", "hello lifecycle", "", true, false, "chat"); err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
 
@@ -212,13 +214,13 @@ func TestDeleteAllConversationsScopedByUser(t *testing.T) {
 		t.Fatalf("insert other conversation: %v", err)
 	}
 
-	if err := handler.insertMessage(context.Background(), user1.ID, conversation1.ID, "user", "message one", "", true, false); err != nil {
+	if err := handler.insertMessage(context.Background(), user1.ID, conversation1.ID, "user", "message one", "", true, false, "chat"); err != nil {
 		t.Fatalf("insert message one: %v", err)
 	}
-	if err := handler.insertMessage(context.Background(), user1.ID, conversation2.ID, "assistant", "message two", "", true, false); err != nil {
+	if err := handler.insertMessage(context.Background(), user1.ID, conversation2.ID, "assistant", "message two", "", true, false, "chat"); err != nil {
 		t.Fatalf("insert message two: %v", err)
 	}
-	if err := handler.insertMessage(context.Background(), user2.ID, otherConversation.ID, "user", "keep me", "", true, false); err != nil {
+	if err := handler.insertMessage(context.Background(), user2.ID, otherConversation.ID, "user", "keep me", "", true, false, "chat"); err != nil {
 		t.Fatalf("insert other user message: %v", err)
 	}
 
@@ -312,7 +314,7 @@ func TestListConversationMessagesScopedByUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert conversation: %v", err)
 	}
-	if err := handler.insertMessage(context.Background(), user1.ID, conversation.ID, "user", "hello", "", true, false); err != nil {
+	if err := handler.insertMessage(context.Background(), user1.ID, conversation.ID, "user", "hello", "", true, false, "chat"); err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
 
@@ -389,9 +391,9 @@ VALUES (?, ?);
 	}
 
 	if _, err := db.Exec(`
-INSERT INTO user_model_preferences (user_id, last_used_model_id, last_used_deep_research_model_id)
-VALUES (?, ?, ?);
-`, user.ID, "anthropic/claude-3.5-haiku", "openrouter/free"); err != nil {
+INSERT INTO user_model_preferences (user_id, last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id)
+VALUES (?, ?, ?, ?);
+`, user.ID, "anthropic/claude-3.5-haiku", "openrouter/free", "openrouter/free"); err != nil {
 		t.Fatalf("seed preferences: %v", err)
 	}
 
@@ -871,11 +873,12 @@ LIMIT 1;
 
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
+	var lastUsedAgentModelID sql.NullString
 	if err := db.QueryRow(`
-SELECT last_used_model_id, last_used_deep_research_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id
 FROM user_model_preferences
 WHERE user_id = ?;
-`, user.ID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID); err != nil {
+`, user.ID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID); err != nil {
 		t.Fatalf("query model preferences: %v", err)
 	}
 	if !lastUsedModelID.Valid || lastUsedModelID.String != "openrouter/free" {
@@ -883,6 +886,9 @@ WHERE user_id = ?;
 	}
 	if !lastUsedDeepResearchModelID.Valid || lastUsedDeepResearchModelID.String != "openrouter/free" {
 		t.Fatalf("unexpected last_used_deep_research_model_id: %+v", lastUsedDeepResearchModelID)
+	}
+	if !lastUsedAgentModelID.Valid || lastUsedAgentModelID.String != "openrouter/free" {
+		t.Fatalf("unexpected last_used_agent_model_id: %+v", lastUsedAgentModelID)
 	}
 }
 
@@ -2747,7 +2753,7 @@ func TestDeleteConversationCleansAttachmentBlobAndMetadata(t *testing.T) {
 	if err != nil {
 		t.Fatalf("insert conversation: %v", err)
 	}
-	if err := handler.insertMessage(context.Background(), user.ID, conversation.ID, "user", "hello", "openrouter/free", true, false); err != nil {
+	if err := handler.insertMessage(context.Background(), user.ID, conversation.ID, "user", "hello", "openrouter/free", true, false, "chat"); err != nil {
 		t.Fatalf("insert message: %v", err)
 	}
 
@@ -2880,6 +2886,289 @@ func TestCreateConversationInAuthDisabledMode(t *testing.T) {
 	}
 }
 
+func TestChatMessagesAgentModeQueuesAndCompletesAsyncRun(t *testing.T) {
+	var (
+		mu           sync.Mutex
+		plannerCalls int
+		prompts      []string
+	)
+	streamer := stubStreamer{
+		streamFn: func(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, _ func(string) error, onUsage func(openrouter.Usage) error) error {
+			mu.Lock()
+			defer mu.Unlock()
+
+			if onStart != nil {
+				if err := onStart(); err != nil {
+					return err
+				}
+			}
+
+			prompt := req.Messages[len(req.Messages)-1].Content
+			prompts = append(prompts, prompt)
+
+			systemPrompt := ""
+			if len(req.Messages) > 0 {
+				systemPrompt = req.Messages[0].Content
+			}
+
+			var response string
+			switch {
+			case strings.Contains(systemPrompt, "You are a research planner."):
+				plannerCalls++
+				if plannerCalls == 1 {
+					response = `{"nextAction":"search_more","queries":["official example update"],"coverageGaps":["Need a primary source"],"targetSourceTypes":["official docs"],"confidence":0.31,"reason":"Need initial evidence."}`
+				} else {
+					response = `{"nextAction":"finalize","queries":[],"coverageGaps":[],"targetSourceTypes":[],"confidence":0.82,"reason":"Evidence is sufficient."}`
+				}
+			case systemPrompt == "You are a structured JSON generator.":
+				roleName := "Agent"
+				switch {
+				case strings.Contains(prompt, "You are Scout."):
+					roleName = "Scout"
+				case strings.Contains(prompt, "You are Skeptic."):
+					roleName = "Skeptic"
+				case strings.Contains(prompt, "You are Verifier."):
+					roleName = "Verifier"
+				case strings.Contains(prompt, "You are User Advocate."):
+					roleName = "User Advocate"
+				}
+				response = fmt.Sprintf(`{"role":%q,"summary":%q,"objections":["Check caveats"],"confidence":0.74,"evidenceIds":[1]}`, roleName, roleName+" summary")
+			default:
+				response = "Final agent answer [1]"
+				if onUsage != nil {
+					if err := onUsage(openrouter.Usage{
+						PromptTokens:     120,
+						CompletionTokens: 48,
+						TotalTokens:      168,
+						ReasoningTokens:  pointerToInt(16),
+					}); err != nil {
+						return err
+					}
+				}
+			}
+
+			return onDelta(response)
+		},
+	}
+
+	handler, db := newTestHandler(t, streamer)
+	t.Cleanup(func() { _ = db.Close() })
+	handler.cfg.AgentMinSearchQueries = 1
+	handler.cfg.AgentSoftMaxSearchQueries = 1
+	handler.cfg.AgentHardMaxSearchQueries = 1
+	handler.cfg.AgentMaxSourcesRead = 1
+	handler.cfg.AgentTimeoutSeconds = 30
+	handler.cfg.BraveMonthlyQueryLimit = 50
+	handler.cfg.BraveMonthlyQueryReserve = 0
+	handler.cfg.InternalWorkerBearerToken = "test-worker-token"
+	handler.grounding = stubGrounder{
+		results: []brave.SearchResult{
+			{URL: "https://example.com/official", Title: "Official Example", Snippet: "Primary source snippet"},
+		},
+	}
+	handler.researchReader = stubResearchReader{
+		responses: map[string]research.ReadResult{
+			"https://example.com/official": {
+				URL:         "https://example.com/official",
+				FinalURL:    "https://example.com/official",
+				Title:       "Official Example",
+				ContentType: "text/html",
+				Text:        "Primary source full text about the example update.",
+				Snippet:     "Primary source snippet",
+				FetchStatus: "ok",
+				FetchedAt:   time.Now().UTC(),
+			},
+		},
+	}
+
+	workerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		runID := strings.TrimPrefix(r.URL.Path, "/internal/agent-runs/")
+		r = requestWithRouteParam(r, "id", runID)
+		handler.InternalRunAgent(w, r)
+	}))
+	defer workerServer.Close()
+	handler.cfg.InternalWorkerBaseURL = workerServer.URL
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	if _, err := db.Exec(`
+INSERT INTO files (id, user_id, filename, media_type, size_bytes, storage_backend, storage_path, extracted_text)
+VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', 'Attachment detail that must survive queueing.');
+`, user.ID); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Research this with the attachment","modelId":"openrouter/free","mode":"agent","fileIds":["file-1"]}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"responseMode":"agent"`) {
+		t.Fatalf("expected agent metadata in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"type":"done"`) {
+		t.Fatalf("expected done event in stream body: %s", body)
+	}
+
+	var (
+		runStatus      string
+		searchesUsed   int
+		persistedError sql.NullString
+	)
+	if err := db.QueryRow(`SELECT status, searches_used, last_error FROM agent_runs LIMIT 1;`).Scan(&runStatus, &searchesUsed, &persistedError); err != nil {
+		t.Fatalf("load agent run: %v", err)
+	}
+	if runStatus != "completed" {
+		t.Fatalf("expected completed agent run, got %q (error=%q)", runStatus, persistedError.String)
+	}
+	if searchesUsed != 1 {
+		t.Fatalf("expected exactly one Brave query, got %d", searchesUsed)
+	}
+
+	var monthQueries int
+	if err := db.QueryRow(`SELECT queries_used FROM brave_monthly_usage WHERE provider = ? AND month_key = ?;`, braveProviderName, currentMonthKey(time.Now().UTC())).Scan(&monthQueries); err != nil {
+		t.Fatalf("load brave usage: %v", err)
+	}
+	if monthQueries != 1 {
+		t.Fatalf("expected Brave monthly usage to be 1, got %d", monthQueries)
+	}
+
+	var conversationID string
+	if err := db.QueryRow(`SELECT id FROM conversations WHERE user_id = ? LIMIT 1;`, user.ID).Scan(&conversationID); err != nil {
+		t.Fatalf("query conversation: %v", err)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/v1/conversations/"+conversationID+"/messages", nil)
+	listReq = requestWithSessionUser(listReq, user)
+	listReq = requestWithConversationID(listReq, conversationID)
+	listResp := httptest.NewRecorder()
+	handler.ListConversationMessages(listResp, listReq)
+
+	if listResp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, listResp.Code, listResp.Body.String())
+	}
+
+	var payload struct {
+		Messages []messageResponse `json:"messages"`
+	}
+	decodeJSONBody(t, listResp, &payload)
+	if len(payload.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(payload.Messages))
+	}
+	assistant := payload.Messages[1]
+	if assistant.ResponseMode != "agent" {
+		t.Fatalf("expected assistant response mode agent, got %q", assistant.ResponseMode)
+	}
+	if assistant.Content != "Final agent answer [1]" {
+		t.Fatalf("unexpected assistant content: %q", assistant.Content)
+	}
+	if len(assistant.AgentSummaries) != 4 {
+		t.Fatalf("expected 4 agent summaries, got %d", len(assistant.AgentSummaries))
+	}
+	if len(assistant.Citations) != 1 {
+		t.Fatalf("expected 1 citation, got %d", len(assistant.Citations))
+	}
+	if assistant.ThinkingTrace == nil || assistant.ThinkingTrace.Status != thinkingTraceStatusDone {
+		t.Fatalf("expected assistant thinking trace to be done, got %+v", assistant.ThinkingTrace)
+	}
+
+	mu.Lock()
+	defer mu.Unlock()
+	foundAttachmentPrompt := false
+	for _, prompt := range prompts {
+		if strings.Contains(prompt, "Attached file excerpts:") && strings.Contains(prompt, "brief.txt") {
+			foundAttachmentPrompt = true
+			break
+		}
+	}
+	if !foundAttachmentPrompt {
+		t.Fatalf("expected queued agent run to include attachment excerpts in downstream prompts: %#v", prompts)
+	}
+}
+
+func TestChatMessagesAgentModeRejectsWhenBraveBudgetBelowMinimum(t *testing.T) {
+	handler, db := newTestHandler(t, stubStreamer{})
+	t.Cleanup(func() { _ = db.Close() })
+	handler.cfg.AgentMinSearchQueries = 20
+	handler.cfg.AgentHardMaxSearchQueries = 200
+	handler.cfg.BraveMonthlyQueryLimit = 25
+	handler.cfg.BraveMonthlyQueryReserve = 10
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "openrouter/free")
+
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/v1/chat/messages",
+		strings.NewReader(`{"message":"Do the agent workflow","modelId":"openrouter/free","mode":"agent"}`),
+	)
+	req = requestWithSessionUser(req, user)
+	resp := httptest.NewRecorder()
+
+	handler.ChatMessages(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
+	}
+	body := resp.Body.String()
+	if !strings.Contains(body, `"type":"warning"`) {
+		t.Fatalf("expected warning event in stream body: %s", body)
+	}
+	if !strings.Contains(body, `"responseMode":"agent"`) {
+		t.Fatalf("expected agent metadata in stream body: %s", body)
+	}
+
+	var (
+		runStatus    string
+		searchBudget int
+		lastError    sql.NullString
+	)
+	if err := db.QueryRow(`SELECT status, search_budget, last_error FROM agent_runs LIMIT 1;`).Scan(&runStatus, &searchBudget, &lastError); err != nil {
+		t.Fatalf("load failed agent run: %v", err)
+	}
+	if runStatus != "failed" {
+		t.Fatalf("expected failed run, got %q", runStatus)
+	}
+	if searchBudget != 15 {
+		t.Fatalf("expected available search budget 15, got %d", searchBudget)
+	}
+	if !strings.Contains(lastError.String, "Not enough Brave monthly budget") {
+		t.Fatalf("unexpected failure reason: %q", lastError.String)
+	}
+
+	var assistantContent, rawTrace string
+	if err := db.QueryRow(`
+SELECT content, COALESCE(thinking_trace_json, '')
+FROM messages
+WHERE role = 'assistant'
+LIMIT 1;
+`).Scan(&assistantContent, &rawTrace); err != nil {
+		t.Fatalf("load assistant placeholder: %v", err)
+	}
+	if !strings.Contains(assistantContent, "remaining Brave free-tier budget") {
+		t.Fatalf("expected budget warning in assistant placeholder, got %q", assistantContent)
+	}
+	trace, ok := decodeThinkingTraceJSON(rawTrace)
+	if !ok {
+		t.Fatalf("expected persisted thinking trace, got %q", rawTrace)
+	}
+	if trace.Status != thinkingTraceStatusStopped {
+		t.Fatalf("expected stopped thinking trace, got %q", trace.Status)
+	}
+}
+
 func newTestHandler(t *testing.T, streamer chatStreamer) (Handler, *sql.DB) {
 	return newTestHandlerWithFileStore(t, streamer, nil)
 }
@@ -2916,6 +3205,14 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 		ResearchSourceMaxBytes:     1_500_000,
 		ResearchMaxCitationsChat:   8,
 		ResearchMaxCitationsDeep:   12,
+		AgentModeEnabled:           true,
+		AgentMinSearchQueries:      20,
+		AgentSoftMaxSearchQueries:  60,
+		AgentHardMaxSearchQueries:  200,
+		AgentMaxSourcesRead:        80,
+		AgentTimeoutSeconds:        1200,
+		BraveMonthlyQueryLimit:     2000,
+		BraveMonthlyQueryReserve:   200,
 	}
 
 	handler := NewHandlerWithFileStore(cfg, db, session.NewStore(db), auth.NewVerifier(cfg), streamer, fileStore)
@@ -2961,6 +3258,12 @@ func requestWithSessionUser(req *http.Request, user session.User) *http.Request 
 func requestWithConversationID(req *http.Request, conversationID string) *http.Request {
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("id", conversationID)
+	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+}
+
+func requestWithRouteParam(req *http.Request, key, value string) *http.Request {
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add(key, value)
 	return req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
 }
 
@@ -3072,6 +3375,7 @@ type stubStreamer struct {
 	catalog         []openrouter.Model
 	catalogErr      error
 	onRequest       func(openrouter.StreamRequest)
+	streamFn        func(context.Context, openrouter.StreamRequest, func() error, func(string) error, func(string) error, func(openrouter.Usage) error) error
 }
 
 type stubGrounder struct {
@@ -3106,7 +3410,10 @@ func (s stubResearchReader) Read(_ context.Context, rawURL string) (research.Rea
 	return research.ReadResult{}, errors.New("not found")
 }
 
-func (s stubStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error, onUsage func(openrouter.Usage) error) error {
+func (s stubStreamer) StreamChatCompletion(ctx context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, onReasoning func(string) error, onUsage func(openrouter.Usage) error) error {
+	if s.streamFn != nil {
+		return s.streamFn(ctx, req, onStart, onDelta, onReasoning, onUsage)
+	}
 	if s.onRequest != nil {
 		s.onRequest(req)
 	}
@@ -3208,10 +3515,12 @@ CREATE TABLE user_model_preferences (
   user_id TEXT PRIMARY KEY,
   last_used_model_id TEXT,
   last_used_deep_research_model_id TEXT,
+  last_used_agent_model_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (last_used_model_id) REFERENCES models(id) ON DELETE SET NULL,
-  FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL
+  FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL,
+  FOREIGN KEY (last_used_agent_model_id) REFERENCES models(id) ON DELETE SET NULL
 );
 
 CREATE TABLE user_model_favorites (
@@ -3226,7 +3535,7 @@ CREATE TABLE user_model_favorites (
 CREATE TABLE user_model_reasoning_presets (
   user_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research')),
+  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research', 'agent')),
   effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high')),
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, model_id, mode),
@@ -3263,6 +3572,8 @@ CREATE TABLE messages (
   usage_provider_name TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
+  response_mode TEXT NOT NULL DEFAULT 'chat' CHECK (response_mode IN ('chat', 'deep_research', 'agent')),
+  agent_summaries_json TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -3301,4 +3612,41 @@ CREATE TABLE message_files (
   FOREIGN KEY (message_id) REFERENCES messages(id) ON DELETE CASCADE,
   FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 );
+
+CREATE TABLE agent_runs (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  conversation_id TEXT NOT NULL,
+  user_message_id TEXT NOT NULL,
+  assistant_message_id TEXT NOT NULL,
+  model_id TEXT NOT NULL,
+  reasoning_effort TEXT,
+  status TEXT NOT NULL CHECK (status IN ('queued', 'running', 'completed', 'failed')),
+  search_budget INTEGER NOT NULL DEFAULT 0,
+  searches_used INTEGER NOT NULL DEFAULT 0,
+  sources_read INTEGER NOT NULL DEFAULT 0,
+  last_error TEXT,
+  started_at TEXT,
+  finished_at TEXT,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+  FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
+  FOREIGN KEY (user_message_id) REFERENCES messages(id) ON DELETE CASCADE,
+  FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE
+);
+
+CREATE TABLE brave_monthly_usage (
+  provider TEXT NOT NULL,
+  month_key TEXT NOT NULL,
+  queries_used INTEGER NOT NULL DEFAULT 0,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (provider, month_key)
+);
+
+CREATE TABLE brave_rate_limits (
+  provider TEXT PRIMARY KEY,
+  next_allowed_at TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+ );
 `

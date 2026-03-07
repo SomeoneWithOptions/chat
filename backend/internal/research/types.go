@@ -22,6 +22,7 @@ const (
 )
 
 type OrchestratorConfig struct {
+	MinSearchQueries   int
 	MaxLoops           int
 	MaxSourcesRead     int
 	MaxSearchQueries   int

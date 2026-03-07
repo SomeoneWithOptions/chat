@@ -37,6 +37,9 @@ Set at minimum:
 - `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
 - `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
+- `AGENT_MODE_ENABLED`, `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional async agent mode budgets)
+- `BRAVE_MONTHLY_QUERY_LIMIT`, `BRAVE_MONTHLY_QUERY_RESERVE` (optional Brave free-tier quota controls)
+- `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings if agent runs are executed via a separate internal URL)
 - `DEFAULT_CHAT_REASONING_EFFORT` (optional, default `medium`)
 - `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional, default `high`)
 - `SESSION_TTL_HOURS` (optional, default `720` for 30-day reauthentication)
@@ -94,3 +97,9 @@ Expected response:
 - Raw provider reasoning text is available as an opt-in nested section within the message thinking panel when streamed by the model.
 - Timeout and cancellation are enforced server-side via `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - When Brave search partially fails, the request continues with available evidence and warning events.
+
+## Agent Mode Behavior (Local)
+
+- Agent mode is always grounded and enqueues an async 4-agent workflow instead of holding the request open.
+- The initial SSE response only creates the placeholder assistant message and queue progress; the frontend polls the conversation until the assistant message finishes.
+- Agent runs enforce Brave monthly reserve checks before starting and pace Brave searches through a shared DB-backed lease so multiple instances still respect the free-tier rate limit.
