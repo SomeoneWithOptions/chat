@@ -16,6 +16,8 @@ Recommended execution order:
 10. `plans/09-implementation-roadmap.md`
 11. `plans/10-agentic-web-research-orchestration-plan.md`
 12. `plans/11-agentic-web-research-execution-checklist.md`
+13. `plans/12-research-process-ux-visibility-plan.md`
+14. `plans/13-prompt-enhance-plan.md`
 
 Core stack assumptions used in these plans:
 

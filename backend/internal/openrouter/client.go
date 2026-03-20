@@ -185,6 +185,109 @@ func NewClient(cfg config.Config, httpClient *http.Client) Client {
 	}
 }
 
+// chatCompletionAPIResponse represents the non-streaming response from OpenRouter.
+type chatCompletionAPIResponse struct {
+	ID       string `json:"id,omitempty"`
+	Model    string `json:"model,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Choices  []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+	Usage *streamAPIUsage `json:"usage,omitempty"`
+	Error *struct {
+		Message string `json:"message"`
+	} `json:"error,omitempty"`
+}
+
+// ChatCompletion makes a non-streaming chat completion request to OpenRouter.
+// Returns the full response content as a string and usage stats.
+func (c Client) ChatCompletion(ctx context.Context, req StreamRequest) (string, Usage, error) {
+	if strings.TrimSpace(c.apiKey) == "" {
+		return "", Usage{}, ErrMissingAPIKey
+	}
+	if strings.TrimSpace(req.Model) == "" {
+		return "", Usage{}, errors.New("model is required")
+	}
+	if len(req.Messages) == 0 {
+		return "", Usage{}, errors.New("messages are required")
+	}
+
+	var reasoning *ReasoningConfig
+	if req.Reasoning != nil {
+		effort := strings.TrimSpace(req.Reasoning.Effort)
+		if effort != "" {
+			reasoning = &ReasoningConfig{Effort: effort}
+		}
+	}
+
+	payload, err := json.Marshal(streamAPIRequest{
+		Model:     strings.TrimSpace(req.Model),
+		Messages:  req.Messages,
+		Reasoning: reasoning,
+		Stream:    false,
+	})
+	if err != nil {
+		return "", Usage{}, fmt.Errorf("marshal openrouter request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/chat/completions", bytes.NewReader(payload))
+	if err != nil {
+		return "", Usage{}, fmt.Errorf("build openrouter request: %w", err)
+	}
+	httpReq.Header.Set("Authorization", "Bearer "+c.apiKey)
+	httpReq.Header.Set("Content-Type", "application/json")
+	httpReq.Header.Set("Accept", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return "", Usage{}, fmt.Errorf("request openrouter: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, maxErrorBodyBytes))
+		return "", Usage{}, fmt.Errorf("openrouter returned %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+
+	var parsed chatCompletionAPIResponse
+	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
+		return "", Usage{}, fmt.Errorf("decode openrouter response: %w", err)
+	}
+
+	if parsed.Error != nil && strings.TrimSpace(parsed.Error.Message) != "" {
+		return "", Usage{}, errors.New(strings.TrimSpace(parsed.Error.Message))
+	}
+
+	content := ""
+	if len(parsed.Choices) > 0 {
+		content = parsed.Choices[0].Message.Content
+	}
+
+	var usage Usage
+	if parsed.Usage != nil {
+		usage = Usage{
+			PromptTokens:     parsed.Usage.PromptTokens,
+			CompletionTokens: parsed.Usage.CompletionTokens,
+			TotalTokens:      parsed.Usage.TotalTokens,
+			CostMicrosUSD:    parseOptionalPriceMicros(parsed.Usage.Cost),
+			ModelID:          strings.TrimSpace(parsed.Model),
+			ProviderName:     strings.TrimSpace(parsed.Provider),
+		}
+		if parsed.Usage.CostDetails != nil {
+			usage.ByokInferenceCostMicros = parseOptionalPriceMicros(parsed.Usage.CostDetails.UpstreamInferenceCost)
+		}
+		if parsed.Usage.CompletionTokensDetails != nil {
+			reasoningTokens := parsed.Usage.CompletionTokensDetails.ReasoningTokens
+			usage.ReasoningTokens = &reasoningTokens
+		}
+		usage.GenerationID = strings.TrimSpace(parsed.ID)
+	}
+
+	return content, usage, nil
+}
+
 func (c Client) StreamChatCompletion(
 	ctx context.Context,
 	req StreamRequest,

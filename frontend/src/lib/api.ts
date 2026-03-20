@@ -168,6 +168,43 @@ export type StreamEvent =
   | { type: 'error'; message: string }
   | { type: 'done' };
 
+// ─── Prompt Enhance Types ───────────────────────
+
+export type EnhanceQuestionType = 'single_select' | 'multi_select' | 'yes_no';
+
+export type EnhanceQuestionOption = {
+  id: string;
+  label: string;
+};
+
+export type EnhanceQuestion = {
+  id: string;
+  text: string;
+  type: EnhanceQuestionType;
+  options: EnhanceQuestionOption[];
+};
+
+export type EnhanceAnswer = {
+  questionId: string;
+  questionText: string;
+  selectedOptions: string[];
+};
+
+export type EnhanceRequest = {
+  prompt: string;
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+  answers?: EnhanceAnswer[];
+  previousEnhancedPrompt?: string;
+  previousQuestionsAndAnswers?: string;
+  iteration?: number;
+};
+
+export type EnhanceResponse = {
+  questions?: EnhanceQuestion[];
+  enhancedPrompt?: string;
+};
+
 const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
 
 type ErrorEnvelope = {
@@ -385,4 +422,15 @@ export async function streamMessage(
       }
     }
   }
+}
+
+export async function enhancePrompt(
+  request: EnhanceRequest,
+  options?: { signal?: AbortSignal },
+): Promise<EnhanceResponse> {
+  return requestJSON<EnhanceResponse>('/v1/prompt/enhance', {
+    method: 'POST',
+    body: JSON.stringify(request),
+    signal: options?.signal,
+  });
 }

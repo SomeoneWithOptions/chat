@@ -48,6 +48,8 @@ function ComposerHarness({ onSend }: { onSend: (event: FormEvent<HTMLFormElement
       onRemoveAttachment={() => undefined}
       error={null}
       streamWarning={null}
+      onEnhance={() => undefined}
+      enhanceDisabled={false}
     />
   );
 }

@@ -35,6 +35,7 @@ type Handler struct {
 	sessions       session.Store
 	verifier       auth.Verifier
 	openrouter     chatStreamer
+	completer      chatCompleter
 	grounding      groundingSearcher
 	researchReader research.Reader
 	models         modelCataloger
@@ -61,6 +62,10 @@ type chatStreamer interface {
 	GetGeneration(ctx context.Context, generationID string) (openrouter.Generation, error)
 }
 
+type chatCompleter interface {
+	ChatCompletion(ctx context.Context, req openrouter.StreamRequest) (string, openrouter.Usage, error)
+}
+
 type modelCataloger interface {
 	ListModels(ctx context.Context) ([]openrouter.Model, error)
 }
@@ -85,12 +90,17 @@ func NewHandlerWithFileStore(
 	if source, ok := streamer.(modelCataloger); ok {
 		catalog = source
 	}
+	var completer chatCompleter
+	if source, ok := streamer.(chatCompleter); ok {
+		completer = source
+	}
 	return Handler{
 		cfg:        cfg,
 		db:         db,
 		sessions:   sessions,
 		verifier:   verifier,
 		openrouter: streamer,
+		completer:  completer,
 		models:     catalog,
 		files:      fileStore,
 	}

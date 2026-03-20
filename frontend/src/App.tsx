@@ -30,6 +30,7 @@ import Sidebar from './components/Sidebar';
 import ModelSelector from './components/ModelSelector';
 import ChatMessage, { type MessageData } from './components/ChatMessage';
 import Composer from './components/Composer';
+import PromptEnhanceModal from './components/PromptEnhanceModal';
 import useVirtualKeyboard from './hooks/useVirtualKeyboard';
 
 const GoogleIcon = () => (
@@ -286,6 +287,7 @@ export default function App() {
 
   // ─── UI State ─────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
+  const [enhanceModalOpen, setEnhanceModalOpen] = useState(false);
 
   const messagesContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldAutoScrollRef = useRef(true);
@@ -647,6 +649,16 @@ export default function App() {
   );
 
   // ─── Handlers ─────────────────────────────────
+
+  function handleOpenEnhance() {
+    if (prompt.trim().length === 0) return;
+    setEnhanceModalOpen(true);
+  }
+
+  function handleUseEnhancedPrompt(enhanced: string) {
+    setPrompt(enhanced);
+    setEnhanceModalOpen(false);
+  }
 
   async function handleDevLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1360,7 +1372,20 @@ export default function App() {
           error={error}
           streamWarning={streamWarning}
           sendDisabled={editingMessageId !== null}
+          onEnhance={handleOpenEnhance}
+          enhanceDisabled={prompt.trim().length === 0 || isStreaming || uploadingAttachments}
         />
+
+        {enhanceModalOpen && (
+          <PromptEnhanceModal
+            isOpen={enhanceModalOpen}
+            onClose={() => setEnhanceModalOpen(false)}
+            prompt={prompt}
+            modelId={selectedModel}
+            reasoningEffort={selectedReasoningEffort}
+            onUsePrompt={handleUseEnhancedPrompt}
+          />
+        )}
       </div>
     </div>
   );

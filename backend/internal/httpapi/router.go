@@ -78,6 +78,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 			p.Put("/models/favorites", h.UpdateModelFavorite)
 			p.Put("/models/reasoning-presets", h.UpdateModelReasoningPreset)
 			p.Post("/files", h.UploadFile)
+			p.Post("/prompt/enhance", h.EnhancePrompt)
 			p.Post("/conversations", h.CreateConversation)
 			p.Get("/conversations", h.ListConversations)
 			p.Delete("/conversations", h.DeleteAllConversations)
