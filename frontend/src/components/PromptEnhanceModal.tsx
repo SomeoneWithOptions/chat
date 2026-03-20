@@ -131,13 +131,15 @@ export default function PromptEnhanceModal({
     });
   }
 
+  function getSelectedOptionLabels(question: EnhanceQuestion): string[] {
+    const selectedIds = answers.get(question.id) ?? [];
+    return question.options.filter((opt) => selectedIds.includes(opt.id)).map((opt) => opt.label);
+  }
+
   function serializeQAHistory(): string {
     const lines: string[] = [];
     for (const q of questions) {
-      const selected = answers.get(q.id) ?? [];
-      const selectedLabels = q.options
-        .filter((opt) => selected.includes(opt.id))
-        .map((opt) => opt.label);
+      const selectedLabels = getSelectedOptionLabels(q);
       if (selectedLabels.length > 0) {
         lines.push(`Q: ${q.text}`);
         lines.push(`A: ${selectedLabels.join(', ')}`);
@@ -156,7 +158,7 @@ export default function PromptEnhanceModal({
       .map((q) => ({
         questionId: q.id,
         questionText: q.text,
-        selectedOptions: answers.get(q.id) ?? [],
+        selectedOptions: getSelectedOptionLabels(q),
       }));
 
     try {

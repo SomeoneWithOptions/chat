@@ -52,8 +52,8 @@ const sampleQuestions: EnhanceResponse = {
       text: 'Should the function handle edge cases?',
       type: 'yes_no' as const,
       options: [
-        { id: 'opt6', label: 'Yes' },
-        { id: 'opt7', label: 'No' },
+        { id: 'yes', label: 'Yes' },
+        { id: 'no', label: 'No' },
       ],
     },
   ],
@@ -171,6 +171,15 @@ describe('PromptEnhanceModal', () => {
     const secondCall = mockEnhancePrompt.mock.calls[1][0];
     expect(secondCall.answers).toBeDefined();
     expect(secondCall.answers!.length).toBe(3);
+    expect(secondCall.answers).toEqual([
+      { questionId: 'q1', questionText: 'What programming language?', selectedOptions: ['TypeScript'] },
+      { questionId: 'q2', questionText: 'What sorting algorithm?', selectedOptions: ['QuickSort'] },
+      {
+        questionId: 'q3',
+        questionText: 'Should the function handle edge cases?',
+        selectedOptions: ['Yes'],
+      },
+    ]);
   });
 
   it('result view shows enhanced prompt', async () => {

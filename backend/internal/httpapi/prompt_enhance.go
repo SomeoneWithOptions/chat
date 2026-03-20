@@ -205,7 +205,7 @@ func (h Handler) handleGoDeeperQuestions(w http.ResponseWriter, r *http.Request,
 }
 
 func (h Handler) handleEnhance(w http.ResponseWriter, r *http.Request, req enhancePromptRequest, prompt, modelID string) {
-	userMessage := buildEnhanceUserMessage(prompt, req.Answers)
+	userMessage := buildEnhanceUserMessage(prompt, req.PreviousEnhancedPrompt, req.PreviousQuestionsAndAnswers, req.Answers)
 
 	messages := []openrouter.Message{
 		{Role: "system", Content: promptEnhanceSystemEnhance},

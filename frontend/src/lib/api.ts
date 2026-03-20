@@ -187,6 +187,7 @@ export type EnhanceQuestion = {
 export type EnhanceAnswer = {
   questionId: string;
   questionText: string;
+  // Human-readable option labels selected by the user.
   selectedOptions: string[];
 };
 

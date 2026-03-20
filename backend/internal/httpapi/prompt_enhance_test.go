@@ -525,5 +525,64 @@ func TestEnhancePromptPassesCorrectSystemPrompt(t *testing.T) {
 	}
 }
 
+func TestEnhancePromptUsesSelectedLabelsAndPreviousPrompt(t *testing.T) {
+	t.Parallel()
+
+	enhancedJSON := `{"enhancedPrompt": "Sharper prompt"}`
+
+	var capturedReq openrouter.StreamRequest
+	streamer := &stubCompleterStreamer{completionContent: enhancedJSON}
+	streamer.onRequest = func(req openrouter.StreamRequest) {
+		capturedReq = req
+	}
+
+	handler, db := newTestHandlerWithCompleter(t, streamer)
+	t.Cleanup(func() { db.Close() })
+	seedUser(t, db, "u1", "test@test.com")
+
+	req := enhanceRequest(`{
+		"prompt": "Explain how databases work",
+		"modelId": "openrouter/free",
+		"previousEnhancedPrompt": "Explain how relational databases work with indexing and query optimization.",
+		"previousQuestionsAndAnswers": "Q: Which database type?\nA: Relational",
+		"answers": [
+			{"questionId": "q1", "questionText": "What depth?", "selectedOptions": ["Detailed technical explanation"]},
+			{"questionId": "q2", "questionText": "Include examples?", "selectedOptions": ["Yes", "Code samples"]}
+		]
+	}`)
+	resp := httptest.NewRecorder()
+	handler.EnhancePrompt(resp, req)
+
+	if resp.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d: %s", resp.Code, resp.Body.String())
+	}
+
+	if len(capturedReq.Messages) != 2 {
+		t.Fatalf("expected 2 messages, got %d", len(capturedReq.Messages))
+	}
+
+	systemPrompt := capturedReq.Messages[0].Content
+	if !strings.Contains(systemPrompt, "Do NOT request hidden internal reasoning or chain-of-thought") {
+		t.Fatalf("system prompt missing updated reasoning guidance: %s", systemPrompt)
+	}
+
+	userMessage := capturedReq.Messages[1].Content
+	if !strings.Contains(userMessage, "Current enhanced prompt so far:") {
+		t.Fatalf("expected previous enhanced prompt in user message: %s", userMessage)
+	}
+	if !strings.Contains(userMessage, "Previous questions and answers:") {
+		t.Fatalf("expected previous Q/A history in user message: %s", userMessage)
+	}
+	if !strings.Contains(userMessage, "Detailed technical explanation") {
+		t.Fatalf("expected human-readable selected option labels in user message: %s", userMessage)
+	}
+	if !strings.Contains(userMessage, "Code samples") {
+		t.Fatalf("expected multiple selected labels in user message: %s", userMessage)
+	}
+	if strings.Contains(userMessage, "opt_") {
+		t.Fatalf("expected selected labels instead of option ids in user message: %s", userMessage)
+	}
+}
+
 // Verify the import is used (json is used in decodeJSONBody which is in another file).
 var _ = json.Unmarshal
