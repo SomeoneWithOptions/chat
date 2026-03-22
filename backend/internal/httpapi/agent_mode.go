@@ -23,6 +23,18 @@ import (
 
 const braveProviderName = "brave"
 
+type councilQueuedStreamInput struct {
+	UserID         string
+	UserMessageID  string
+	ConversationID string
+	SourceModels   []CouncilSourceSpec
+	FusionModel    CouncilSourceSpec
+	Message        string
+	Prompt         string
+	Grounding      bool
+	History        []openrouter.Message
+}
+
 type agentQueuedStreamInput struct {
 	UserID          string
 	UserMessageID   string
@@ -48,6 +60,11 @@ type agentRunRecord struct {
 	SearchesUsed       int
 	SourcesRead        int
 	LastError          string
+	WorkflowType       string
+	SourceModelIDsJSON string
+	FusionModelID      string
+	GroundingEnabled   bool
+	CouncilConfigJSON  string
 }
 
 type agentRoleDefinition struct {
@@ -597,12 +614,15 @@ func toAgentSummaries(results []agentRoleResult) []agentSummary {
 }
 
 func (h Handler) insertAgentRun(ctx context.Context, run agentRunRecord) error {
+	if run.WorkflowType == "" {
+		run.WorkflowType = "single_model"
+	}
 	_, err := h.db.ExecContext(ctx, `
 INSERT INTO agent_runs (
-  id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, reasoning_effort, status, search_budget, searches_used, sources_read, last_error, created_at, updated_at
+  id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, reasoning_effort, status, search_budget, searches_used, sources_read, last_error, workflow_type, source_model_ids_json, fusion_model_id, grounding_enabled, council_config_json, created_at, updated_at
 )
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-`, run.ID, run.UserID, run.ConversationID, run.UserMessageID, run.AssistantMessageID, run.ModelID, nullableString(run.ReasoningEffort), run.Status, run.SearchBudget, run.SearchesUsed, run.SourcesRead, nullableString(run.LastError))
+VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+`, run.ID, run.UserID, run.ConversationID, run.UserMessageID, run.AssistantMessageID, run.ModelID, nullableString(run.ReasoningEffort), run.Status, run.SearchBudget, run.SearchesUsed, run.SourcesRead, nullableString(run.LastError), run.WorkflowType, nullableString(run.SourceModelIDsJSON), nullableString(run.FusionModelID), run.GroundingEnabled, nullableString(run.CouncilConfigJSON))
 	return err
 }
 
@@ -615,11 +635,11 @@ func (h Handler) claimAgentRun(ctx context.Context, runID string) (*agentRunReco
 
 	run := agentRunRecord{}
 	err = tx.QueryRowContext(ctx, `
-SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, '')
+SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, ''), workflow_type, COALESCE(source_model_ids_json, ''), COALESCE(fusion_model_id, ''), grounding_enabled, COALESCE(council_config_json, '')
 FROM agent_runs
 WHERE id = ?
 LIMIT 1;
-`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError)
+`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError, &run.WorkflowType, &run.SourceModelIDsJSON, &run.FusionModelID, &run.GroundingEnabled, &run.CouncilConfigJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -994,4 +1014,332 @@ WHERE provider = ?;
 			return err
 		}
 	}
+}
+
+func (h Handler) updateCouncilAssistantMessage(
+	ctx context.Context,
+	userID string,
+	messageID string,
+	content string,
+	traceCollector *thinkingTraceCollector,
+	citations []citationResponse,
+	usage *usageResponse,
+	agentSources []CouncilSourceResult,
+	agentAnalysis *CouncilAnalysis,
+	resultModelID string,
+	agentRunID string,
+	desiredStatus string,
+) error {
+	trace := traceCollector.Snapshot()
+	if trace != nil && desiredStatus != "" {
+		trace.Status = desiredStatus
+	}
+	traceJSON, err := encodeThinkingTraceJSON(trace)
+	if err != nil {
+		return err
+	}
+
+	var sourcesJSON any
+	if len(agentSources) > 0 {
+		sourcesBytes, _ := json.Marshal(agentSources)
+		sourcesJSON = string(sourcesBytes)
+	}
+
+	var analysisJSON any
+	if agentAnalysis != nil {
+		analysisBytes, _ := json.Marshal(agentAnalysis)
+		analysisJSON = string(analysisBytes)
+	}
+
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.ExecContext(ctx, `
+UPDATE messages
+SET content = COALESCE(NULLIF(?, ''), content),
+    thinking_trace_json = ?,
+    agent_sources_json = COALESCE(?, agent_sources_json),
+    agent_analysis_json = COALESCE(?, agent_analysis_json),
+    agent_result_model_id = COALESCE(?, agent_result_model_id),
+    prompt_tokens = COALESCE(?, prompt_tokens),
+    completion_tokens = COALESCE(?, completion_tokens),
+    total_tokens = COALESCE(?, total_tokens),
+    reasoning_tokens = COALESCE(?, reasoning_tokens),
+    cost_microusd = COALESCE(?, cost_microusd),
+    byok_inference_cost_microusd = COALESCE(?, byok_inference_cost_microusd),
+    tokens_per_second = COALESCE(?, tokens_per_second),
+    usage_model_id = COALESCE(?, usage_model_id),
+    usage_provider_name = COALESCE(?, usage_provider_name),
+    agent_run_id = COALESCE(?, agent_run_id),
+    response_mode = 'agent'
+WHERE id = ? AND user_id = ?;
+`, content, traceJSON, sourcesJSON, analysisJSON, nullableString(resultModelID),
+		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.PromptTokens }),
+		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.CompletionTokens }),
+		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.TotalTokens }),
+		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return u.ReasoningTokens }),
+		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return u.CostMicrosUSD }),
+		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return u.ByokInferenceCostMicrosUSD }),
+		nullableUsageResponseFloat(usage, func(u *usageResponse) *float64 { return u.TokensPerSecond }),
+		nullableUsageResponseString(usage, func(u *usageResponse) string { return u.ModelID }),
+		nullableUsageResponseString(usage, func(u *usageResponse) string { return u.ProviderName }),
+		nullableString(agentRunID), messageID, userID); err != nil {
+		return err
+	}
+
+	if _, err := tx.ExecContext(ctx, `DELETE FROM citations WHERE message_id = ?;`, messageID); err != nil {
+		return err
+	}
+	for _, citation := range citations {
+		if strings.TrimSpace(citation.URL) == "" {
+			continue
+		}
+		if _, err := tx.ExecContext(ctx, `
+INSERT INTO citations (id, message_id, url, title, snippet, source_provider)
+VALUES (?, ?, ?, ?, ?, ?);
+`, uuid.NewString(), messageID, citation.URL, nullableString(citation.Title), nullableString(citation.Snippet), nullableString(citation.SourceProvider)); err != nil {
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
+func nullableUsageResponseInt(usage *usageResponse, selector func(*usageResponse) *int) any {
+	if usage == nil {
+		return nil
+	}
+	value := selector(usage)
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func nullableUsageResponseFloat(usage *usageResponse, selector func(*usageResponse) *float64) any {
+	if usage == nil {
+		return nil
+	}
+	value := selector(usage)
+	if value == nil {
+		return nil
+	}
+	return *value
+}
+
+func nullableUsageResponseString(usage *usageResponse, selector func(*usageResponse) string) any {
+	if usage == nil {
+		return nil
+	}
+	value := strings.TrimSpace(selector(usage))
+	if value == "" {
+		return nil
+	}
+	return value
+}
+
+func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input councilQueuedStreamInput) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+
+	runID := uuid.NewString()
+
+	metadataEvent := map[string]any{
+		"type":           "metadata",
+		"grounding":      input.Grounding,
+		"deepResearch":   false,
+		"responseMode":   "agent",
+		"modelId":        input.FusionModel.ModelID,
+		"conversationId": input.ConversationID,
+		"userMessageId":  input.UserMessageID,
+		"agentRunId":     runID,
+	}
+	if input.FusionModel.ReasoningEffort != "" {
+		metadataEvent["reasoningEffort"] = input.FusionModel.ReasoningEffort
+	}
+	_ = writeSSEEvent(w, metadataEvent)
+
+	traceCollector := newThinkingTraceCollector()
+	initialProgress := summarizedProgress(research.Progress{
+		Phase:   research.PhasePlanning,
+		Message: "Queueing council workflow",
+	}, research.ProgressSummaryInput{
+		Phase: research.PhasePlanning,
+	})
+	traceCollector.AppendProgress(initialProgress)
+	_ = writeSSEEvent(w, progressEventData(initialProgress))
+	flusher.Flush()
+
+	assistantMessageID, err := h.insertMessageWithCitations(
+		ctx,
+		input.UserID,
+		input.ConversationID,
+		"assistant",
+		"",
+		"",
+		input.FusionModel.ModelID,
+		input.Grounding,
+		false,
+		"agent",
+		nil,
+		traceCollector.Snapshot(),
+		nil,
+		nil,
+	)
+	if err != nil {
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to create council placeholder"})
+		_ = writeSSEEvent(w, map[string]any{"type": "done"})
+		flusher.Flush()
+		return
+	}
+
+	searchBudget, budgetErr := h.availableAgentSearchBudget(ctx)
+	if budgetErr != nil {
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to reserve Brave search budget"})
+		_ = writeSSEEvent(w, map[string]any{"type": "done"})
+		flusher.Flush()
+		_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, nil, "", runID, thinkingTraceStatusStopped)
+		return
+	}
+
+	minRequiredBudget := len(input.SourceModels) * 1
+	if searchBudget < minRequiredBudget && input.Grounding {
+		if err := h.insertAgentRun(ctx, agentRunRecord{
+			ID:                 runID,
+			UserID:             input.UserID,
+			ConversationID:     input.ConversationID,
+			UserMessageID:      input.UserMessageID,
+			AssistantMessageID: assistantMessageID,
+			ModelID:            input.FusionModel.ModelID,
+			ReasoningEffort:    input.FusionModel.ReasoningEffort,
+			Status:             "failed",
+			SearchBudget:       searchBudget,
+			LastError:          "Not enough Brave monthly budget remains for council mode.",
+			WorkflowType:       "council_fusion",
+		}); err != nil {
+			log.Printf("council run persist failed: %v", err)
+		}
+		_ = writeSSEEvent(w, map[string]any{
+			"type":    "warning",
+			"scope":   "agent",
+			"message": "Council mode needs search budget, but the remaining monthly Brave budget is too low right now.",
+		})
+		_ = writeSSEEvent(w, map[string]any{"type": "done"})
+		flusher.Flush()
+		_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, nil, "", runID, thinkingTraceStatusStopped)
+		return
+	}
+
+	configJSON, _ := json.Marshal(CouncilRunConfig{
+		SourceModels: input.SourceModels,
+		FusionModel:  input.FusionModel,
+		Grounding:    input.Grounding,
+	})
+
+	var sourceModelIDs []string
+	for _, sm := range input.SourceModels {
+		sourceModelIDs = append(sourceModelIDs, sm.ModelID)
+	}
+	sourceModelIDsJSON, _ := json.Marshal(sourceModelIDs)
+
+	if err := h.insertAgentRun(ctx, agentRunRecord{
+		ID:                 runID,
+		UserID:             input.UserID,
+		ConversationID:     input.ConversationID,
+		UserMessageID:      input.UserMessageID,
+		AssistantMessageID: assistantMessageID,
+		ModelID:            input.FusionModel.ModelID,
+		ReasoningEffort:    input.FusionModel.ReasoningEffort,
+		Status:             "queued",
+		SearchBudget:       searchBudget,
+		WorkflowType:       "council_fusion",
+		SourceModelIDsJSON: string(sourceModelIDsJSON),
+		FusionModelID:      input.FusionModel.ModelID,
+		GroundingEnabled:   input.Grounding,
+		CouncilConfigJSON:  string(configJSON),
+	}); err != nil {
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to queue council run"})
+		_ = writeSSEEvent(w, map[string]any{"type": "done"})
+		flusher.Flush()
+		return
+	}
+
+	queuedProgress := summarizedProgress(research.Progress{
+		Phase:   research.PhasePlanning,
+		Message: "Queued council workflow",
+	}, research.ProgressSummaryInput{
+		Phase: research.PhasePlanning,
+	})
+	traceCollector.AppendProgress(queuedProgress)
+	_ = writeSSEEvent(w, progressEventData(queuedProgress))
+	_ = writeSSEEvent(w, map[string]any{"type": "done"})
+	flusher.Flush()
+
+	if err := h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, nil, "", runID, thinkingTraceStatusRunning); err != nil {
+		log.Printf("council placeholder update failed: run_id=%s err=%v", runID, err)
+	}
+	if err := h.enqueueAgentRun(context.Background(), runID); err != nil {
+		log.Printf("council enqueue failed: run_id=%s err=%v", runID, err)
+		_ = h.failAgentRun(context.Background(), runID, "failed to enqueue council run")
+	}
+}
+
+func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
+	runID := strings.TrimSpace(chi.URLParam(r, "id"))
+	if runID == "" {
+		writeError(w, http.StatusBadRequest, "invalid_request", "run id is required")
+		return
+	}
+
+	user, ok := sessionUserFromContext(r.Context())
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized", "invalid session")
+		return
+	}
+
+	row := h.db.QueryRowContext(r.Context(), `
+		SELECT id, status, source_results_json, fusion_analysis_json, fusion_result_json, public_status_json 
+		FROM agent_runs 
+		WHERE id = ? AND user_id = ?
+	`, runID, user.ID)
+
+	var (
+		id                string
+		status            string
+		sourceResultsJSON sql.NullString
+		analysisJSON      sql.NullString
+		resultJSON        sql.NullString
+		warningsJSON      sql.NullString
+	)
+
+	if err := row.Scan(&id, &status, &sourceResultsJSON, &analysisJSON, &resultJSON, &warningsJSON); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "not_found", "agent run not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to query agent run")
+		return
+	}
+
+	var resp AgentRunStatusResponse
+	resp.ID = id
+	resp.Status = status
+	if sourceResultsJSON.Valid && sourceResultsJSON.String != "" {
+		_ = json.Unmarshal([]byte(sourceResultsJSON.String), &resp.SourceResults)
+	}
+	if analysisJSON.Valid && analysisJSON.String != "" {
+		_ = json.Unmarshal([]byte(analysisJSON.String), &resp.Analysis)
+	}
+	if resultJSON.Valid && resultJSON.String != "" {
+		_ = json.Unmarshal([]byte(resultJSON.String), &resp.Result)
+	}
+	if warningsJSON.Valid && warningsJSON.String != "" {
+		_ = json.Unmarshal([]byte(warningsJSON.String), &resp.Warnings)
+	}
+
+	writeJSON(w, http.StatusOK, resp)
 }

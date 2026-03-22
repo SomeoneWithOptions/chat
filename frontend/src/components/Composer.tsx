@@ -1,5 +1,5 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef } from 'react';
-import { type ReasoningEffort, type UploadedFile } from '../lib/api';
+import { type ReasoningEffort, type UploadedFile, type Model } from '../lib/api';
 
 type ComposerProps = {
   prompt: string;
@@ -28,6 +28,11 @@ type ComposerProps = {
   error: string | null;
   streamWarning: string | null;
   sendDisabled?: boolean;
+  models?: Model[];
+  selectedSourceModels?: string[];
+  onSourceModelsChange?: (models: string[]) => void;
+  selectedFusionModel?: string | null;
+  onFusionModelChange?: (model: string | null) => void;
 };
 
 const acceptedAttachmentTypes = '.txt,.md,.pdf,.csv,.json';
@@ -65,6 +70,11 @@ export default function Composer({
   sendDisabled = false,
   onEnhance,
   enhanceDisabled = false,
+  models = [],
+  selectedSourceModels = [],
+  onSourceModelsChange,
+  selectedFusionModel,
+  onFusionModelChange,
 }: ComposerProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -134,6 +144,69 @@ export default function Composer({
             <span className="reasoning-unavailable">Unavailable</span>
           )}
         </div>
+
+        {agentMode && (
+          <div className="composer-council-tray">
+            <div className="council-section">
+              <span className="council-label">Sources ({selectedSourceModels.length}/5)</span>
+              <div className="council-models">
+                {selectedSourceModels.map((id) => {
+                  const m = models.find((x) => x.id === id);
+                  return (
+                    <span key={id} className="council-chip">
+                      {m?.name || id}
+                      <button
+                        type="button"
+                        onClick={() => onSourceModelsChange?.(selectedSourceModels.filter((x) => x !== id))}
+                        disabled={isStreaming}
+                      >
+                        &times;
+                      </button>
+                    </span>
+                  );
+                })}
+                {selectedSourceModels.length < 5 && (
+                  <select
+                    className="council-select"
+                    value=""
+                    onChange={(e) => {
+                      if (!e.target.value) return;
+                      if (!selectedSourceModels.includes(e.target.value)) {
+                        onSourceModelsChange?.([...selectedSourceModels, e.target.value]);
+                      }
+                    }}
+                    disabled={isStreaming}
+                  >
+                    <option value="" disabled>+ Add Source</option>
+                    {models.map((m) => (
+                      <option key={m.id} value={m.id} disabled={selectedSourceModels.includes(m.id)}>
+                        {m.name}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            </div>
+            {selectedSourceModels.length > 0 && (
+              <div className="council-section">
+                <span className="council-label">Fuse with</span>
+                <select
+                  className="council-select fusion-select"
+                  value={selectedFusionModel || ''}
+                  onChange={(e) => onFusionModelChange?.(e.target.value)}
+                  disabled={isStreaming}
+                >
+                  <option value="" disabled>Select Fusion Model</option>
+                  {models.map((m) => (
+                    <option key={m.id} value={m.id}>
+                      {m.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+          </div>
+        )}
 
         <textarea
           ref={textareaRef}

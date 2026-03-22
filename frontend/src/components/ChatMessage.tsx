@@ -1,5 +1,5 @@
 import { isValidElement, type HTMLAttributes, type ReactNode, useEffect, useState } from 'react';
-import { type AgentSummary, type Citation, type ProgressDecision, type ThinkingTrace, type Usage } from '../lib/api';
+import { type AgentSummary, type Citation, type ProgressDecision, type ThinkingTrace, type Usage, type CouncilSourceResult, type CouncilAnalysis } from '../lib/api';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -13,7 +13,14 @@ type MessageData = {
   usage?: Usage | null;
   responseMode?: 'chat' | 'deep_research' | 'agent';
   agentSummaries?: AgentSummary[];
+  agentSources?: import('../lib/api').CouncilSourceResult[];
+  agentAnalysis?: import('../lib/api').CouncilAnalysis;
+  agentResultModelId?: string;
+  agentResultUsage?: Usage;
+  agentRunId?: string;
   citations: Citation[];
+  groundingEnabled?: boolean;
+  deepResearchEnabled?: boolean;
 };
 
 type ChatMessageProps = {
@@ -159,6 +166,117 @@ const markdownComponents: Components = {
     <MarkdownCodeBlock {...props} />
   ),
 };
+
+function CouncilSourceCard({ source, isStreaming }: { source: CouncilSourceResult; isStreaming: boolean }) {
+  const [expanded, setExpanded] = useState(false);
+
+  const isWorking = source.status === 'queued' || source.status === 'running';
+  const displayStatus = source.status.charAt(0).toUpperCase() + source.status.slice(1);
+
+  return (
+    <div className={`council-source-card status-${source.status}`}>
+      <button className="council-source-header" onClick={() => setExpanded(!expanded)} type="button">
+        <span className="council-source-title">{source.modelId}</span>
+        <div className="council-source-badges">
+          {source.readableSources !== undefined && (
+            <span className="badge" title={`${source.readableSources} readable sources`}>
+              {source.readableSources}/15 sources
+            </span>
+          )}
+          {source.durationMs !== undefined && (
+            <span className="badge">{(source.durationMs / 1000).toFixed(1)}s</span>
+          )}
+          <span className={`badge status-badge ${source.status}`}>{displayStatus}</span>
+        </div>
+        <svg
+          className={`chevron ${expanded ? 'open' : ''}`}
+          viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {expanded && (
+        <div className="council-source-body">
+          {source.error ? (
+            <div className="error-message">{source.error}</div>
+          ) : (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{source.response || (isWorking || isStreaming ? 'Thinking...' : '')}</ReactMarkdown>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CouncilAnalysisView({ analysis }: { analysis: CouncilAnalysis }) {
+  return (
+    <div className="council-analysis-view">
+      <h3 className="council-section-title">Analysis</h3>
+      {analysis.agreement && analysis.agreement.length > 0 && (
+        <details className="analysis-category">
+          <summary>Agreement</summary>
+          <ul>
+            {analysis.agreement.map((item, i) => (
+              <li key={i}>
+                {item.point} {item.sourceModels && item.sourceModels.length > 0 && <span className="source-badges">({item.sourceModels.join(', ')})</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {analysis.keyDifferences && analysis.keyDifferences.length > 0 && (
+        <details className="analysis-category">
+          <summary>Key Differences</summary>
+          {analysis.keyDifferences.map((group, i) => (
+            <div key={i} className="difference-group">
+              <strong>{group.topic}</strong>
+              <ul>
+                {group.positions.map((pos, j) => (
+                  <li key={j}><em>{pos.sourceModel}:</em> {pos.summary}</li>
+                ))}
+              </ul>
+            </div>
+          ))}
+        </details>
+      )}
+      {analysis.partialCoverage && analysis.partialCoverage.length > 0 && (
+        <details className="analysis-category">
+          <summary>Partial Coverage</summary>
+          <ul>
+            {analysis.partialCoverage.map((item, i) => (
+              <li key={i}>
+                {item.point} {item.sourceModels && item.sourceModels.length > 0 && <span className="source-badges">({item.sourceModels.join(', ')})</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {analysis.uniqueInsights && analysis.uniqueInsights.length > 0 && (
+        <details className="analysis-category">
+          <summary>Unique Insights</summary>
+          <ul>
+            {analysis.uniqueInsights.map((item, i) => (
+              <li key={i}>
+                {item.point} {item.sourceModels && item.sourceModels.length > 0 && <span className="source-badges">({item.sourceModels.join(', ')})</span>}
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {analysis.blindSpots && analysis.blindSpots.length > 0 && (
+        <details className="analysis-category">
+          <summary>Blind Spots</summary>
+          <ul>
+            {analysis.blindSpots.map((item, i) => (
+              <li key={i}>{item.point}</li>
+            ))}
+          </ul>
+        </details>
+      )}
+    </div>
+  );
+}
 
 export default function ChatMessage({
   message,
@@ -344,6 +462,29 @@ export default function ChatMessage({
               </div>
             </div>
           )}
+
+          {message.agentSources && message.agentSources.length > 0 && (
+            <div className="council-sources-container">
+              <h3 className="council-section-title">Sources</h3>
+              <div className="council-sources-list">
+                {message.agentSources.map((source, idx) => (
+                  <CouncilSourceCard key={idx} source={source} isStreaming={!!isStreaming} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {message.agentAnalysis && (
+            <CouncilAnalysisView analysis={message.agentAnalysis} />
+          )}
+
+          {((message.agentResultModelId || message.agentSources?.length)) ? (
+            <div className="council-result-container">
+              <h3 className="council-section-title">
+                Result {message.agentResultModelId && <span className="council-fused-badge">Fused by {message.agentResultModelId}</span>}
+              </h3>
+            </div>
+          ) : null}
 
           {isUser && isEditing ? (
             <div className="message-user-edit-shell">

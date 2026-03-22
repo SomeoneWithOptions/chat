@@ -2632,10 +2632,242 @@ code {
 
 .enhance-modal-footer {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
-  padding: 14px 20px;
+  gap: 12px;
+  padding: 16px 20px;
+  background: var(--surface-primary);
   border-top: 1px solid var(--border);
+  border-radius: 0 0 var(--radius-lg) var(--radius-lg);
   flex-shrink: 0;
+}
+
+/* ─── Council UI ────────────────────────────────────── */
+
+.composer-council-tray {
+  margin-top: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 12px;
+}
+
+.council-section {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.council-label {
+  font-size: 12px;
+  color: var(--text-secondary);
+  font-weight: 500;
+  width: 80px;
+  flex-shrink: 0;
+  margin-top: 6px;
+}
+
+.council-models {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.council-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  padding: 4px 8px;
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+}
+
+.council-chip button {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 0;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.council-chip button:hover {
+  color: var(--error);
+}
+
+.council-select {
+  background: transparent;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  font-size: 12px;
+  padding: 4px 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+.council-select:hover {
+  border-color: var(--text-tertiary);
+}
+
+.fusion-select {
+  border-style: solid;
+  border-color: var(--border);
+  color: var(--text-primary);
+  background: var(--surface-elevated);
+}
+
+.council-sources-container {
+  margin: 16px 0;
+}
+
+.council-section-title {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-secondary);
+  margin: 0 0 12px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.council-fused-badge {
+  font-size: 11px;
+  background: var(--accent-subtle);
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 12px;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.council-sources-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.council-source-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-secondary);
+  overflow: hidden;
+}
+
+.council-source-header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  background: none;
+  border: none;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 14px;
+}
+
+.council-source-header:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.council-source-title {
+  font-weight: 500;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+
+.council-source-badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+  margin-right: 12px;
+}
+
+.council-source-badges .badge {
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-elevated);
+  color: var(--text-secondary);
+  border: 1px solid var(--border);
+}
+
+.council-source-badges .status-badge {
+  background: var(--accent-subtle);
+  color: var(--accent);
+  border-color: transparent;
+}
+
+.council-source-card.status-failed .status-badge {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--error);
+}
+
+.council-source-card.status-degraded .status-badge {
+  background: rgba(245, 158, 11, 0.1);
+  color: #f59e0b;
+}
+
+.council-source-body {
+  padding: 16px;
+  border-top: 1px solid var(--border);
+  font-size: 14px;
+  line-height: 1.6;
+}
+
+.council-analysis-view {
+  margin: 24px 0;
+  background: var(--surface-secondary);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 16px;
+}
+
+.analysis-category {
+  margin-bottom: 12px;
+}
+
+.analysis-category:last-child {
+  margin-bottom: 0;
+}
+
+.analysis-category summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 8px;
+  user-select: none;
+}
+
+.analysis-category ul {
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-secondary);
+}
+
+.analysis-category li {
+  margin-bottom: 6px;
+}
+
+.source-badges {
+  font-size: 12px;
+  color: var(--text-tertiary);
+}
+
+.difference-group {
+  margin-bottom: 16px;
+  padding-left: 12px;
+  border-left: 2px solid var(--border);
 }
 
 /* Loading state */

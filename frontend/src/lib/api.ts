@@ -29,6 +29,8 @@ export type ModelPreferences = {
   lastUsedModelId: string;
   lastUsedDeepResearchModelId: string;
   lastUsedAgentModelId: string;
+  lastUsedAgentSourceModelIds?: string[];
+  lastUsedAgentFusionModelId?: string;
 };
 
 export type AgentSummary = {
@@ -54,6 +56,64 @@ export type Conversation = {
   updatedAt: string;
 };
 
+export type CouncilSourceSpec = {
+  modelId: string;
+  reasoningEffort?: ReasoningEffort;
+};
+
+export type CouncilSourceResult = {
+  modelId: string;
+  status: 'queued' | 'running' | 'complete' | 'degraded' | 'failed';
+  response?: string;
+  reasoningContent?: string;
+  citations?: Citation[];
+  usage?: Usage;
+  durationMs?: number;
+  searchQueries?: number;
+  readableSources?: number;
+  warnings?: string[];
+  error?: string;
+};
+
+export type CouncilAnalysisItem = {
+  point: string;
+  sourceModels?: string[];
+};
+
+export type CouncilDifferencePosition = {
+  sourceModel: string;
+  summary: string;
+};
+
+export type CouncilDifferenceGroup = {
+  topic: string;
+  positions: CouncilDifferencePosition[];
+};
+
+export type CouncilAnalysis = {
+  agreement?: CouncilAnalysisItem[];
+  keyDifferences?: CouncilDifferenceGroup[];
+  partialCoverage?: CouncilAnalysisItem[];
+  uniqueInsights?: CouncilAnalysisItem[];
+  blindSpots?: CouncilAnalysisItem[];
+};
+
+export type CouncilFinalResult = {
+  modelId: string;
+  response: string;
+  reasoningContent?: string;
+  usage?: Usage;
+};
+
+export type AgentRunStatus = {
+  id: string;
+  status: 'queued' | 'running' | 'completed' | 'failed';
+  sourceResults?: CouncilSourceResult[];
+  analysis?: CouncilAnalysis;
+  result?: CouncilFinalResult;
+  warnings?: string[];
+};
+
 export type ConversationMessage = {
   id: string;
   conversationId: string;
@@ -67,6 +127,11 @@ export type ConversationMessage = {
   deepResearchEnabled: boolean;
   responseMode?: ReasoningMode;
   agentSummaries?: AgentSummary[];
+  agentSources?: CouncilSourceResult[];
+  agentAnalysis?: CouncilAnalysis;
+  agentResultModelId?: string;
+  agentResultUsage?: Usage;
+  agentRunId?: string;
   citations: Citation[];
   createdAt: string;
 };
@@ -102,12 +167,14 @@ export type ChatRequest = {
   conversationId?: string;
   editMessageId?: string;
   message: string;
-  modelId: string;
+  modelId?: string;
   mode?: ReasoningMode;
   reasoningEffort?: ReasoningEffort;
   grounding: boolean;
   deepResearch: boolean;
   fileIds?: string[];
+  sourceModels?: CouncilSourceSpec[];
+  fusionModel?: CouncilSourceSpec;
 };
 
 export type ResearchPhase = 'planning' | 'searching' | 'reading' | 'evaluating' | 'iterating' | 'synthesizing' | 'finalizing';
@@ -143,6 +210,7 @@ export type StreamEvent =
       reasoningEffort?: ReasoningEffort;
       conversationId?: string;
       userMessageId?: string;
+      agentRunId?: string;
     }
   | {
       type: 'progress';
@@ -423,6 +491,13 @@ export async function streamMessage(
       }
     }
   }
+}
+
+export async function getAgentRunStatus(runId: string): Promise<AgentRunStatus> {
+  const response = await requestJSON<AgentRunStatus>(`/v1/agent-runs/${runId}`, {
+    method: 'GET',
+  });
+  return response;
 }
 
 export async function enhancePrompt(

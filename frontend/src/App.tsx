@@ -14,6 +14,7 @@ import {
   updateModelFavorite,
   updateModelPreference,
   updateModelReasoningPreset,
+  getAgentRunStatus,
   type Conversation,
   type Model,
   type ModelPreferences,
@@ -199,9 +200,16 @@ function toMessageData(message: import('./lib/api').ConversationMessage): Messag
     thinkingTrace: message.thinkingTrace ?? null,
     modelId: message.modelId ?? null,
     usage: message.usage ?? null,
-    responseMode: message.responseMode ?? (message.deepResearchEnabled ? 'deep_research' : 'chat'),
-    agentSummaries: message.agentSummaries ?? [],
-    citations: message.citations ?? [],
+    groundingEnabled: message.groundingEnabled,
+    deepResearchEnabled: message.deepResearchEnabled,
+    responseMode: message.responseMode,
+    agentSummaries: message.agentSummaries,
+    agentSources: message.agentSources,
+    agentAnalysis: message.agentAnalysis,
+    agentResultModelId: message.agentResultModelId,
+    agentResultUsage: message.agentResultUsage,
+    agentRunId: message.agentRunId,
+    citations: message.citations,
   };
 }
 
@@ -256,6 +264,8 @@ export default function App() {
   const [reasoningPresets, setReasoningPresets] = useState<ReasoningPreset[]>([]);
   const [showAllModels, setShowAllModels] = useState(false);
   const [selectedModel, setSelectedModel] = useState('openrouter/free');
+  const [selectedSourceModels, setSelectedSourceModels] = useState<string[]>([]);
+  const [selectedFusionModel, setSelectedFusionModel] = useState<string | null>(null);
   const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
   const [updatingReasoningPreset, setUpdatingReasoningPreset] = useState(false);
 
@@ -432,6 +442,20 @@ export default function App() {
           setSelectedModel(
             catalog.models.some((m) => m.id === preferredModelId) ? preferredModelId : catalog.models[0].id,
           );
+
+          if (catalog.preferences.lastUsedAgentSourceModelIds?.length) {
+            const validSourceModels = catalog.preferences.lastUsedAgentSourceModelIds.filter((id) => catalog.models.some((m) => m.id === id));
+            setSelectedSourceModels(validSourceModels);
+          } else {
+            setSelectedSourceModels([]);
+          }
+
+          if (catalog.preferences.lastUsedAgentFusionModelId) {
+            const validFusionModel = catalog.models.some((m) => m.id === catalog.preferences.lastUsedAgentFusionModelId) ? catalog.preferences.lastUsedAgentFusionModelId : null;
+            setSelectedFusionModel(validFusionModel);
+          } else {
+            setSelectedFusionModel(null);
+          }
         }
       } catch (err) {
         setError((err as Error).message);
@@ -594,6 +618,46 @@ export default function App() {
   useEffect(() => {
     shouldAutoScrollRef.current = true;
   }, [activeConversationId]);
+
+  const runningCouncilMessagesRef = useRef(messages.filter((m) => m.responseMode === 'agent' && m.agentRunId && m.thinkingTrace?.status === 'running'));
+  useEffect(() => {
+    runningCouncilMessagesRef.current = messages.filter((m) => m.responseMode === 'agent' && m.agentRunId && m.thinkingTrace?.status === 'running');
+  }, [messages]);
+
+  useEffect(() => {
+    const intervalId = setInterval(() => {
+      const running = runningCouncilMessagesRef.current;
+      if (running.length === 0) return;
+
+      void Promise.all(
+        running.map(async (msg) => {
+          if (!msg.agentRunId) return;
+          try {
+            const status = await getAgentRunStatus(msg.agentRunId);
+            setMessages((prev) => {
+              const idx = prev.findIndex((m) => m.id === msg.id);
+              if (idx === -1) return prev;
+              const newMsgs = [...prev];
+              newMsgs[idx] = {
+                ...newMsgs[idx],
+                agentSources: status.sourceResults ?? newMsgs[idx].agentSources,
+                agentAnalysis: status.analysis ?? newMsgs[idx].agentAnalysis,
+                agentResultModelId: status.result?.modelId ?? newMsgs[idx].agentResultModelId,
+                agentResultUsage: status.result?.usage ?? newMsgs[idx].agentResultUsage,
+                content: status.result?.response ?? newMsgs[idx].content,
+                reasoningContent: status.result?.reasoningContent ?? newMsgs[idx].reasoningContent,
+              };
+              return newMsgs;
+            });
+          } catch {
+            // Ignore
+          }
+        })
+      );
+    }, 2000);
+
+    return () => clearInterval(intervalId);
+  }, []);
 
   // ─── Computed ─────────────────────────────────
 
@@ -899,6 +963,13 @@ export default function App() {
     streamAbortControllerRef.current = abortController;
     let refreshedConversationListForStream = false;
 
+    let sourceModels;
+    let fusionModel;
+    if (activeMode === 'agent' && selectedSourceModels.length > 0) {
+      sourceModels = selectedSourceModels.map(id => ({ modelId: id, reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined }));
+      fusionModel = { modelId: selectedFusionModel || selectedModel, reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined };
+    }
+
     try {
       await streamMessage(
         {
@@ -911,6 +982,8 @@ export default function App() {
           grounding,
           deepResearch: activeMode === 'deep_research',
           fileIds: options.attachmentIDs.length > 0 ? options.attachmentIDs : undefined,
+          sourceModels,
+          fusionModel,
         },
         (eventData) => {
           if (eventData.type === 'metadata') {
@@ -921,6 +994,7 @@ export default function App() {
                     ...m,
                     modelId: eventData.modelId,
                     responseMode: eventData.responseMode ?? (eventData.deepResearch ? 'deep_research' : activeMode),
+                    agentRunId: eventData.agentRunId,
                   };
                 }
                 if (eventData.userMessageId && m.id === options.optimisticUserMessageID) {

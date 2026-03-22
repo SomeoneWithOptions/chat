@@ -122,9 +122,11 @@ type modelResponse struct {
 }
 
 type modelPreferencesResponse struct {
-	LastUsedModelID             string `json:"lastUsedModelId"`
-	LastUsedDeepResearchModelID string `json:"lastUsedDeepResearchModelId"`
-	LastUsedAgentModelID        string `json:"lastUsedAgentModelId"`
+	LastUsedModelID             string   `json:"lastUsedModelId"`
+	LastUsedDeepResearchModelID string   `json:"lastUsedDeepResearchModelId"`
+	LastUsedAgentModelID        string   `json:"lastUsedAgentModelId"`
+	LastUsedAgentSourceModelIDs []string `json:"lastUsedAgentSourceModelIds,omitempty"`
+	LastUsedAgentFusionModelID  string   `json:"lastUsedAgentFusionModelId,omitempty"`
 }
 
 type reasoningPresetResponse struct {
@@ -931,16 +933,82 @@ WHERE user_id = ?;
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
+type CouncilSourceSpec struct {
+	ModelID         string `json:"modelId"`
+	ReasoningEffort string `json:"reasoningEffort,omitempty"`
+}
+
+type CouncilRunConfig struct {
+	SourceModels []CouncilSourceSpec `json:"sourceModels"`
+	FusionModel  CouncilSourceSpec   `json:"fusionModel"`
+	Grounding    bool                `json:"grounding"`
+}
+
+type CouncilSourceResult struct {
+	ModelID          string             `json:"modelId"`
+	Status           string             `json:"status"`
+	Response         string             `json:"response,omitempty"`
+	ReasoningContent string             `json:"reasoningContent,omitempty"`
+	Citations        []citationResponse `json:"citations,omitempty"`
+	Usage            *usageResponse     `json:"usage,omitempty"`
+	DurationMs       int64              `json:"durationMs,omitempty"`
+	SearchQueries    int                `json:"searchQueries,omitempty"`
+	ReadableSources  int                `json:"readableSources,omitempty"`
+	Warnings         []string           `json:"warnings,omitempty"`
+	Error            string             `json:"error,omitempty"`
+}
+
+type CouncilAnalysisItem struct {
+	Point        string   `json:"point"`
+	SourceModels []string `json:"sourceModels,omitempty"`
+}
+
+type CouncilDifferencePosition struct {
+	SourceModel string `json:"sourceModel"`
+	Summary     string `json:"summary"`
+}
+
+type CouncilDifferenceGroup struct {
+	Topic     string                      `json:"topic"`
+	Positions []CouncilDifferencePosition `json:"positions"`
+}
+
+type CouncilAnalysis struct {
+	Agreement       []CouncilAnalysisItem    `json:"agreement"`
+	KeyDifferences  []CouncilDifferenceGroup `json:"keyDifferences"`
+	PartialCoverage []CouncilAnalysisItem    `json:"partialCoverage"`
+	UniqueInsights  []CouncilAnalysisItem    `json:"uniqueInsights"`
+	BlindSpots      []CouncilAnalysisItem    `json:"blindSpots"`
+}
+
+type CouncilFinalResult struct {
+	ModelID          string         `json:"modelId"`
+	Response         string         `json:"response"`
+	ReasoningContent string         `json:"reasoningContent,omitempty"`
+	Usage            *usageResponse `json:"usage,omitempty"`
+}
+
+type AgentRunStatusResponse struct {
+	ID            string                `json:"id"`
+	Status        string                `json:"status"`
+	SourceResults []CouncilSourceResult `json:"sourceResults,omitempty"`
+	Analysis      *CouncilAnalysis      `json:"analysis,omitempty"`
+	Result        *CouncilFinalResult   `json:"result,omitempty"`
+	Warnings      []string              `json:"warnings,omitempty"`
+}
+
 type chatMessageRequest struct {
-	ConversationID  string   `json:"conversationId"`
-	EditMessageID   string   `json:"editMessageId"`
-	Message         string   `json:"message"`
-	ModelID         string   `json:"modelId"`
-	Mode            string   `json:"mode"`
-	ReasoningEffort string   `json:"reasoningEffort"`
-	Grounding       *bool    `json:"grounding"`
-	DeepResearch    *bool    `json:"deepResearch"`
-	FileIDs         []string `json:"fileIds"`
+	ConversationID  string              `json:"conversationId"`
+	EditMessageID   string              `json:"editMessageId"`
+	Message         string              `json:"message"`
+	ModelID         string              `json:"modelId"`
+	Mode            string              `json:"mode"`
+	ReasoningEffort string              `json:"reasoningEffort"`
+	Grounding       *bool               `json:"grounding"`
+	DeepResearch    *bool               `json:"deepResearch"`
+	FileIDs         []string            `json:"fileIds"`
+	SourceModels    []CouncilSourceSpec `json:"sourceModels,omitempty"`
+	FusionModel     *CouncilSourceSpec  `json:"fusionModel,omitempty"`
 }
 
 func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -1010,22 +1078,65 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	deepResearch := responseMode == "deep_research"
 
 	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
-	if _, err := h.persistModelSelection(r.Context(), user.ID, responseMode, modelID); err != nil {
-		writeError(w, http.StatusInternalServerError, "db_error", "failed to persist model preferences")
-		return
-	}
+	var reasoningEffort string
 
-	reasoningEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, modelID, responseMode, req.ReasoningEffort)
-	if err != nil {
-		switch {
-		case errors.Is(err, errInvalidReasoningEffort):
-			writeError(w, http.StatusBadRequest, "invalid_request", "reasoningEffort must be one of: low, medium, high")
-		case errors.Is(err, errReasoningUnsupportedModel):
-			writeError(w, http.StatusBadRequest, "invalid_request", "selected model does not support reasoning controls")
-		default:
-			writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve reasoning effort")
+	isCouncil := responseMode == "agent" && len(req.SourceModels) > 0
+	if isCouncil {
+		if req.FusionModel == nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", "fusionModel is required when sourceModels is provided")
+			return
 		}
-		return
+		if len(req.SourceModels) > 5 {
+			writeError(w, http.StatusBadRequest, "invalid_request", "maximum of 5 source models allowed")
+			return
+		}
+
+		seenSourceModels := make(map[string]bool)
+		for i, sm := range req.SourceModels {
+			if seenSourceModels[sm.ModelID] {
+				writeError(w, http.StatusBadRequest, "invalid_request", "duplicate source models are not allowed")
+				return
+			}
+			seenSourceModels[sm.ModelID] = true
+
+			resolvedEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, sm.ModelID, responseMode, sm.ReasoningEffort)
+			if err != nil {
+				writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid reasoning effort for model %s: %v", sm.ModelID, err))
+				return
+			}
+			req.SourceModels[i].ReasoningEffort = resolvedEffort
+		}
+
+		resolvedFusionEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, req.FusionModel.ModelID, responseMode, req.FusionModel.ReasoningEffort)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_request", fmt.Sprintf("invalid reasoning effort for fusion model %s: %v", req.FusionModel.ModelID, err))
+			return
+		}
+		req.FusionModel.ReasoningEffort = resolvedFusionEffort
+
+		if _, err := h.persistCouncilModelSelection(r.Context(), user.ID, req.SourceModels, *req.FusionModel); err != nil {
+			writeError(w, http.StatusInternalServerError, "db_error", "failed to persist model preferences")
+			return
+		}
+	} else {
+		if _, err := h.persistModelSelection(r.Context(), user.ID, responseMode, modelID); err != nil {
+			writeError(w, http.StatusInternalServerError, "db_error", "failed to persist model preferences")
+			return
+		}
+
+		resolvedEffort, err := h.resolveReasoningEffort(r.Context(), user.ID, modelID, responseMode, req.ReasoningEffort)
+		if err != nil {
+			switch {
+			case errors.Is(err, errInvalidReasoningEffort):
+				writeError(w, http.StatusBadRequest, "invalid_request", "reasoningEffort must be one of: low, medium, high")
+			case errors.Is(err, errReasoningUnsupportedModel):
+				writeError(w, http.StatusBadRequest, "invalid_request", "selected model does not support reasoning controls")
+			default:
+				writeError(w, http.StatusInternalServerError, "db_error", "failed to resolve reasoning effort")
+			}
+			return
+		}
+		reasoningEffort = resolvedEffort
 	}
 
 	conversationID, err := h.resolveConversationID(r.Context(), user.ID, req.ConversationID, req.Message)
@@ -1111,6 +1222,21 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if responseMode == "agent" {
+		if isCouncil {
+			h.streamCouncilQueuedResponse(r.Context(), w, flusher, councilQueuedStreamInput{
+				UserID:         user.ID,
+				UserMessageID:  userMessageID,
+				ConversationID: conversationID,
+				SourceModels:   req.SourceModels,
+				FusionModel:    *req.FusionModel,
+				Message:        req.Message,
+				Prompt:         userPrompt,
+				Grounding:      true,
+				History:        historyMessages,
+			})
+			return
+		}
+
 		h.streamAgentQueuedResponse(r.Context(), w, flusher, agentQueuedStreamInput{
 			UserID:          user.ID,
 			UserMessageID:   userMessageID,
@@ -1896,20 +2022,29 @@ func (h Handler) persistModelSelection(ctx context.Context, userID, mode, modelI
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
 	var lastUsedAgentModelID sql.NullString
+	var lastUsedAgentSourceModelIDsJSON sql.NullString
+	var lastUsedAgentFusionModelID sql.NullString
 	err = tx.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id, last_used_agent_source_model_ids_json, last_used_agent_fusion_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID)
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID, &lastUsedAgentSourceModelIDsJSON, &lastUsedAgentFusionModelID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, err
+	}
+
+	var lastUsedAgentSourceModelIDs []string
+	if lastUsedAgentSourceModelIDsJSON.Valid && lastUsedAgentSourceModelIDsJSON.String != "" {
+		_ = json.Unmarshal([]byte(lastUsedAgentSourceModelIDsJSON.String), &lastUsedAgentSourceModelIDs)
 	}
 
 	preferences := modelPreferencesResponse{
 		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
 		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
 		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
+		LastUsedAgentSourceModelIDs: lastUsedAgentSourceModelIDs,
+		LastUsedAgentFusionModelID:  strings.TrimSpace(lastUsedAgentFusionModelID.String),
 	}
 
 	switch mode {
@@ -1937,6 +2072,79 @@ LIMIT 1;
 		if preferences.LastUsedDeepResearchModelID == "" {
 			preferences.LastUsedDeepResearchModelID = resolvedModelID
 		}
+	}
+
+	if err := upsertUserModelPreferences(ctx, tx, userID, preferences); err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	return preferences, nil
+}
+
+func (h Handler) persistCouncilModelSelection(ctx context.Context, userID string, sourceModels []CouncilSourceSpec, fusionModel CouncilSourceSpec) (modelPreferencesResponse, error) {
+	tx, err := h.db.BeginTx(ctx, nil)
+	if err != nil {
+		return modelPreferencesResponse{}, err
+	}
+	defer tx.Rollback()
+
+	sourceModelIDs := make([]string, 0, len(sourceModels))
+	for _, m := range sourceModels {
+		resolved, err := ensureModelExists(ctx, tx, m.ModelID)
+		if err != nil {
+			return modelPreferencesResponse{}, err
+		}
+		sourceModelIDs = append(sourceModelIDs, resolved)
+	}
+
+	resolvedFusion, err := ensureModelExists(ctx, tx, fusionModel.ModelID)
+	if err != nil {
+		return modelPreferencesResponse{}, err
+	}
+
+	var lastUsedModelID sql.NullString
+	var lastUsedDeepResearchModelID sql.NullString
+	var lastUsedAgentModelID sql.NullString
+	var lastUsedAgentSourceModelIDsJSON sql.NullString
+	var lastUsedAgentFusionModelID sql.NullString
+	err = tx.QueryRowContext(ctx, `
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id, last_used_agent_source_model_ids_json, last_used_agent_fusion_model_id
+FROM user_model_preferences
+WHERE user_id = ?
+LIMIT 1;
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID, &lastUsedAgentSourceModelIDsJSON, &lastUsedAgentFusionModelID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return modelPreferencesResponse{}, err
+	}
+
+	var lastUsedAgentSourceModelIDs []string
+	if lastUsedAgentSourceModelIDsJSON.Valid && lastUsedAgentSourceModelIDsJSON.String != "" {
+		_ = json.Unmarshal([]byte(lastUsedAgentSourceModelIDsJSON.String), &lastUsedAgentSourceModelIDs)
+	}
+
+	preferences := modelPreferencesResponse{
+		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
+		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
+		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
+		LastUsedAgentSourceModelIDs: lastUsedAgentSourceModelIDs,
+		LastUsedAgentFusionModelID:  strings.TrimSpace(lastUsedAgentFusionModelID.String),
+	}
+
+	preferences.LastUsedAgentSourceModelIDs = sourceModelIDs
+	preferences.LastUsedAgentFusionModelID = resolvedFusion
+
+	if preferences.LastUsedModelID == "" {
+		preferences.LastUsedModelID = resolvedFusion
+	}
+	if preferences.LastUsedDeepResearchModelID == "" {
+		preferences.LastUsedDeepResearchModelID = resolvedFusion
+	}
+	if preferences.LastUsedAgentModelID == "" {
+		preferences.LastUsedAgentModelID = resolvedFusion
 	}
 
 	if err := upsertUserModelPreferences(ctx, tx, userID, preferences); err != nil {
@@ -2160,21 +2368,35 @@ func upsertUserModelPreferences(ctx context.Context, tx *sql.Tx, userID string, 
 	deepModelID := nullableString(preferences.LastUsedDeepResearchModelID)
 	agentModelID := nullableString(preferences.LastUsedAgentModelID)
 
+	var sourcesJSON sql.NullString
+	if len(preferences.LastUsedAgentSourceModelIDs) > 0 {
+		b, _ := json.Marshal(preferences.LastUsedAgentSourceModelIDs)
+		sourcesJSON = sql.NullString{String: string(b), Valid: true}
+	}
+	fusionModelID := nullableString(preferences.LastUsedAgentFusionModelID)
+
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO user_model_preferences (
   user_id,
   last_used_model_id,
   last_used_deep_research_model_id,
   last_used_agent_model_id,
+  last_used_agent_source_model_ids_json,
+  last_used_agent_fusion_model_id,
   updated_at
 )
-VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(user_id) DO UPDATE SET
   last_used_model_id = excluded.last_used_model_id,
   last_used_deep_research_model_id = excluded.last_used_deep_research_model_id,
   last_used_agent_model_id = excluded.last_used_agent_model_id,
+  last_used_agent_source_model_ids_json = excluded.last_used_agent_source_model_ids_json,
+  last_used_agent_fusion_model_id = excluded.last_used_agent_fusion_model_id,
   updated_at = CURRENT_TIMESTAMP;
-`, userID, normalModelID, deepModelID, agentModelID)
+`, userID, normalModelID, deepModelID, agentModelID, sourcesJSON, fusionModelID)
+	if err != nil {
+		log.Printf("upsertUserModelPreferences error: %v", err)
+	}
 	return err
 }
 

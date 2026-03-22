@@ -341,9 +341,31 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `progress`, `warning`, `token`, `reasoning`, `usage`, `citations`, `error`, and `done`.
+                description: "SSE events with `event: message` and JSON payload in `data:`. Event types include `metadata`, `progress`, `warning`, `token`, `reasoning`, `usage`, `citations`, `error`, and `done`."
         '400':
           $ref: '#/components/responses/Error'
+        '401':
+          $ref: '#/components/responses/Error'
+        '404':
+          $ref: '#/components/responses/Error'
+  /v1/agent-runs/{id}:
+    get:
+      summary: Poll agent run status
+      security:
+        - SessionCookie: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent run status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentRunStatus'
         '401':
           $ref: '#/components/responses/Error'
         '404':
@@ -671,13 +693,18 @@ components:
         deepResearch:
           type: boolean
           default: false
-        mode:
-          type: string
-          enum: [chat, deep_research, agent]
         fileIds:
           type: array
           items:
             type: string
+        sourceModels:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilSourceSpec'
+          description: List of source models to query in parallel (for agent mode)
+        fusionModel:
+          $ref: '#/components/schemas/CouncilSourceSpec'
+          description: Model to fuse the source model responses (for agent mode)
     StreamEvent:
       oneOf:
         - $ref: '#/components/schemas/StreamEventMetadata'
@@ -806,6 +833,8 @@ components:
           type: string
         userMessageId:
           type: string
+        agentRunId:
+          type: string
     StreamEventProgress:
       type: object
       required: [type, phase]
@@ -921,3 +950,124 @@ components:
               type: string
             message:
               type: string
+    CouncilSourceSpec:
+      type: object
+      required: [modelId]
+      properties:
+        modelId:
+          type: string
+        reasoningEffort:
+          $ref: '#/components/schemas/ReasoningEffort'
+    CouncilSourceResult:
+      type: object
+      required: [modelId, status]
+      properties:
+        modelId:
+          type: string
+        status:
+          type: string
+        response:
+          type: string
+        reasoningContent:
+          type: string
+        citations:
+          type: array
+          items:
+            $ref: '#/components/schemas/Citation'
+        usage:
+          $ref: '#/components/schemas/Usage'
+        durationMs:
+          type: integer
+        searchQueries:
+          type: integer
+        readableSources:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        error:
+          type: string
+    CouncilAnalysisItem:
+      type: object
+      required: [point]
+      properties:
+        point:
+          type: string
+        sourceModels:
+          type: array
+          items:
+            type: string
+    CouncilDifferencePosition:
+      type: object
+      required: [sourceModel, summary]
+      properties:
+        sourceModel:
+          type: string
+        summary:
+          type: string
+    CouncilDifferenceGroup:
+      type: object
+      required: [topic, positions]
+      properties:
+        topic:
+          type: string
+        positions:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilDifferencePosition'
+    CouncilAnalysis:
+      type: object
+      properties:
+        agreement:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilAnalysisItem'
+        keyDifferences:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilDifferenceGroup'
+        partialCoverage:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilAnalysisItem'
+        uniqueInsights:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilAnalysisItem'
+        blindSpots:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilAnalysisItem'
+    CouncilFinalResult:
+      type: object
+      required: [modelId, response]
+      properties:
+        modelId:
+          type: string
+        response:
+          type: string
+        reasoningContent:
+          type: string
+        usage:
+          $ref: '#/components/schemas/Usage'
+    AgentRunStatus:
+      type: object
+      required: [id, status]
+      properties:
+        id:
+          type: string
+        status:
+          type: string
+        sourceResults:
+          type: array
+          items:
+            $ref: '#/components/schemas/CouncilSourceResult'
+        analysis:
+          $ref: '#/components/schemas/CouncilAnalysis'
+        result:
+          $ref: '#/components/schemas/CouncilFinalResult'
+        warnings:
+          type: array
+          items:
+            type: string
