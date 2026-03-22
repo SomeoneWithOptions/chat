@@ -1,5 +1,6 @@
 import { type ChangeEvent, type FormEvent, useEffect, useRef } from 'react';
 import { type ReasoningEffort, type UploadedFile, type Model } from '../lib/api';
+import ModelDropdown from './ModelDropdown';
 
 type ComposerProps = {
   prompt: string;
@@ -166,43 +167,33 @@ export default function Composer({
                   );
                 })}
                 {selectedSourceModels.length < 5 && (
-                  <select
-                    className="council-select"
-                    value=""
-                    onChange={(e) => {
-                      if (!e.target.value) return;
-                      if (!selectedSourceModels.includes(e.target.value)) {
-                        onSourceModelsChange?.([...selectedSourceModels, e.target.value]);
+                  <ModelDropdown
+                    models={models}
+                    value={null}
+                    onChange={(id) => {
+                      if (!selectedSourceModels.includes(id)) {
+                        onSourceModelsChange?.([...selectedSourceModels, id]);
                       }
                     }}
+                    placeholder="+ Add Source"
+                    disabledIds={selectedSourceModels}
                     disabled={isStreaming}
-                  >
-                    <option value="" disabled>+ Add Source</option>
-                    {models.map((m) => (
-                      <option key={m.id} value={m.id} disabled={selectedSourceModels.includes(m.id)}>
-                        {m.name}
-                      </option>
-                    ))}
-                  </select>
+                    variant="dashed"
+                  />
                 )}
               </div>
             </div>
             {selectedSourceModels.length > 0 && (
               <div className="council-section">
                 <span className="council-label">Fuse with</span>
-                <select
-                  className="council-select fusion-select"
-                  value={selectedFusionModel || ''}
-                  onChange={(e) => onFusionModelChange?.(e.target.value)}
+                <ModelDropdown
+                  models={models}
+                  value={selectedFusionModel ?? null}
+                  onChange={(id) => onFusionModelChange?.(id)}
+                  placeholder="Select Fusion Model"
                   disabled={isStreaming}
-                >
-                  <option value="" disabled>Select Fusion Model</option>
-                  {models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.name}
-                    </option>
-                  ))}
-                </select>
+                  variant="solid"
+                />
               </div>
             )}
           </div>
