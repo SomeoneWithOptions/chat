@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useCallback } from 'react';
+import { createPortal } from 'react-dom';
 import type { Model } from '../lib/api';
 
 type ModelDropdownProps = {
@@ -14,6 +15,13 @@ type ModelDropdownProps = {
 type ModelGroup = {
   provider: string;
   models: Model[];
+};
+
+type PanelPos = {
+  top: number;
+  left: number;
+  width: number;
+  openUp: boolean;
 };
 
 function groupAndSort(models: Model[], search: string): ModelGroup[] {
@@ -46,6 +54,10 @@ function groupAndSort(models: Model[], search: string): ModelGroup[] {
   }));
 }
 
+const PANEL_MAX_HEIGHT = 360; // search (~60) + list (~280) + padding
+const PANEL_WIDTH = 300;
+const GAP = 6;
+
 export default function ModelDropdown({
   models,
   value,
@@ -57,24 +69,61 @@ export default function ModelDropdown({
 }: ModelDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [search, setSearch] = useState('');
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const [panelPos, setPanelPos] = useState<PanelPos | null>(null);
+
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+
+  // Calculate where the panel should be positioned (fixed, in viewport coords)
+  const calcPos = useCallback(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const rect = trigger.getBoundingClientRect();
+    const spaceAbove = rect.top;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const openUp = spaceAbove > spaceBelow || spaceBelow < PANEL_MAX_HEIGHT + GAP;
+
+    setPanelPos({
+      left: Math.min(rect.left, window.innerWidth - PANEL_WIDTH - 8),
+      top: openUp
+        ? rect.top - Math.min(PANEL_MAX_HEIGHT, spaceAbove - GAP)
+        : rect.bottom + GAP,
+      width: PANEL_WIDTH,
+      openUp,
+    });
+  }, []);
 
   // Auto-focus search input when panel opens
   useEffect(() => {
     if (isOpen) {
+      calcPos();
       setTimeout(() => searchRef.current?.focus(), 0);
     }
-  }, [isOpen]);
+  }, [isOpen, calcPos]);
 
-  // Click-outside to close
+  // Reposition on scroll/resize while open
+  useEffect(() => {
+    if (!isOpen) return;
+    window.addEventListener('scroll', calcPos, true);
+    window.addEventListener('resize', calcPos);
+    return () => {
+      window.removeEventListener('scroll', calcPos, true);
+      window.removeEventListener('resize', calcPos);
+    };
+  }, [isOpen, calcPos]);
+
+  // Click-outside to close (checks both trigger and panel)
   useEffect(() => {
     if (!isOpen) return;
     function handleMouseDown(e: MouseEvent) {
-      if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
-        setIsOpen(false);
-        setSearch('');
-      }
+      const target = e.target as Node;
+      if (
+        triggerRef.current?.contains(target) ||
+        panelRef.current?.contains(target)
+      ) return;
+      setIsOpen(false);
+      setSearch('');
     }
     document.addEventListener('mousedown', handleMouseDown);
     return () => document.removeEventListener('mousedown', handleMouseDown);
@@ -105,37 +154,20 @@ export default function ModelDropdown({
     .filter(Boolean)
     .join(' ');
 
-  return (
-    <div className="council-dropdown-wrapper" ref={wrapperRef}>
-      <button
-        type="button"
-        className={triggerClass}
-        onClick={() => {
-          if (!disabled) setIsOpen((o) => !o);
-        }}
-        disabled={disabled}
-      >
-        <span>{triggerLabel}</span>
-        <svg
-          className="council-dropdown-chevron"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-
-      {isOpen && (
-        <>
+  const panel =
+    isOpen && panelPos
+      ? createPortal(
           <div
-            className="dropdown-backdrop"
-            onClick={close}
-          />
-          <div className="council-dropdown-panel">
+            ref={panelRef}
+            className={`council-dropdown-panel${panelPos.openUp ? ' council-dropdown-panel--up' : ' council-dropdown-panel--down'}`}
+            style={{
+              position: 'fixed',
+              top: panelPos.top,
+              left: panelPos.left,
+              width: panelPos.width,
+              zIndex: 9999,
+            }}
+          >
             <div className="council-dropdown-search-wrap">
               <input
                 ref={searchRef}
@@ -173,9 +205,37 @@ export default function ModelDropdown({
                 </div>
               ))}
             </div>
-          </div>
-        </>
-      )}
-    </div>
+          </div>,
+          document.body
+        )
+      : null;
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        className={triggerClass}
+        onClick={() => {
+          if (!disabled) setIsOpen((o) => !o);
+        }}
+        disabled={disabled}
+      >
+        <span>{triggerLabel}</span>
+        <svg
+          className="council-dropdown-chevron"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+
+      {panel}
+    </>
   );
 }

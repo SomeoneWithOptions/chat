@@ -2751,10 +2751,6 @@ code {
 
 /* ─── Council Model Dropdown ────────────────────────── */
 
-.council-dropdown-wrapper {
-  position: relative;
-}
-
 /* Trigger button */
 .council-dropdown-trigger {
   display: inline-flex;
@@ -2823,28 +2819,36 @@ code {
   color: var(--accent);
 }
 
-/* ── Panel — opens UPWARD to avoid covering the composer ── */
+/* ── Panel — rendered into <body> via portal, position:fixed set inline ── */
 .council-dropdown-panel {
-  position: absolute;
-  /* Open upward: sits above the trigger */
-  bottom: calc(100% + 6px);
-  left: 0;
-  z-index: 200;
-  width: 300px;
-  max-width: calc(100vw - 32px);
-  /* Solid opaque background — critical */
+  /* position/top/left/width are set via inline styles by the component */
+  max-height: 360px;
+  max-width: calc(100vw - 16px);
+  /* Solid opaque background — critical, never transparent */
   background: #222222;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.14);
   border-radius: var(--radius-md);
-  box-shadow: 0 -4px 6px rgba(0,0,0,0.15), 0 16px 40px rgba(0, 0, 0, 0.7);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.8), 0 2px 8px rgba(0, 0, 0, 0.4);
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  animation: councilDropIn 140ms ease;
 }
 
-@keyframes councilDropIn {
+.council-dropdown-panel--up {
+  animation: councilSlideUp 130ms ease;
+}
+
+.council-dropdown-panel--down {
+  animation: councilSlideDown 130ms ease;
+}
+
+@keyframes councilSlideUp {
   from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes councilSlideDown {
+  from { opacity: 0; transform: translateY(-6px); }
   to   { opacity: 1; transform: translateY(0); }
 }
 
