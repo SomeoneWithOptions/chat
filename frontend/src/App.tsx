@@ -1448,6 +1448,11 @@ export default function App() {
           sendDisabled={editingMessageId !== null}
           onEnhance={handleOpenEnhance}
           enhanceDisabled={prompt.trim().length === 0 || isStreaming || uploadingAttachments}
+          models={models}
+          selectedSourceModels={selectedSourceModels}
+          onSourceModelsChange={setSelectedSourceModels}
+          selectedFusionModel={selectedFusionModel}
+          onFusionModelChange={setSelectedFusionModel}
         />
 
         {enhanceModalOpen && (
