@@ -31,35 +31,35 @@ func BuildProgressSummary(input ProgressSummaryInput) ProgressSummary {
 
 	switch input.Phase {
 	case PhasePlanning:
-		summary.Title = "Planning next step"
-		summary.Detail = "Checking what evidence is still missing"
+		summary.Title = "Mapping the request"
+		summary.Detail = "Figuring out what needs to be answered before drafting anything."
 	case PhaseSearching:
 		if input.QueryCount <= 1 && input.QueryCount > 0 {
-			summary.Title = "Getting grounding results"
+			summary.Title = "Finding an initial source"
 			summary.IsQuickStep = true
 		} else {
-			summary.Title = "Searching trusted sources"
-			summary.Detail = "Searching trusted sources for corroboration"
+			summary.Title = "Scanning for trustworthy sources"
+			summary.Detail = "Looking for current, relevant sources that can support the answer."
 		}
 	case PhaseReading:
-		summary.Title = "Reading selected sources"
-		summary.Detail = "Using top-ranked pages to improve accuracy"
+		summary.Title = "Pulling facts from the strongest results"
+		summary.Detail = "Reading the most promising pages and extracting usable evidence."
 		if input.CandidateCount == 1 {
 			summary.IsQuickStep = true
 		}
 	case PhaseEvaluating:
-		summary.Title = "Checking evidence quality"
-		summary.Detail = "Deciding whether we can answer confidently"
+		summary.Title = "Comparing what holds up"
+		summary.Detail = "Checking whether the sources agree and whether the evidence is strong enough."
 	case PhaseIterating:
-		summary.Title = "Running another pass"
-		summary.Detail = "Need one more search to close gaps"
+		summary.Title = "Closing the remaining gaps"
+		summary.Detail = "Running another pass where the answer still needs more support."
 		summary.Decision = ProgressDecisionSearchMore
 	case PhaseSynthesizing:
-		summary.Title = "Drafting response"
-		summary.Detail = "Grounding claims to collected sources"
+		summary.Title = "Shaping the response"
+		summary.Detail = "Turning the research into a clear response with grounded claims."
 	case PhaseFinalizing:
-		summary.Title = "Finalizing answer"
-		summary.Detail = "Ordering citations and sending response"
+		summary.Title = "Polishing the final answer"
+		summary.Detail = "Tightening wording, organizing citations, and preparing the response."
 		summary.Decision = ProgressDecisionFinalize
 	default:
 		summary.Title = strings.TrimSpace(input.Message)

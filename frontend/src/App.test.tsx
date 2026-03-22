@@ -150,7 +150,7 @@ describe('Deep research streaming UX', () => {
     });
 
     expect(screen.getByText('First prompt')).toBeInTheDocument();
-    expect(screen.getByText('Thinking', { selector: '.message-streaming-label' })).toBeInTheDocument();
+    expect(screen.getByText('Thinking', { selector: '.thinking-status-chip-label' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /thought process/i })).not.toBeInTheDocument();
 
     if (typeof releaseStream === 'function') {
@@ -234,8 +234,8 @@ describe('Deep research streaming UX', () => {
       onEvent({
         type: 'progress',
         phase: 'planning',
-        title: 'Planning next step',
-        detail: 'Checking what evidence is still missing',
+        title: 'Mapping the request',
+        detail: 'Figuring out what needs to be answered before drafting anything.',
         totalPasses: 3,
         loop: 1,
         maxLoops: 3,
@@ -243,8 +243,8 @@ describe('Deep research streaming UX', () => {
       onEvent({
         type: 'progress',
         phase: 'searching',
-        title: 'Searching trusted sources',
-        detail: 'Searching trusted sources for corroboration',
+        title: 'Scanning for trustworthy sources',
+        detail: 'Looking for current, relevant sources that can support the answer.',
         pass: 1,
         totalPasses: 3,
         loop: 1,
@@ -253,8 +253,8 @@ describe('Deep research streaming UX', () => {
       onEvent({
         type: 'progress',
         phase: 'reading',
-        title: 'Reading selected sources',
-        detail: 'Using top-ranked pages to improve accuracy',
+        title: 'Pulling facts from the strongest results',
+        detail: 'Reading the most promising pages and extracting usable evidence.',
         loop: 1,
         maxLoops: 3,
         sourcesConsidered: 4,
@@ -263,8 +263,8 @@ describe('Deep research streaming UX', () => {
       onEvent({
         type: 'progress',
         phase: 'evaluating',
-        title: 'Checking evidence quality',
-        detail: 'Deciding whether we can answer confidently',
+        title: 'Comparing what holds up',
+        detail: 'Checking whether the sources agree and whether the evidence is strong enough.',
         loop: 1,
         maxLoops: 3,
         sourcesConsidered: 4,
@@ -273,8 +273,8 @@ describe('Deep research streaming UX', () => {
       onEvent({
         type: 'progress',
         phase: 'iterating',
-        title: 'Running another pass',
-        detail: 'Need one more search to close gaps',
+        title: 'Closing the remaining gaps',
+        detail: 'Running another pass where the answer still needs more support.',
         loop: 1,
         maxLoops: 3,
         sourcesConsidered: 4,
@@ -283,15 +283,15 @@ describe('Deep research streaming UX', () => {
       onEvent({
         type: 'progress',
         phase: 'synthesizing',
-        title: 'Drafting response',
-        detail: 'Grounding claims to collected sources',
+        title: 'Shaping the response',
+        detail: 'Turning the research into a clear response with grounded claims.',
       });
       onEvent({ type: 'token', delta: 'Final answer [1].' });
       onEvent({
         type: 'progress',
         phase: 'finalizing',
-        title: 'Finalizing answer',
-        detail: 'Ordering citations and sending response',
+        title: 'Polishing the final answer',
+        detail: 'Tightening wording, organizing citations, and preparing the response.',
       });
       await new Promise<void>((resolve) => {
         releaseStream = () => {
@@ -315,19 +315,19 @@ describe('Deep research streaming UX', () => {
     });
 
     expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
-    expect(screen.getByText('Finalizing answer: Ordering citations and sending response')).toBeInTheDocument();
-    expect(screen.getByText('Running')).toBeInTheDocument();
+    expect(screen.getByText('Tightening wording, organizing citations, and preparing the response.')).toBeInTheDocument();
+    expect(screen.getByText('Thinking', { selector: '.thinking-status-chip-label' })).toBeInTheDocument();
 
     // Expand the in-message panel to see all phases
     await user.click(screen.getByRole('button', { name: /thinking/i }));
 
-    expect(screen.getByText('Planning next step')).toBeInTheDocument();
-    expect(screen.getByText('Searching trusted sources')).toBeInTheDocument();
-    expect(screen.getByText('Reading selected sources')).toBeInTheDocument();
-    expect(screen.getByText('Checking evidence quality')).toBeInTheDocument();
-    expect(screen.getByText('Running another pass')).toBeInTheDocument();
-    expect(screen.getByText('Drafting response')).toBeInTheDocument();
-    expect(screen.getByText('Finalizing answer')).toBeInTheDocument();
+    expect(screen.getByText('Mapping the request')).toBeInTheDocument();
+    expect(screen.getByText('Scanning for trustworthy sources')).toBeInTheDocument();
+    expect(screen.getByText('Pulling facts from the strongest results')).toBeInTheDocument();
+    expect(screen.getByText('Comparing what holds up')).toBeInTheDocument();
+    expect(screen.getByText('Closing the remaining gaps')).toBeInTheDocument();
+    expect(screen.getByText('Shaping the response')).toBeInTheDocument();
+    expect(screen.getByText('Polishing the final answer')).toBeInTheDocument();
 
     if (releaseStream) releaseStream();
   });
@@ -396,7 +396,7 @@ describe('Deep research streaming UX', () => {
     let releaseStream: (() => void) | undefined;
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
-      onEvent({ type: 'progress', phase: 'searching', title: 'Getting grounding results', isQuickStep: true });
+      onEvent({ type: 'progress', phase: 'searching', title: 'Finding an initial source', isQuickStep: true });
       await new Promise<void>((resolve) => {
         releaseStream = () => {
           onEvent({ type: 'done' });
@@ -417,8 +417,8 @@ describe('Deep research streaming UX', () => {
     });
 
     expect(screen.queryByTestId('research-timeline')).not.toBeInTheDocument();
-    expect(screen.getByText('Getting grounding results')).toBeInTheDocument();
-    expect(screen.queryByText('Searching trusted sources for corroboration')).not.toBeInTheDocument();
+    expect(screen.getByText('Finding an initial source')).toBeInTheDocument();
+    expect(screen.queryByText('Looking for current, relevant sources that can support the answer.')).not.toBeInTheDocument();
 
     if (releaseStream) releaseStream();
   });
@@ -427,7 +427,7 @@ describe('Deep research streaming UX', () => {
     let releaseStream: (() => void) | undefined;
     streamMessageMock.mockImplementation(async (_request: api.ChatRequest, onEvent: (event: api.StreamEvent) => void) => {
       onEvent({ type: 'metadata', grounding: true, deepResearch: false, modelId: 'openrouter/free', conversationId: 'conv-1' });
-      onEvent({ type: 'progress', phase: 'planning', title: 'Planning next step', detail: 'Checking what evidence is still missing' });
+      onEvent({ type: 'progress', phase: 'planning', title: 'Mapping the request', detail: 'Figuring out what needs to be answered before drafting anything.' });
       onEvent({ type: 'reasoning', delta: 'I am validating evidence consistency.' });
       await new Promise<void>((resolve) => {
         releaseStream = () => {
@@ -488,12 +488,12 @@ describe('Deep research streaming UX', () => {
         reasoningContent: 'Checking release note chronology.',
         thinkingTrace: {
           status: 'done',
-          summary: 'Finalizing answer: Ordering citations and sending response',
+          summary: 'Tightening wording, organizing citations, and preparing the response.',
           entries: [
             {
               phase: 'planning',
-              title: 'Planning next step',
-              detail: 'Checking what evidence is still missing',
+              title: 'Mapping the request',
+              detail: 'Figuring out what needs to be answered before drafting anything.',
             },
           ],
         },
@@ -513,10 +513,10 @@ describe('Deep research streaming UX', () => {
     await waitFor(() => {
       expect(listConversationMessagesMock).toHaveBeenCalledWith('conv-existing');
     });
-    expect(screen.getByText('Finalizing answer: Ordering citations and sending response')).toBeInTheDocument();
+    expect(screen.getByText('Tightening wording, organizing citations, and preparing the response.')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /thinking/i }));
-    expect(screen.getByText('Planning next step')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /ready/i }));
+    expect(screen.getByText('Mapping the request')).toBeInTheDocument();
   });
 
   it('includes selected reasoning effort in chat requests when model supports reasoning', async () => {

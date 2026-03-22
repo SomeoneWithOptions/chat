@@ -95,6 +95,75 @@ function decisionLabel(decision: ProgressDecision | undefined): string | null {
   return null;
 }
 
+type StatusTone = 'neutral' | 'running' | 'done' | 'warning' | 'stopped';
+
+function phaseChipLabel(phase: ThinkingTrace['entries'][number]['phase']): string {
+  switch (phase) {
+    case 'planning':
+      return 'Planning';
+    case 'searching':
+      return 'Searching';
+    case 'reading':
+      return 'Reading';
+    case 'evaluating':
+      return 'Checking';
+    case 'iterating':
+      return 'Refining';
+    case 'synthesizing':
+      return 'Writing';
+    case 'finalizing':
+      return 'Finishing';
+    default:
+      return 'Thinking';
+  }
+}
+
+function generationStatusMeta(status: NonNullable<ThinkingTrace['status']>): { label: string; tone: StatusTone; animate: boolean } {
+  if (status === 'running') return { label: 'Thinking', tone: 'running', animate: true };
+  if (status === 'stopped') return { label: 'Paused', tone: 'stopped', animate: false };
+  return { label: 'Ready', tone: 'done', animate: false };
+}
+
+function sourceStatusMeta(status: CouncilSourceResult['status']): { label: string; tone: StatusTone; animate: boolean; description: string } {
+  switch (status) {
+    case 'queued':
+      return {
+        label: 'Starting',
+        tone: 'neutral',
+        animate: true,
+        description: 'Preparing this model to start its pass.',
+      };
+    case 'running':
+      return {
+        label: 'Thinking',
+        tone: 'running',
+        animate: true,
+        description: 'Reviewing sources and drafting a candidate answer.',
+      };
+    case 'degraded':
+      return {
+        label: 'Partial',
+        tone: 'warning',
+        animate: false,
+        description: 'Finished with warnings or missing pieces.',
+      };
+    case 'failed':
+      return {
+        label: 'Stopped',
+        tone: 'stopped',
+        animate: false,
+        description: 'This pass stopped before it could finish.',
+      };
+    default:
+      return {
+        label: 'Ready',
+        tone: 'done',
+        animate: false,
+        description: 'This model finished its pass and is ready to inspect.',
+      };
+  }
+}
+
 async function copyToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
@@ -167,16 +236,50 @@ const markdownComponents: Components = {
   ),
 };
 
+function ThinkingStatusChip({
+  label,
+  tone,
+  animate,
+  className = '',
+}: {
+  label: string;
+  tone: StatusTone;
+  animate: boolean;
+  className?: string;
+}) {
+  const classes = ['thinking-status-chip', tone, animate ? 'is-animated' : '', className]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <span className={classes}>
+      <span className="thinking-status-chip-label">{label}</span>
+      {animate ? (
+        <span className="thinking-status-chip-dots" aria-hidden="true">
+          <span />
+          <span />
+          <span />
+        </span>
+      ) : (
+        <span className="thinking-status-chip-mark" aria-hidden="true" />
+      )}
+    </span>
+  );
+}
+
 function CouncilSourceCard({ source, isStreaming }: { source: CouncilSourceResult; isStreaming: boolean }) {
   const [expanded, setExpanded] = useState(false);
 
   const isWorking = source.status === 'queued' || source.status === 'running';
-  const displayStatus = source.status.charAt(0).toUpperCase() + source.status.slice(1);
+  const statusMeta = sourceStatusMeta(source.status);
 
   return (
     <div className={`council-source-card status-${source.status}`}>
       <button className="council-source-header" onClick={() => setExpanded(!expanded)} type="button">
-        <span className="council-source-title">{source.modelId}</span>
+        <span className="council-source-heading">
+          <span className="council-source-title">{source.modelId}</span>
+          <span className="council-source-summary">{statusMeta.description}</span>
+        </span>
         <div className="council-source-badges">
           {source.readableSources !== undefined && (
             <span className="badge" title={`${source.readableSources} readable sources`}>
@@ -186,7 +289,12 @@ function CouncilSourceCard({ source, isStreaming }: { source: CouncilSourceResul
           {source.durationMs !== undefined && (
             <span className="badge">{(source.durationMs / 1000).toFixed(1)}s</span>
           )}
-          <span className={`badge status-badge ${source.status}`}>{displayStatus}</span>
+          <ThinkingStatusChip
+            label={statusMeta.label}
+            tone={statusMeta.tone}
+            animate={statusMeta.animate}
+            className="council-source-status"
+          />
         </div>
         <svg
           className={`chevron ${expanded ? 'open' : ''}`}
@@ -200,8 +308,15 @@ function CouncilSourceCard({ source, isStreaming }: { source: CouncilSourceResul
         <div className="council-source-body">
           {source.error ? (
             <div className="error-message">{source.error}</div>
+          ) : source.response ? (
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{source.response}</ReactMarkdown>
+          ) : (isWorking || isStreaming) ? (
+            <div className="council-source-placeholder">
+              <ThinkingStatusChip label={statusMeta.label} tone={statusMeta.tone} animate={statusMeta.animate} />
+              <p>{statusMeta.description}</p>
+            </div>
           ) : (
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{source.response || (isWorking || isStreaming ? 'Thinking...' : '')}</ReactMarkdown>
+            <p className="council-source-empty">No source response was recorded for this pass.</p>
           )}
         </div>
       )}
@@ -305,15 +420,15 @@ export default function ChatMessage({
   const [usageExpanded, setUsageExpanded] = useState(false);
   const generationPanelID = `${message.id}-generation-trace`;
   const generationStatus = thinkingTrace?.status ?? (isStreaming ? 'running' : 'done');
+  const generationStatusPresentation = generationStatusMeta(generationStatus);
   const generationSummary = thinkingTrace?.summary?.trim() || (isStreaming ? 'Working on your request' : 'Thought process');
-  const generationStatusLabel =
-    generationStatus === 'running' ? 'Running' : generationStatus === 'stopped' ? 'Stopped' : 'Complete';
   const reasoningPanelID = `${message.id}-reasoning`;
   const agentsPanelID = `${message.id}-agents`;
   const sourcesPanelID = `${message.id}-sources`;
   const usagePanelID = `${message.id}-usage`;
   const hasUsage = isAssistant && !!message.usage;
   const hasAgentSummaries = isAssistant && !!message.agentSummaries && message.agentSummaries.length > 0;
+  const latestTraceIndex = thinkingTrace?.entries.length ? thinkingTrace.entries.length - 1 : -1;
 
   useEffect(() => {
     setGenerationExpanded(false);
@@ -372,10 +487,13 @@ export default function ChatMessage({
                 aria-controls={generationPanelID}
               >
                 <span className="generation-trace-heading">
-                  <span className="generation-trace-title">Thinking</span>
+                  <ThinkingStatusChip
+                    label={generationStatusPresentation.label}
+                    tone={generationStatusPresentation.tone}
+                    animate={generationStatusPresentation.animate}
+                  />
                   <span className="generation-trace-summary">{generationSummary}</span>
                 </span>
-                <span className={`generation-trace-status ${generationStatus}`}>{generationStatusLabel}</span>
                 <svg
                   className={`generation-trace-chevron ${generationExpanded ? 'open' : ''}`}
                   viewBox="0 0 24 24"
@@ -401,10 +519,22 @@ export default function ChatMessage({
                         {thinkingTrace.entries.map((entry, index) => {
                           const counter = formatTraceCounter(entry);
                           const decision = decisionLabel(entry.decision);
+                          const isCurrentStep = generationStatus === 'running' && index === latestTraceIndex;
                           return (
-                            <li key={`${message.id}-trace-${index}`} className="generation-trace-entry">
+                            <li
+                              key={`${message.id}-trace-${index}`}
+                              className={`generation-trace-entry ${isCurrentStep ? 'current' : ''}`}
+                            >
                               <div className="generation-trace-entry-row">
-                                <span className="generation-trace-entry-title">{entry.title}</span>
+                                <span className="generation-trace-entry-heading">
+                                  <ThinkingStatusChip
+                                    label={phaseChipLabel(entry.phase)}
+                                    tone={isCurrentStep ? 'running' : 'neutral'}
+                                    animate={isCurrentStep}
+                                    className="generation-trace-entry-chip"
+                                  />
+                                  <span className="generation-trace-entry-title">{entry.title}</span>
+                                </span>
                                 {counter && <span className="generation-trace-entry-counter">{counter}</span>}
                               </div>
                               {entry.detail && <p className="generation-trace-entry-detail">{entry.detail}</p>}
@@ -510,14 +640,12 @@ export default function ChatMessage({
             message.content || ''
           )}
           {showStreamingIndicator && (
-            <span className="message-streaming-indicator" aria-live="polite">
-              <span className="message-streaming-label">Thinking</span>
-              <span className="message-streaming-dots" aria-hidden="true">
-                <span />
-                <span />
-                <span />
-              </span>
-            </span>
+            <ThinkingStatusChip
+              label="Thinking"
+              tone="running"
+              animate
+              className="message-streaming-indicator"
+            />
           )}
         </div>
 

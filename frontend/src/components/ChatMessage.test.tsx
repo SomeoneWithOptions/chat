@@ -21,12 +21,12 @@ describe('ChatMessage generation trace', () => {
           reasoningContent: 'Reasoning paragraph.',
           thinkingTrace: {
             status: 'done',
-            summary: 'Finalizing answer: Ordering citations and sending response',
+            summary: 'Tightening wording, organizing citations, and preparing the response.',
             entries: [
               {
                 phase: 'planning',
-                title: 'Planning next step',
-                detail: 'Checking what evidence is still missing',
+                title: 'Mapping the request',
+                detail: 'Figuring out what needs to be answered before drafting anything.',
               },
             ],
           },
@@ -35,12 +35,12 @@ describe('ChatMessage generation trace', () => {
       />,
     );
 
-    expect(screen.getByText('Finalizing answer: Ordering citations and sending response')).toBeInTheDocument();
-    expect(screen.queryByText('Planning next step')).not.toBeInTheDocument();
+    expect(screen.getByText('Tightening wording, organizing citations, and preparing the response.')).toBeInTheDocument();
+    expect(screen.queryByText('Mapping the request')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /thinking/i }));
+    await user.click(screen.getByRole('button', { name: /ready/i }));
 
-    expect(screen.getByText('Planning next step')).toBeInTheDocument();
+    expect(screen.getByText('Mapping the request')).toBeInTheDocument();
     expect(screen.queryByText('Reasoning paragraph.')).not.toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /model reasoning/i }));

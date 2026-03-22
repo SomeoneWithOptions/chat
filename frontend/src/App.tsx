@@ -119,23 +119,23 @@ function loadGoogleIdentityScript(): Promise<void> {
 const maxThinkingTraceEntries = 60;
 
 const researchPhaseTitleDefaults: Record<ResearchPhase, string> = {
-  planning: 'Planning next step',
-  searching: 'Searching trusted sources',
-  reading: 'Reading selected sources',
-  evaluating: 'Checking evidence quality',
-  iterating: 'Running another pass',
-  synthesizing: 'Drafting response',
-  finalizing: 'Finalizing answer',
+  planning: 'Mapping the request',
+  searching: 'Scanning for trustworthy sources',
+  reading: 'Pulling facts from the strongest results',
+  evaluating: 'Comparing what holds up',
+  iterating: 'Closing the remaining gaps',
+  synthesizing: 'Shaping the response',
+  finalizing: 'Polishing the final answer',
 };
 
 const researchPhaseDetailDefaults: Record<ResearchPhase, string> = {
-  planning: 'Checking what evidence is still missing',
-  searching: 'Searching trusted sources for corroboration',
-  reading: 'Using top-ranked pages to improve accuracy',
-  evaluating: 'Deciding whether we can answer confidently',
-  iterating: 'Need one more search to close gaps',
-  synthesizing: 'Grounding claims to collected sources',
-  finalizing: 'Ordering citations and sending response',
+  planning: 'Figuring out what needs to be answered before drafting anything.',
+  searching: 'Looking for current, relevant sources that can support the answer.',
+  reading: 'Reading the most promising pages and extracting usable evidence.',
+  evaluating: 'Checking whether the sources agree and whether the evidence is strong enough.',
+  iterating: 'Running another pass where the answer still needs more support.',
+  synthesizing: 'Turning the research into a clear response with grounded claims.',
+  finalizing: 'Tightening wording, organizing citations, and preparing the response.',
 };
 
 function resolveResearchTitle(
@@ -214,7 +214,7 @@ function toMessageData(message: import('./lib/api').ConversationMessage): Messag
 }
 
 function buildTraceSummary(entry: ThinkingTraceEntry): string {
-  if (entry.detail?.trim()) return `${entry.title}: ${entry.detail}`;
+  if (entry.detail?.trim()) return entry.detail;
   return entry.title;
 }
 
@@ -1043,7 +1043,7 @@ export default function App() {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === options.assistantMessageID
-                  ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped due to an error') }
+                  ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Response paused due to an error') }
                   : m,
               ),
             );
@@ -1063,8 +1063,8 @@ export default function App() {
                   ? {
                     ...m,
                     thinkingTrace: m.responseMode === 'agent'
-                      ? (m.thinkingTrace ?? { status: 'running', summary: 'Queued agent workflow', entries: [] })
-                      : updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Thought process complete'),
+                      ? (m.thinkingTrace ?? { status: 'running', summary: 'Coordinating the agent workflow', entries: [] })
+                      : updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Response ready'),
                   }
                   : m,
               ),
@@ -1117,7 +1117,7 @@ export default function App() {
         setMessages((existing) =>
           existing.map((m) =>
             m.id === options.assistantMessageID
-              ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped by user') }
+              ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Response paused') }
               : m,
           ),
         );
@@ -1126,7 +1126,7 @@ export default function App() {
       setMessages((existing) =>
         existing.map((m) =>
           m.id === options.assistantMessageID
-            ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Stopped due to an error') }
+            ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Response paused due to an error') }
             : m,
         ),
       );
