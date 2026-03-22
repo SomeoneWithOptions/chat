@@ -37,7 +37,8 @@ Set at minimum:
 - `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
 - `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
-- `AGENT_MODE_ENABLED`, `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional async agent mode budgets)
+- `AGENT_MODE_ENABLED`, `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional legacy async agent mode budgets)
+- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL`, `COUNCIL_SEARCH_RESULTS_PER_QUERY`, `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL`, `COUNCIL_TIMEOUT_SECONDS` (optional council-mode budgets)
 - `BRAVE_MONTHLY_QUERY_LIMIT`, `BRAVE_MONTHLY_QUERY_RESERVE` (optional Brave free-tier quota controls)
 - `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings if agent runs are executed via a separate internal URL)
 - `DEFAULT_CHAT_REASONING_EFFORT` (optional, default `medium`)
@@ -100,6 +101,8 @@ Expected response:
 
 ## Agent Mode Behavior (Local)
 
-- Agent mode is always grounded and enqueues an async 4-agent workflow instead of holding the request open.
-- The initial SSE response only creates the placeholder assistant message and queue progress; the frontend polls the conversation until the assistant message finishes.
-- Agent runs enforce Brave monthly reserve checks before starting and pace Brave searches through a shared DB-backed lease so multiple instances still respect the free-tier rate limit.
+- Agent mode enqueues async background work instead of holding the request open.
+- Council mode runs sequential source-model passes, then persists `Sources`, `Analysis`, and `Result` state so reloads and polling can reconstruct the full message.
+- Council mode may run grounded or ungrounded. Legacy single-model agent runs remain grounded.
+- The initial SSE response only creates the placeholder assistant message and queue progress; the frontend then polls the queued run and conversation state until the assistant message settles.
+- Grounded agent runs enforce Brave monthly reserve checks before starting and pace Brave searches through a shared DB-backed lease so multiple instances still respect the free-tier rate limit.

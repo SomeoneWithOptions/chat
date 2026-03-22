@@ -15,17 +15,22 @@ type councilGroundingCoordinator struct {
 	handler      *Handler
 	runID        string
 	runBudget    int
+	defaultCount int
 	searchesUsed int
 	lastSearchAt time.Time
 	minSpacing   time.Duration
 }
 
-func newCouncilGroundingCoordinator(h *Handler, runID string, budget int) *councilGroundingCoordinator {
+func newCouncilGroundingCoordinator(h *Handler, runID string, budget int, defaultCount int) *councilGroundingCoordinator {
+	if defaultCount < 1 {
+		defaultCount = 15
+	}
 	return &councilGroundingCoordinator{
-		handler:    h,
-		runID:      runID,
-		runBudget:  budget,
-		minSpacing: 1100 * time.Millisecond,
+		handler:      h,
+		runID:        runID,
+		runBudget:    budget,
+		defaultCount: defaultCount,
+		minSpacing:   1100 * time.Millisecond,
 	}
 }
 
@@ -58,9 +63,8 @@ func (c *councilGroundingCoordinator) Search(ctx context.Context, query string, 
 	c.searchesUsed++
 	c.lastSearchAt = time.Now()
 
-	// Force count=15 for council mode to get more sources per query
-	if count < 15 {
-		count = 15
+	if count < c.defaultCount {
+		count = c.defaultCount
 	}
 
 	results, err := c.handler.grounding.Search(ctx, query, count)

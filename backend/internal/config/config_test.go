@@ -97,6 +97,18 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.AgentMaxSourcesRead != 80 || cfg.AgentTimeoutSeconds != 1200 {
 		t.Fatalf("unexpected agent defaults: max_sources=%d timeout=%d", cfg.AgentMaxSourcesRead, cfg.AgentTimeoutSeconds)
 	}
+	if cfg.CouncilTargetReadableSourcesPerModel != 15 ||
+		cfg.CouncilSearchResultsPerQuery != 15 ||
+		cfg.CouncilMaxSearchQueriesPerModel != 4 ||
+		cfg.CouncilTimeoutSeconds != 1200 {
+		t.Fatalf(
+			"unexpected council defaults: target_reads=%d results_per_q=%d max_queries=%d timeout=%d",
+			cfg.CouncilTargetReadableSourcesPerModel,
+			cfg.CouncilSearchResultsPerQuery,
+			cfg.CouncilMaxSearchQueriesPerModel,
+			cfg.CouncilTimeoutSeconds,
+		)
+	}
 	if cfg.BraveMonthlyQueryLimit != 2000 || cfg.BraveMonthlyQueryReserve != 200 {
 		t.Fatalf("unexpected brave quota defaults: limit=%d reserve=%d", cfg.BraveMonthlyQueryLimit, cfg.BraveMonthlyQueryReserve)
 	}
@@ -181,6 +193,10 @@ func TestLoadClampsInvalidResearchBudgetsToDefaults(t *testing.T) {
 	t.Setenv("RESEARCH_SOURCE_MAX_BYTES", "0")
 	t.Setenv("RESEARCH_MAX_CITATIONS_CHAT", "0")
 	t.Setenv("RESEARCH_MAX_CITATIONS_DEEP", "-4")
+	t.Setenv("COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL", "0")
+	t.Setenv("COUNCIL_SEARCH_RESULTS_PER_QUERY", "-3")
+	t.Setenv("COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL", "0")
+	t.Setenv("COUNCIL_TIMEOUT_SECONDS", "-1")
 
 	cfg, err := Load()
 	if err != nil {
@@ -197,7 +213,11 @@ func TestLoadClampsInvalidResearchBudgetsToDefaults(t *testing.T) {
 		cfg.ResearchSourceTimeoutSecs != 12 ||
 		cfg.ResearchSourceMaxBytes != 1_500_000 ||
 		cfg.ResearchMaxCitationsChat != 8 ||
-		cfg.ResearchMaxCitationsDeep != 12 {
+		cfg.ResearchMaxCitationsDeep != 12 ||
+		cfg.CouncilTargetReadableSourcesPerModel != 15 ||
+		cfg.CouncilSearchResultsPerQuery != 15 ||
+		cfg.CouncilMaxSearchQueriesPerModel != 4 ||
+		cfg.CouncilTimeoutSeconds != 1200 {
 		t.Fatalf("expected invalid budgets to clamp to defaults, got %+v", cfg)
 	}
 }

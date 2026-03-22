@@ -1,4 +1,12 @@
-import { ChangeEvent, FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ChangeEvent,
+  FormEvent,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import {
   APIError,
   authWithGoogle,
@@ -26,24 +34,36 @@ import {
   type ThinkingTraceEntry,
   type UploadedFile,
   type User,
-} from './lib/api';
-import Sidebar from './components/Sidebar';
-import ModelSelector from './components/ModelSelector';
-import ChatMessage, { type MessageData } from './components/ChatMessage';
-import Composer from './components/Composer';
-import PromptEnhanceModal from './components/PromptEnhanceModal';
-import useVirtualKeyboard from './hooks/useVirtualKeyboard';
+} from "./lib/api";
+import Sidebar from "./components/Sidebar";
+import ModelSelector from "./components/ModelSelector";
+import ChatMessage, { type MessageData } from "./components/ChatMessage";
+import Composer from "./components/Composer";
+import PromptEnhanceModal from "./components/PromptEnhanceModal";
+import useVirtualKeyboard from "./hooks/useVirtualKeyboard";
 
 const GoogleIcon = () => (
-  <svg viewBox="0 0 24 24" width="20" height="20" style={{ display: 'block' }}>
-    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z" />
-    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z" />
+  <svg viewBox="0 0 24 24" width="20" height="20" style={{ display: "block" }}>
+    <path
+      fill="#4285F4"
+      d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+    />
+    <path
+      fill="#34A853"
+      d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+    />
+    <path
+      fill="#FBBC05"
+      d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"
+    />
+    <path
+      fill="#EA4335"
+      d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+    />
   </svg>
 );
 
-const googleIdentityScriptSrc = 'https://accounts.google.com/gsi/client';
+const googleIdentityScriptSrc = "https://accounts.google.com/gsi/client";
 
 type GoogleCredentialResponse = {
   credential?: string;
@@ -59,11 +79,11 @@ type GoogleIdentityServices = {
       renderButton: (
         parent: HTMLElement,
         options: {
-          theme?: 'outline' | 'filled_blue' | 'filled_black';
-          size?: 'large' | 'medium' | 'small';
-          text?: 'signin_with' | 'signup_with' | 'continue_with' | 'signin';
-          shape?: 'rectangular' | 'pill' | 'circle' | 'square';
-          logo_alignment?: 'left' | 'center';
+          theme?: "outline" | "filled_blue" | "filled_black";
+          size?: "large" | "medium" | "small";
+          text?: "signin_with" | "signup_with" | "continue_with" | "signin";
+          shape?: "rectangular" | "pill" | "circle" | "square";
+          logo_alignment?: "left" | "center";
           width?: string;
         },
       ) => void;
@@ -75,7 +95,7 @@ let googleIdentityScriptLoadPromise: Promise<void> | null = null;
 
 function readGoogleIdentityServices(): GoogleIdentityServices | null {
   const googleValue = (window as Window & { google?: unknown }).google;
-  if (!googleValue || typeof googleValue !== 'object') return null;
+  if (!googleValue || typeof googleValue !== "object") return null;
 
   const google = googleValue as Partial<GoogleIdentityServices>;
   if (!google.accounts?.id) return null;
@@ -92,26 +112,35 @@ function loadGoogleIdentityScript(): Promise<void> {
   }
 
   googleIdentityScriptLoadPromise = new Promise<void>((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(`script[src="${googleIdentityScriptSrc}"]`);
+    const existing = document.querySelector<HTMLScriptElement>(
+      `script[src="${googleIdentityScriptSrc}"]`,
+    );
     if (existing) {
-      existing.addEventListener('load', () => resolve(), { once: true });
-      existing.addEventListener('error', () => reject(new Error('Failed to load Google Identity script')), { once: true });
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener(
+        "error",
+        () => reject(new Error("Failed to load Google Identity script")),
+        { once: true },
+      );
       return;
     }
 
-    const script = document.createElement('script');
+    const script = document.createElement("script");
     script.src = googleIdentityScriptSrc;
     script.async = true;
     script.defer = true;
     script.onload = () => resolve();
-    script.onerror = () => reject(new Error('Failed to load Google Identity script'));
+    script.onerror = () =>
+      reject(new Error("Failed to load Google Identity script"));
     document.head.appendChild(script);
   });
 
-  googleIdentityScriptLoadPromise = googleIdentityScriptLoadPromise.catch((err) => {
-    googleIdentityScriptLoadPromise = null;
-    throw err;
-  });
+  googleIdentityScriptLoadPromise = googleIdentityScriptLoadPromise.catch(
+    (err) => {
+      googleIdentityScriptLoadPromise = null;
+      throw err;
+    },
+  );
 
   return googleIdentityScriptLoadPromise;
 }
@@ -119,23 +148,27 @@ function loadGoogleIdentityScript(): Promise<void> {
 const maxThinkingTraceEntries = 60;
 
 const researchPhaseTitleDefaults: Record<ResearchPhase, string> = {
-  planning: 'Mapping the request',
-  searching: 'Scanning for trustworthy sources',
-  reading: 'Pulling facts from the strongest results',
-  evaluating: 'Comparing what holds up',
-  iterating: 'Closing the remaining gaps',
-  synthesizing: 'Shaping the response',
-  finalizing: 'Polishing the final answer',
+  planning: "Mapping the request",
+  searching: "Scanning for trustworthy sources",
+  reading: "Pulling facts from the strongest results",
+  evaluating: "Comparing what holds up",
+  iterating: "Closing the remaining gaps",
+  synthesizing: "Shaping the response",
+  finalizing: "Polishing the final answer",
 };
 
 const researchPhaseDetailDefaults: Record<ResearchPhase, string> = {
-  planning: 'Figuring out what needs to be answered before drafting anything.',
-  searching: 'Looking for current, relevant sources that can support the answer.',
-  reading: 'Reading the most promising pages and extracting usable evidence.',
-  evaluating: 'Checking whether the sources agree and whether the evidence is strong enough.',
-  iterating: 'Running another pass where the answer still needs more support.',
-  synthesizing: 'Turning the research into a clear response with grounded claims.',
-  finalizing: 'Tightening wording, organizing citations, and preparing the response.',
+  planning: "Figuring out what needs to be answered before drafting anything.",
+  searching:
+    "Looking for current, relevant sources that can support the answer.",
+  reading: "Reading the most promising pages and extracting usable evidence.",
+  evaluating:
+    "Checking whether the sources agree and whether the evidence is strong enough.",
+  iterating: "Running another pass where the answer still needs more support.",
+  synthesizing:
+    "Turning the research into a clear response with grounded claims.",
+  finalizing:
+    "Tightening wording, organizing citations, and preparing the response.",
 };
 
 function resolveResearchTitle(
@@ -161,16 +194,17 @@ function resolveResearchDetail(
   return researchPhaseDetailDefaults[phase];
 }
 
-const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> = [
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-];
+const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> =
+  [
+    { value: "low", label: "Low" },
+    { value: "medium", label: "Medium" },
+    { value: "high", label: "High" },
+  ];
 
 const defaultReasoningEffortByMode: Record<ReasoningMode, ReasoningEffort> = {
-  chat: 'medium',
-  deep_research: 'high',
-  agent: 'high',
+  chat: "medium",
+  deep_research: "high",
+  agent: "high",
 };
 
 function resolveReasoningEffort(
@@ -178,7 +212,9 @@ function resolveReasoningEffort(
   modelId: string,
   mode: ReasoningMode,
 ): ReasoningEffort {
-  const existing = presets.find((preset) => preset.modelId === modelId && preset.mode === mode);
+  const existing = presets.find(
+    (preset) => preset.modelId === modelId && preset.mode === mode,
+  );
   if (existing) return existing.effort;
   return defaultReasoningEffortByMode[mode];
 }
@@ -187,16 +223,20 @@ function upsertReasoningPreset(
   presets: ReasoningPreset[],
   next: ReasoningPreset,
 ): ReasoningPreset[] {
-  const filtered = presets.filter((preset) => !(preset.modelId === next.modelId && preset.mode === next.mode));
+  const filtered = presets.filter(
+    (preset) => !(preset.modelId === next.modelId && preset.mode === next.mode),
+  );
   return [...filtered, next];
 }
 
-function toMessageData(message: import('./lib/api').ConversationMessage): MessageData {
+function toMessageData(
+  message: import("./lib/api").ConversationMessage,
+): MessageData {
   return {
     id: message.id,
     role: message.role,
     content: message.content,
-    reasoningContent: message.reasoningContent ?? '',
+    reasoningContent: message.reasoningContent ?? "",
     thinkingTrace: message.thinkingTrace ?? null,
     modelId: message.modelId ?? null,
     usage: message.usage ?? null,
@@ -218,11 +258,14 @@ function buildTraceSummary(entry: ThinkingTraceEntry): string {
   return entry.title;
 }
 
-function appendThinkingTraceEntry(existing: ThinkingTrace | null | undefined, entry: ThinkingTraceEntry): ThinkingTrace {
+function appendThinkingTraceEntry(
+  existing: ThinkingTrace | null | undefined,
+  entry: ThinkingTraceEntry,
+): ThinkingTrace {
   const previousEntries = existing?.entries ?? [];
   const entries = [...previousEntries, entry].slice(-maxThinkingTraceEntries);
   return {
-    status: 'running',
+    status: "running",
     summary: buildTraceSummary(entry),
     entries,
   };
@@ -230,7 +273,7 @@ function appendThinkingTraceEntry(existing: ThinkingTrace | null | undefined, en
 
 function updateThinkingTraceStatus(
   existing: ThinkingTrace | null | undefined,
-  status: 'done' | 'stopped',
+  status: "done" | "stopped",
   fallbackSummary: string,
 ): ThinkingTrace | null {
   if (!existing || existing.entries.length === 0) return null;
@@ -241,15 +284,43 @@ function updateThinkingTraceStatus(
   };
 }
 
+function updateCouncilTraceFromRunStatus(
+  existing: ThinkingTrace | null | undefined,
+  runStatus: import("./lib/api").AgentRunStatus["status"],
+): ThinkingTrace | null | undefined {
+  if (runStatus === "completed") {
+    return {
+      ...(existing ?? {}),
+      status: "done",
+      summary: "Council result ready",
+      entries: existing?.entries ?? [],
+    };
+  }
+  if (runStatus === "failed") {
+    return {
+      ...(existing ?? {}),
+      status: "stopped",
+      summary: "Council run stopped",
+      entries: existing?.entries ?? [],
+    };
+  }
+  if (existing) return existing;
+  return {
+    status: "running",
+    summary: "Coordinating the council workflow",
+    entries: [],
+  };
+}
+
 export default function App() {
   // ─── Auth State ───────────────────────────────
-  const googleClientID = (import.meta.env.VITE_GOOGLE_CLIENT_ID ?? '').trim();
-  const googleSignInEnabled = googleClientID !== '';
+  const googleClientID = (import.meta.env.VITE_GOOGLE_CLIENT_ID ?? "").trim();
+  const googleSignInEnabled = googleClientID !== "";
   const [user, setUser] = useState<User | null>(null);
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [signingInWithGoogle, setSigningInWithGoogle] = useState(false);
-  const [devEmail, setDevEmail] = useState('acastesol@gmail.com');
-  const [devSub, setDevSub] = useState('dev-user-1');
+  const [devEmail, setDevEmail] = useState("acastesol@gmail.com");
+  const [devSub, setDevSub] = useState("dev-user-1");
   const googleButtonContainerRef = useRef<HTMLDivElement | null>(null);
 
   // ─── Model State ──────────────────────────────
@@ -257,20 +328,26 @@ export default function App() {
   const [curatedModels, setCuratedModels] = useState<Model[]>([]);
   const [favoriteModelIds, setFavoriteModelIds] = useState<string[]>([]);
   const [modelPreferences, setModelPreferences] = useState<ModelPreferences>({
-    lastUsedModelId: 'openrouter/free',
-    lastUsedDeepResearchModelId: 'openrouter/free',
-    lastUsedAgentModelId: 'openrouter/free',
+    lastUsedModelId: "openrouter/free",
+    lastUsedDeepResearchModelId: "openrouter/free",
+    lastUsedAgentModelId: "openrouter/free",
   });
-  const [reasoningPresets, setReasoningPresets] = useState<ReasoningPreset[]>([]);
+  const [reasoningPresets, setReasoningPresets] = useState<ReasoningPreset[]>(
+    [],
+  );
   const [showAllModels, setShowAllModels] = useState(false);
-  const [selectedModel, setSelectedModel] = useState('openrouter/free');
-  const [selectedSourceModels, setSelectedSourceModels] = useState<string[]>([]);
-  const [selectedFusionModel, setSelectedFusionModel] = useState<string | null>(null);
+  const [selectedModel, setSelectedModel] = useState("openrouter/free");
+  const [selectedSourceModels, setSelectedSourceModels] = useState<string[]>(
+    [],
+  );
+  const [selectedFusionModel, setSelectedFusionModel] = useState<string | null>(
+    null,
+  );
   const [updatingModelPreference, setUpdatingModelPreference] = useState(false);
   const [updatingReasoningPreset, setUpdatingReasoningPreset] = useState(false);
 
   // ─── Chat State ───────────────────────────────
-  const [prompt, setPrompt] = useState('');
+  const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [grounding, setGrounding] = useState(true);
   const [deepResearch, setDeepResearch] = useState(false);
@@ -278,22 +355,31 @@ export default function App() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<string | null>(null);
+  const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<
+    string | null
+  >(null);
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
-  const [editingDraft, setEditingDraft] = useState('');
+  const [editingDraft, setEditingDraft] = useState("");
 
   // ─── Conversation State ───────────────────────
   const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
-  const [conversationAPISupported, setConversationAPISupported] = useState(true);
-  const [deletingConversationId, setDeletingConversationId] = useState<string | null>(null);
+  const [activeConversationId, setActiveConversationId] = useState<
+    string | null
+  >(null);
+  const [conversationAPISupported, setConversationAPISupported] =
+    useState(true);
+  const [deletingConversationId, setDeletingConversationId] = useState<
+    string | null
+  >(null);
   const [isDeletingAll, setIsDeletingAll] = useState(false);
   const [loadingConversations, setLoadingConversations] = useState(false);
   const [loadingMessages, setLoadingMessages] = useState(false);
 
   // ─── Attachment State ─────────────────────────
   const [uploadingAttachments, setUploadingAttachments] = useState(false);
-  const [pendingAttachments, setPendingAttachments] = useState<UploadedFile[]>([]);
+  const [pendingAttachments, setPendingAttachments] = useState<UploadedFile[]>(
+    [],
+  );
 
   // ─── UI State ─────────────────────────────────
   const [sidebarCollapsed, setSidebarCollapsed] = useState(true);
@@ -305,7 +391,10 @@ export default function App() {
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const isStreamingRef = useRef(isStreaming);
   const hasRunningAgentMessage = messages.some(
-    (message) => message.role === 'assistant' && message.responseMode === 'agent' && message.thinkingTrace?.status === 'running',
+    (message) =>
+      message.role === "assistant" &&
+      message.responseMode === "agent" &&
+      message.thinkingTrace?.status === "running",
   );
 
   // ─── Virtual keyboard handling (mobile) ─────
@@ -318,11 +407,15 @@ export default function App() {
   }
 
   function isConversationNotFoundError(err: unknown): err is APIError {
-    return err instanceof APIError && err.status === 404 && err.code === 'conversation_not_found';
+    return (
+      err instanceof APIError &&
+      err.status === 404 &&
+      err.code === "conversation_not_found"
+    );
   }
 
   function isAbortError(err: unknown): boolean {
-    return err instanceof DOMException && err.name === 'AbortError';
+    return err instanceof DOMException && err.name === "AbortError";
   }
 
   // ─── Auth Effects ─────────────────────────────
@@ -365,7 +458,7 @@ export default function App() {
         const google = readGoogleIdentityServices();
         const container = googleButtonContainerRef.current;
         if (!google || !container) {
-          throw new Error('Google Identity Services is unavailable');
+          throw new Error("Google Identity Services is unavailable");
         }
 
         google.accounts.id.initialize({
@@ -373,7 +466,7 @@ export default function App() {
           callback: (response) => {
             const credential = response.credential?.trim();
             if (!credential) {
-              setError('Google sign-in did not return a credential.');
+              setError("Google sign-in did not return a credential.");
               return;
             }
             void authenticateWithGoogleToken(credential);
@@ -381,13 +474,16 @@ export default function App() {
         });
 
         container.replaceChildren();
-        const width = Math.max(240, Math.min(400, container.clientWidth || 360));
+        const width = Math.max(
+          240,
+          Math.min(400, container.clientWidth || 360),
+        );
         google.accounts.id.renderButton(container, {
-          theme: 'filled_black',
-          size: 'large',
-          text: 'continue_with',
-          shape: 'pill',
-          logo_alignment: 'left',
+          theme: "filled_black",
+          size: "large",
+          text: "continue_with",
+          shape: "pill",
+          logo_alignment: "left",
           width: `${width}`,
         });
       } catch (err) {
@@ -400,7 +496,13 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [authenticateWithGoogleToken, googleClientID, googleSignInEnabled, loadingAuth, user]);
+  }, [
+    authenticateWithGoogleToken,
+    googleClientID,
+    googleSignInEnabled,
+    loadingAuth,
+    user,
+  ]);
 
   // ─── Model Effects ────────────────────────────
 
@@ -409,7 +511,11 @@ export default function App() {
       setModels([]);
       setCuratedModels([]);
       setFavoriteModelIds([]);
-      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free', lastUsedAgentModelId: 'openrouter/free' });
+      setModelPreferences({
+        lastUsedModelId: "openrouter/free",
+        lastUsedDeepResearchModelId: "openrouter/free",
+        lastUsedAgentModelId: "openrouter/free",
+      });
       setReasoningPresets([]);
       setShowAllModels(false);
       setConversations([]);
@@ -419,7 +525,7 @@ export default function App() {
       setStreamWarning(null);
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
-      setEditingDraft('');
+      setEditingDraft("");
       setAgentMode(false);
       setDeepResearch(false);
       setPendingAttachments([]);
@@ -438,20 +544,30 @@ export default function App() {
         setShowAllModels(catalog.curatedModels.length === 0);
 
         if (catalog.models.length > 0) {
-          const preferredModelId = catalog.preferences.lastUsedModelId || catalog.models[0].id;
+          const preferredModelId =
+            catalog.preferences.lastUsedModelId || catalog.models[0].id;
           setSelectedModel(
-            catalog.models.some((m) => m.id === preferredModelId) ? preferredModelId : catalog.models[0].id,
+            catalog.models.some((m) => m.id === preferredModelId)
+              ? preferredModelId
+              : catalog.models[0].id,
           );
 
           if (catalog.preferences.lastUsedAgentSourceModelIds?.length) {
-            const validSourceModels = catalog.preferences.lastUsedAgentSourceModelIds.filter((id) => catalog.models.some((m) => m.id === id));
+            const validSourceModels =
+              catalog.preferences.lastUsedAgentSourceModelIds.filter((id) =>
+                catalog.models.some((m) => m.id === id),
+              );
             setSelectedSourceModels(validSourceModels);
           } else {
             setSelectedSourceModels([]);
           }
 
           if (catalog.preferences.lastUsedAgentFusionModelId) {
-            const validFusionModel = catalog.models.some((m) => m.id === catalog.preferences.lastUsedAgentFusionModelId) ? catalog.preferences.lastUsedAgentFusionModelId : null;
+            const validFusionModel = catalog.models.some(
+              (m) => m.id === catalog.preferences.lastUsedAgentFusionModelId,
+            )
+              ? catalog.preferences.lastUsedAgentFusionModelId
+              : null;
             setSelectedFusionModel(validFusionModel);
           } else {
             setSelectedFusionModel(null);
@@ -465,49 +581,60 @@ export default function App() {
 
   // ─── Conversation Effects ─────────────────────
 
-  const refreshConversations = useCallback(async (
-    preferredConversationId?: string,
-    options?: { fallbackToFirstConversation?: boolean },
-  ) => {
-    setLoadingConversations(true);
-    try {
-      const availableConversations = await listConversations();
-      const fallbackToFirstConversation = options?.fallbackToFirstConversation ?? true;
-      setConversationAPISupported(true);
-      setConversations(availableConversations);
-      setActiveConversationId((current) => {
-        if (preferredConversationId && availableConversations.some((c) => c.id === preferredConversationId)) {
-          return preferredConversationId;
+  const refreshConversations = useCallback(
+    async (
+      preferredConversationId?: string,
+      options?: { fallbackToFirstConversation?: boolean },
+    ) => {
+      setLoadingConversations(true);
+      try {
+        const availableConversations = await listConversations();
+        const fallbackToFirstConversation =
+          options?.fallbackToFirstConversation ?? true;
+        setConversationAPISupported(true);
+        setConversations(availableConversations);
+        setActiveConversationId((current) => {
+          if (
+            preferredConversationId &&
+            availableConversations.some((c) => c.id === preferredConversationId)
+          ) {
+            return preferredConversationId;
+          }
+          if (current && availableConversations.some((c) => c.id === current)) {
+            return current;
+          }
+          return fallbackToFirstConversation
+            ? (availableConversations[0]?.id ?? null)
+            : null;
+        });
+        if (availableConversations.length === 0 && !isStreamingRef.current) {
+          setMessages([]);
+          setEditingMessageId(null);
+          setEditingDraft("");
         }
-        if (current && availableConversations.some((c) => c.id === current)) {
-          return current;
+      } catch (err) {
+        if (isNotFoundError(err)) {
+          setConversationAPISupported(false);
+          setConversations([]);
+          setActiveConversationId(null);
+          setMessages([]);
+          setEditingMessageId(null);
+          setEditingDraft("");
+          return;
         }
-        return fallbackToFirstConversation ? (availableConversations[0]?.id ?? null) : null;
-      });
-      if (availableConversations.length === 0 && !isStreamingRef.current) {
-        setMessages([]);
-        setEditingMessageId(null);
-        setEditingDraft('');
+        setError((err as Error).message);
+      } finally {
+        setLoadingConversations(false);
       }
-    } catch (err) {
-      if (isNotFoundError(err)) {
-        setConversationAPISupported(false);
-        setConversations([]);
-        setActiveConversationId(null);
-        setMessages([]);
-        setEditingMessageId(null);
-        setEditingDraft('');
-        return;
-      }
-      setError((err as Error).message);
-    } finally {
-      setLoadingConversations(false);
-    }
-  }, []);
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!user || !conversationAPISupported) return;
-    void refreshConversations(undefined, { fallbackToFirstConversation: false });
+    void refreshConversations(undefined, {
+      fallbackToFirstConversation: false,
+    });
   }, [conversationAPISupported, refreshConversations, user]);
 
   useEffect(() => {
@@ -517,7 +644,7 @@ export default function App() {
         setMessages([]);
         setActiveAssistantMessageId(null);
         setEditingMessageId(null);
-        setEditingDraft('');
+        setEditingDraft("");
       }
       return;
     }
@@ -527,12 +654,13 @@ export default function App() {
     setLoadingMessages(true);
     void (async () => {
       try {
-        const conversationMessages = await listConversationMessages(activeConversationId);
+        const conversationMessages =
+          await listConversationMessages(activeConversationId);
         if (cancelled) return;
         setMessages(conversationMessages.map(toMessageData));
         setActiveAssistantMessageId(null);
         setEditingMessageId(null);
-        setEditingDraft('');
+        setEditingDraft("");
       } catch (err) {
         if (isConversationNotFoundError(err)) {
           await refreshConversations();
@@ -543,7 +671,7 @@ export default function App() {
           setConversations([]);
           setActiveConversationId(null);
           setEditingMessageId(null);
-          setEditingDraft('');
+          setEditingDraft("");
           return;
         }
         if (!cancelled) setError((err as Error).message);
@@ -552,17 +680,26 @@ export default function App() {
       }
     })();
 
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [activeConversationId, conversationAPISupported, isStreaming, user]);
 
   useEffect(() => {
-    if (!user || !conversationAPISupported || !activeConversationId || !hasRunningAgentMessage) return;
+    if (
+      !user ||
+      !conversationAPISupported ||
+      !activeConversationId ||
+      !hasRunningAgentMessage
+    )
+      return;
 
     let cancelled = false;
     const intervalID = window.setInterval(() => {
       void (async () => {
         try {
-          const conversationMessages = await listConversationMessages(activeConversationId);
+          const conversationMessages =
+            await listConversationMessages(activeConversationId);
           if (!cancelled) {
             setMessages(conversationMessages.map(toMessageData));
           }
@@ -576,7 +713,12 @@ export default function App() {
       cancelled = true;
       window.clearInterval(intervalID);
     };
-  }, [activeConversationId, conversationAPISupported, hasRunningAgentMessage, user]);
+  }, [
+    activeConversationId,
+    conversationAPISupported,
+    hasRunningAgentMessage,
+    user,
+  ]);
 
   useEffect(() => {
     isStreamingRef.current = isStreaming;
@@ -589,14 +731,15 @@ export default function App() {
 
     const bottomThresholdPx = 96;
     const updateAutoScroll = () => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+      const distanceFromBottom =
+        container.scrollHeight - container.scrollTop - container.clientHeight;
       shouldAutoScrollRef.current = distanceFromBottom <= bottomThresholdPx;
     };
 
     updateAutoScroll();
-    container.addEventListener('scroll', updateAutoScroll, { passive: true });
+    container.addEventListener("scroll", updateAutoScroll, { passive: true });
     return () => {
-      container.removeEventListener('scroll', updateAutoScroll);
+      container.removeEventListener("scroll", updateAutoScroll);
     };
   }, [user]);
 
@@ -611,7 +754,7 @@ export default function App() {
 
     container.scrollTo({
       top: container.scrollHeight,
-      behavior: isStreaming ? 'auto' : 'smooth',
+      behavior: isStreaming ? "auto" : "smooth",
     });
   }, [isStreaming, messages]);
 
@@ -619,9 +762,21 @@ export default function App() {
     shouldAutoScrollRef.current = true;
   }, [activeConversationId]);
 
-  const runningCouncilMessagesRef = useRef(messages.filter((m) => m.responseMode === 'agent' && m.agentRunId && m.thinkingTrace?.status === 'running'));
+  const runningCouncilMessagesRef = useRef(
+    messages.filter(
+      (m) =>
+        m.responseMode === "agent" &&
+        m.agentRunId &&
+        m.thinkingTrace?.status === "running",
+    ),
+  );
   useEffect(() => {
-    runningCouncilMessagesRef.current = messages.filter((m) => m.responseMode === 'agent' && m.agentRunId && m.thinkingTrace?.status === 'running');
+    runningCouncilMessagesRef.current = messages.filter(
+      (m) =>
+        m.responseMode === "agent" &&
+        m.agentRunId &&
+        m.thinkingTrace?.status === "running",
+    );
   }, [messages]);
 
   useEffect(() => {
@@ -642,17 +797,25 @@ export default function App() {
                 ...newMsgs[idx],
                 agentSources: status.sourceResults ?? newMsgs[idx].agentSources,
                 agentAnalysis: status.analysis ?? newMsgs[idx].agentAnalysis,
-                agentResultModelId: status.result?.modelId ?? newMsgs[idx].agentResultModelId,
-                agentResultUsage: status.result?.usage ?? newMsgs[idx].agentResultUsage,
+                agentResultModelId:
+                  status.result?.modelId ?? newMsgs[idx].agentResultModelId,
+                agentResultUsage:
+                  status.result?.usage ?? newMsgs[idx].agentResultUsage,
                 content: status.result?.response ?? newMsgs[idx].content,
-                reasoningContent: status.result?.reasoningContent ?? newMsgs[idx].reasoningContent,
+                reasoningContent:
+                  status.result?.reasoningContent ??
+                  newMsgs[idx].reasoningContent,
+                thinkingTrace: updateCouncilTraceFromRunStatus(
+                  newMsgs[idx].thinkingTrace,
+                  status.status,
+                ),
               };
               return newMsgs;
             });
           } catch {
             // Ignore
           }
-        })
+        }),
       );
     }, 2000);
 
@@ -661,7 +824,10 @@ export default function App() {
 
   // ─── Computed ─────────────────────────────────
 
-  const favoriteModelIdSet = useMemo(() => new Set(favoriteModelIds), [favoriteModelIds]);
+  const favoriteModelIdSet = useMemo(
+    () => new Set(favoriteModelIds),
+    [favoriteModelIds],
+  );
 
   const visibleModels = useMemo(() => {
     let base: Model[];
@@ -677,7 +843,7 @@ export default function App() {
         merged.set(model.id, model);
       };
 
-      include(byID.get('openrouter/free'));
+      include(byID.get("openrouter/free"));
       for (const modelId of favoriteModelIds) include(byID.get(modelId));
       for (const model of curatedModels) include(model);
 
@@ -690,7 +856,13 @@ export default function App() {
       if (aFav !== bFav) return bFav - aFav;
       return a.name.localeCompare(b.name);
     });
-  }, [curatedModels, favoriteModelIdSet, favoriteModelIds, models, showAllModels]);
+  }, [
+    curatedModels,
+    favoriteModelIdSet,
+    favoriteModelIds,
+    models,
+    showAllModels,
+  ]);
 
   const selectableModels = useMemo(() => {
     const byID = new Map<string, Model>();
@@ -705,8 +877,13 @@ export default function App() {
     [models, selectedModel],
   );
 
-  const activeMode: ReasoningMode = agentMode ? 'agent' : deepResearch ? 'deep_research' : 'chat';
-  const currentModelSupportsReasoning = currentModel?.supportsReasoning === true;
+  const activeMode: ReasoningMode = agentMode
+    ? "agent"
+    : deepResearch
+      ? "deep_research"
+      : "chat";
+  const currentModelSupportsReasoning =
+    currentModel?.supportsReasoning === true;
   const selectedReasoningEffort = useMemo(
     () => resolveReasoningEffort(reasoningPresets, selectedModel, activeMode),
     [activeMode, reasoningPresets, selectedModel],
@@ -728,10 +905,10 @@ export default function App() {
     event.preventDefault();
     setError(null);
     try {
-      const authenticatedUser = await authWithGoogle('dev-token', {
-        'X-Test-Email': devEmail,
-        'X-Test-Google-Sub': devSub,
-        'X-Test-Name': devEmail.split('@')[0],
+      const authenticatedUser = await authWithGoogle("dev-token", {
+        "X-Test-Email": devEmail,
+        "X-Test-Google-Sub": devSub,
+        "X-Test-Name": devEmail.split("@")[0],
       });
       setUser(authenticatedUser);
     } catch (err) {
@@ -747,15 +924,19 @@ export default function App() {
       setModels([]);
       setCuratedModels([]);
       setFavoriteModelIds([]);
-      setModelPreferences({ lastUsedModelId: 'openrouter/free', lastUsedDeepResearchModelId: 'openrouter/free', lastUsedAgentModelId: 'openrouter/free' });
+      setModelPreferences({
+        lastUsedModelId: "openrouter/free",
+        lastUsedDeepResearchModelId: "openrouter/free",
+        lastUsedAgentModelId: "openrouter/free",
+      });
       setReasoningPresets([]);
       setShowAllModels(false);
-      setSelectedModel('openrouter/free');
+      setSelectedModel("openrouter/free");
       setMessages([]);
       setStreamWarning(null);
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
-      setEditingDraft('');
+      setEditingDraft("");
       setAgentMode(false);
       setDeepResearch(false);
       setConversations([]);
@@ -791,23 +972,38 @@ export default function App() {
     setAgentMode(false);
     setDeepResearch(next);
     setError(null);
-    const preferredModelID = next ? modelPreferences.lastUsedDeepResearchModelId : modelPreferences.lastUsedModelId;
+    const preferredModelID = next
+      ? modelPreferences.lastUsedDeepResearchModelId
+      : modelPreferences.lastUsedModelId;
     const resolvedModelID =
-      preferredModelID && models.some((m) => m.id === preferredModelID) ? preferredModelID : selectedModel;
-    if (resolvedModelID !== selectedModel && resolvedModelID) setSelectedModel(resolvedModelID);
-    if (resolvedModelID) void persistModelSelection(next ? 'deep_research' : 'chat', resolvedModelID);
+      preferredModelID && models.some((m) => m.id === preferredModelID)
+        ? preferredModelID
+        : selectedModel;
+    if (resolvedModelID !== selectedModel && resolvedModelID)
+      setSelectedModel(resolvedModelID);
+    if (resolvedModelID)
+      void persistModelSelection(
+        next ? "deep_research" : "chat",
+        resolvedModelID,
+      );
   }
 
   function handleAgentModeChange(next: boolean) {
     setAgentMode(next);
     if (next) setDeepResearch(false);
     setError(null);
-    const preferredModelID = next ? modelPreferences.lastUsedAgentModelId : modelPreferences.lastUsedModelId;
+    const preferredModelID = next
+      ? modelPreferences.lastUsedAgentModelId
+      : modelPreferences.lastUsedModelId;
     const resolvedModelID =
-      preferredModelID && models.some((m) => m.id === preferredModelID) ? preferredModelID : selectedModel;
-    if (resolvedModelID !== selectedModel && resolvedModelID) setSelectedModel(resolvedModelID);
+      preferredModelID && models.some((m) => m.id === preferredModelID)
+        ? preferredModelID
+        : selectedModel;
+    if (resolvedModelID !== selectedModel && resolvedModelID)
+      setSelectedModel(resolvedModelID);
     if (next) setGrounding(true);
-    if (resolvedModelID) void persistModelSelection(next ? 'agent' : 'chat', resolvedModelID);
+    if (resolvedModelID)
+      void persistModelSelection(next ? "agent" : "chat", resolvedModelID);
   }
 
   async function handleReasoningEffortChange(next: ReasoningEffort) {
@@ -815,10 +1011,18 @@ export default function App() {
     setError(null);
     setUpdatingReasoningPreset(true);
     setReasoningPresets((existing) =>
-      upsertReasoningPreset(existing, { modelId: selectedModel, mode: activeMode, effort: next }),
+      upsertReasoningPreset(existing, {
+        modelId: selectedModel,
+        mode: activeMode,
+        effort: next,
+      }),
     );
     try {
-      const presets = await updateModelReasoningPreset(selectedModel, activeMode, next);
+      const presets = await updateModelReasoningPreset(
+        selectedModel,
+        activeMode,
+        next,
+      );
       setReasoningPresets(presets);
     } catch (err) {
       setError((err as Error).message);
@@ -831,7 +1035,10 @@ export default function App() {
     if (!user) return;
     setError(null);
     try {
-      const favorites = await updateModelFavorite(modelId, !favoriteModelIdSet.has(modelId));
+      const favorites = await updateModelFavorite(
+        modelId,
+        !favoriteModelIdSet.has(modelId),
+      );
       setFavoriteModelIds(favorites);
     } catch (err) {
       setError((err as Error).message);
@@ -839,20 +1046,34 @@ export default function App() {
   }
 
   async function handleNewConversation() {
-    if (isStreaming || !conversationAPISupported || deletingConversationId !== null || isDeletingAll) return;
+    if (
+      isStreaming ||
+      !conversationAPISupported ||
+      deletingConversationId !== null ||
+      isDeletingAll
+    )
+      return;
     setError(null);
     setSidebarCollapsed(true);
     setActiveConversationId(null);
     setMessages([]);
     setActiveAssistantMessageId(null);
     setEditingMessageId(null);
-    setEditingDraft('');
+    setEditingDraft("");
   }
 
   async function handleDeleteConversation(conversationId: string) {
-    if (isStreaming || deletingConversationId !== null || isDeletingAll || !conversationAPISupported) return;
+    if (
+      isStreaming ||
+      deletingConversationId !== null ||
+      isDeletingAll ||
+      !conversationAPISupported
+    )
+      return;
     const conversation = conversations.find((c) => c.id === conversationId);
-    const confirmed = window.confirm(`Delete "${conversation?.title ?? 'this chat'}"? This cannot be undone.`);
+    const confirmed = window.confirm(
+      `Delete "${conversation?.title ?? "this chat"}"? This cannot be undone.`,
+    );
     if (!confirmed) return;
 
     setError(null);
@@ -861,21 +1082,24 @@ export default function App() {
       setMessages([]);
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
-      setEditingDraft('');
+      setEditingDraft("");
     }
 
     try {
       await deleteConversation(conversationId);
       await refreshConversations();
     } catch (err) {
-      if (isConversationNotFoundError(err)) { await refreshConversations(); return; }
+      if (isConversationNotFoundError(err)) {
+        await refreshConversations();
+        return;
+      }
       if (isNotFoundError(err)) {
         setConversationAPISupported(false);
         setConversations([]);
         setActiveConversationId(null);
         setMessages([]);
         setEditingMessageId(null);
-        setEditingDraft('');
+        setEditingDraft("");
         return;
       }
       setError((err as Error).message);
@@ -885,9 +1109,17 @@ export default function App() {
   }
 
   async function handleDeleteAllConversations() {
-    if (isStreaming || deletingConversationId !== null || isDeletingAll || !conversationAPISupported || conversations.length === 0)
+    if (
+      isStreaming ||
+      deletingConversationId !== null ||
+      isDeletingAll ||
+      !conversationAPISupported ||
+      conversations.length === 0
+    )
       return;
-    const confirmed = window.confirm('Delete all conversations? This cannot be undone.');
+    const confirmed = window.confirm(
+      "Delete all conversations? This cannot be undone.",
+    );
     if (!confirmed) return;
 
     setError(null);
@@ -899,7 +1131,7 @@ export default function App() {
       setMessages([]);
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
-      setEditingDraft('');
+      setEditingDraft("");
     } catch (err) {
       if (isNotFoundError(err)) {
         setConversationAPISupported(false);
@@ -907,7 +1139,7 @@ export default function App() {
         setActiveConversationId(null);
         setMessages([]);
         setEditingMessageId(null);
-        setEditingDraft('');
+        setEditingDraft("");
         return;
       }
       setError((err as Error).message);
@@ -922,7 +1154,9 @@ export default function App() {
     setError(null);
     setUploadingAttachments(true);
     try {
-      const uploaded = await Promise.all(Array.from(files).map((file) => uploadFile(file)));
+      const uploaded = await Promise.all(
+        Array.from(files).map((file) => uploadFile(file)),
+      );
       setPendingAttachments((existing) => {
         const byID = new Map<string, UploadedFile>();
         for (const a of existing) byID.set(a.id, a);
@@ -933,12 +1167,14 @@ export default function App() {
       setError((err as Error).message);
     } finally {
       setUploadingAttachments(false);
-      event.target.value = '';
+      event.target.value = "";
     }
   }
 
   function handleRemoveAttachment(fileId: string) {
-    setPendingAttachments((existing) => existing.filter((a) => a.id !== fileId));
+    setPendingAttachments((existing) =>
+      existing.filter((a) => a.id !== fileId),
+    );
   }
 
   function handleStopStreaming() {
@@ -965,9 +1201,19 @@ export default function App() {
 
     let sourceModels;
     let fusionModel;
-    if (activeMode === 'agent' && selectedSourceModels.length > 0) {
-      sourceModels = selectedSourceModels.map(id => ({ modelId: id, reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined }));
-      fusionModel = { modelId: selectedFusionModel || selectedModel, reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined };
+    if (activeMode === "agent" && selectedSourceModels.length > 0) {
+      sourceModels = selectedSourceModels.map((id) => ({
+        modelId: id,
+        reasoningEffort: currentModelSupportsReasoning
+          ? selectedReasoningEffort
+          : undefined,
+      }));
+      fusionModel = {
+        modelId: selectedFusionModel || selectedModel,
+        reasoningEffort: currentModelSupportsReasoning
+          ? selectedReasoningEffort
+          : undefined,
+      };
     }
 
     try {
@@ -978,26 +1224,36 @@ export default function App() {
           message: options.content,
           modelId: selectedModel,
           mode: activeMode,
-          reasoningEffort: currentModelSupportsReasoning ? selectedReasoningEffort : undefined,
+          reasoningEffort: currentModelSupportsReasoning
+            ? selectedReasoningEffort
+            : undefined,
           grounding,
-          deepResearch: activeMode === 'deep_research',
-          fileIds: options.attachmentIDs.length > 0 ? options.attachmentIDs : undefined,
+          deepResearch: activeMode === "deep_research",
+          fileIds:
+            options.attachmentIDs.length > 0
+              ? options.attachmentIDs
+              : undefined,
           sourceModels,
           fusionModel,
         },
         (eventData) => {
-          if (eventData.type === 'metadata') {
+          if (eventData.type === "metadata") {
             setMessages((existing) =>
               existing.map((m) => {
                 if (m.id === options.assistantMessageID) {
                   return {
                     ...m,
                     modelId: eventData.modelId,
-                    responseMode: eventData.responseMode ?? (eventData.deepResearch ? 'deep_research' : activeMode),
+                    responseMode:
+                      eventData.responseMode ??
+                      (eventData.deepResearch ? "deep_research" : activeMode),
                     agentRunId: eventData.agentRunId,
                   };
                 }
-                if (eventData.userMessageId && m.id === options.optimisticUserMessageID) {
+                if (
+                  eventData.userMessageId &&
+                  m.id === options.optimisticUserMessageID
+                ) {
                   return { ...m, id: eventData.userMessageId };
                 }
                 return m;
@@ -1006,16 +1262,29 @@ export default function App() {
             if (eventData.conversationId) {
               resolvedConversationID = eventData.conversationId;
               setActiveConversationId(eventData.conversationId);
-              if (!refreshedConversationListForStream && conversationAPISupported) {
+              if (
+                !refreshedConversationListForStream &&
+                conversationAPISupported
+              ) {
                 refreshedConversationListForStream = true;
-                void refreshConversations(eventData.conversationId, { fallbackToFirstConversation: false });
+                void refreshConversations(eventData.conversationId, {
+                  fallbackToFirstConversation: false,
+                });
               }
             }
             return;
           }
-          if (eventData.type === 'progress') {
-            const progressTitle = resolveResearchTitle(eventData.phase, eventData.title, eventData.message);
-            const progressDetail = resolveResearchDetail(eventData.phase, eventData.detail, eventData.isQuickStep);
+          if (eventData.type === "progress") {
+            const progressTitle = resolveResearchTitle(
+              eventData.phase,
+              eventData.title,
+              eventData.message,
+            );
+            const progressDetail = resolveResearchDetail(
+              eventData.phase,
+              eventData.detail,
+              eventData.isQuickStep,
+            );
             const traceEntry: ThinkingTraceEntry = {
               phase: eventData.phase,
               title: progressTitle,
@@ -1032,74 +1301,114 @@ export default function App() {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === options.assistantMessageID
-                  ? { ...m, thinkingTrace: appendThinkingTraceEntry(m.thinkingTrace, traceEntry) }
+                  ? {
+                      ...m,
+                      thinkingTrace: appendThinkingTraceEntry(
+                        m.thinkingTrace,
+                        traceEntry,
+                      ),
+                    }
                   : m,
               ),
             );
             return;
           }
-          if (eventData.type === 'warning') { setStreamWarning(eventData.message); return; }
-          if (eventData.type === 'error') {
+          if (eventData.type === "warning") {
+            setStreamWarning(eventData.message);
+            return;
+          }
+          if (eventData.type === "error") {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === options.assistantMessageID
-                  ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Response paused due to an error') }
+                  ? {
+                      ...m,
+                      thinkingTrace: updateThinkingTraceStatus(
+                        m.thinkingTrace,
+                        "stopped",
+                        "Response paused due to an error",
+                      ),
+                    }
                   : m,
               ),
             );
             setError(eventData.message);
             return;
           }
-          if (eventData.type === 'citations') {
-            setMessages((existing) =>
-              existing.map((m) => m.id === options.assistantMessageID ? { ...m, citations: eventData.citations } : m),
-            );
-            return;
-          }
-          if (eventData.type === 'done') {
+          if (eventData.type === "citations") {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === options.assistantMessageID
-                  ? {
-                    ...m,
-                    thinkingTrace: m.responseMode === 'agent'
-                      ? (m.thinkingTrace ?? { status: 'running', summary: 'Coordinating the agent workflow', entries: [] })
-                      : updateThinkingTraceStatus(m.thinkingTrace, 'done', 'Response ready'),
-                  }
+                  ? { ...m, citations: eventData.citations }
                   : m,
               ),
             );
             return;
           }
-          if (eventData.type === 'agent_summaries') {
-            setMessages((existing) =>
-              existing.map((m) => (
-                m.id === options.assistantMessageID ? { ...m, agentSummaries: eventData.agentSummaries } : m
-              )),
-            );
-            return;
-          }
-          if (eventData.type === 'token') {
+          if (eventData.type === "done") {
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === options.assistantMessageID ? { ...m, content: `${m.content}${eventData.delta}` } : m,
+                m.id === options.assistantMessageID
+                  ? {
+                      ...m,
+                      thinkingTrace:
+                        m.responseMode === "agent"
+                          ? (m.thinkingTrace ?? {
+                              status: "running",
+                              summary: "Coordinating the agent workflow",
+                              entries: [],
+                            })
+                          : updateThinkingTraceStatus(
+                              m.thinkingTrace,
+                              "done",
+                              "Response ready",
+                            ),
+                    }
+                  : m,
               ),
             );
             return;
           }
-          if (eventData.type === 'reasoning') {
+          if (eventData.type === "agent_summaries") {
             setMessages((existing) =>
               existing.map((m) =>
-                m.id === options.assistantMessageID ? { ...m, reasoningContent: `${m.reasoningContent ?? ''}${eventData.delta}` } : m,
+                m.id === options.assistantMessageID
+                  ? { ...m, agentSummaries: eventData.agentSummaries }
+                  : m,
               ),
             );
             return;
           }
-          if (eventData.type === 'usage') {
+          if (eventData.type === "token") {
             setMessages((existing) =>
-              existing.map((m) => (
-                m.id === options.assistantMessageID ? { ...m, usage: eventData.usage } : m
-              )),
+              existing.map((m) =>
+                m.id === options.assistantMessageID
+                  ? { ...m, content: `${m.content}${eventData.delta}` }
+                  : m,
+              ),
+            );
+            return;
+          }
+          if (eventData.type === "reasoning") {
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === options.assistantMessageID
+                  ? {
+                      ...m,
+                      reasoningContent: `${m.reasoningContent ?? ""}${eventData.delta}`,
+                    }
+                  : m,
+              ),
+            );
+            return;
+          }
+          if (eventData.type === "usage") {
+            setMessages((existing) =>
+              existing.map((m) =>
+                m.id === options.assistantMessageID
+                  ? { ...m, usage: eventData.usage }
+                  : m,
+              ),
             );
           }
         },
@@ -1113,11 +1422,18 @@ export default function App() {
       }
     } catch (err) {
       if (isAbortError(err)) {
-        setStreamWarning('Response stopped.');
+        setStreamWarning("Response stopped.");
         setMessages((existing) =>
           existing.map((m) =>
             m.id === options.assistantMessageID
-              ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Response paused') }
+              ? {
+                  ...m,
+                  thinkingTrace: updateThinkingTraceStatus(
+                    m.thinkingTrace,
+                    "stopped",
+                    "Response paused",
+                  ),
+                }
               : m,
           ),
         );
@@ -1126,7 +1442,14 @@ export default function App() {
       setMessages((existing) =>
         existing.map((m) =>
           m.id === options.assistantMessageID
-            ? { ...m, thinkingTrace: updateThinkingTraceStatus(m.thinkingTrace, 'stopped', 'Response paused due to an error') }
+            ? {
+                ...m,
+                thinkingTrace: updateThinkingTraceStatus(
+                  m.thinkingTrace,
+                  "stopped",
+                  "Response paused due to an error",
+                ),
+              }
             : m,
         ),
       );
@@ -1141,14 +1464,20 @@ export default function App() {
 
   async function handleSend(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!prompt.trim() || isStreaming || uploadingAttachments || editingMessageId !== null) return;
+    if (
+      !prompt.trim() ||
+      isStreaming ||
+      uploadingAttachments ||
+      editingMessageId !== null
+    )
+      return;
 
     const attachmentIDs = pendingAttachments.map((a) => a.id);
     const userMessage: MessageData = {
       id: crypto.randomUUID(),
-      role: 'user',
+      role: "user",
       content: prompt.trim(),
-      reasoningContent: '',
+      reasoningContent: "",
       modelId: selectedModel,
       usage: null,
       responseMode: activeMode,
@@ -1157,9 +1486,9 @@ export default function App() {
     };
     const assistantMessage: MessageData = {
       id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-      reasoningContent: '',
+      role: "assistant",
+      content: "",
+      reasoningContent: "",
       thinkingTrace: null,
       modelId: selectedModel,
       usage: null,
@@ -1169,7 +1498,7 @@ export default function App() {
     };
 
     setMessages((existing) => [...existing, userMessage, assistantMessage]);
-    setPrompt('');
+    setPrompt("");
 
     await submitMessage({
       content: userMessage.content,
@@ -1189,31 +1518,39 @@ export default function App() {
   function handleCancelEditMessage() {
     if (isStreaming) return;
     setEditingMessageId(null);
-    setEditingDraft('');
+    setEditingDraft("");
   }
 
   async function handleSaveEditedMessage() {
-    if (!editingMessageId || !editingDraft.trim() || isStreaming || uploadingAttachments) return;
+    if (
+      !editingMessageId ||
+      !editingDraft.trim() ||
+      isStreaming ||
+      uploadingAttachments
+    )
+      return;
     if (!activeConversationId) {
-      setError('Cannot edit a message without an active conversation.');
+      setError("Cannot edit a message without an active conversation.");
       return;
     }
 
     const editTargetID = editingMessageId;
-    const targetMessageIndex = messages.findIndex((message) => message.id === editTargetID && message.role === 'user');
+    const targetMessageIndex = messages.findIndex(
+      (message) => message.id === editTargetID && message.role === "user",
+    );
     if (targetMessageIndex === -1) {
       setEditingMessageId(null);
-      setEditingDraft('');
-      setError('Selected message is no longer available for editing.');
+      setEditingDraft("");
+      setError("Selected message is no longer available for editing.");
       return;
     }
 
     const editedContent = editingDraft.trim();
     const userMessage: MessageData = {
       id: crypto.randomUUID(),
-      role: 'user',
+      role: "user",
       content: editedContent,
-      reasoningContent: '',
+      reasoningContent: "",
       modelId: selectedModel,
       usage: null,
       responseMode: activeMode,
@@ -1222,9 +1559,9 @@ export default function App() {
     };
     const assistantMessage: MessageData = {
       id: crypto.randomUUID(),
-      role: 'assistant',
-      content: '',
-      reasoningContent: '',
+      role: "assistant",
+      content: "",
+      reasoningContent: "",
       thinkingTrace: null,
       modelId: selectedModel,
       usage: null,
@@ -1234,12 +1571,14 @@ export default function App() {
     };
 
     setMessages((existing) => {
-      const editIndex = existing.findIndex((message) => message.id === editTargetID && message.role === 'user');
+      const editIndex = existing.findIndex(
+        (message) => message.id === editTargetID && message.role === "user",
+      );
       if (editIndex === -1) return existing;
       return [...existing.slice(0, editIndex), userMessage, assistantMessage];
     });
     setEditingMessageId(null);
-    setEditingDraft('');
+    setEditingDraft("");
     setStreamWarning(null);
 
     await submitMessage({
@@ -1279,15 +1618,22 @@ export default function App() {
                   <GoogleIcon />
                   <span>Continue with Google</span>
                 </div>
-                <div ref={googleButtonContainerRef} className="google-signin-overlay" />
+                <div
+                  ref={googleButtonContainerRef}
+                  className="google-signin-overlay"
+                />
               </div>
-              {signingInWithGoogle && <div className="auth-inline-status">Signing in...</div>}
+              {signingInWithGoogle && (
+                <div className="auth-inline-status">Signing in...</div>
+              )}
             </div>
           ) : (
             <>
               <form onSubmit={handleDevLogin} className="auth-form">
                 <div className="form-field">
-                  <label className="form-label" htmlFor="dev-email">Email</label>
+                  <label className="form-label" htmlFor="dev-email">
+                    Email
+                  </label>
                   <input
                     id="dev-email"
                     className="form-input"
@@ -1298,7 +1644,9 @@ export default function App() {
                   />
                 </div>
                 <div className="form-field">
-                  <label className="form-label" htmlFor="dev-sub">Google Subject</label>
+                  <label className="form-label" htmlFor="dev-sub">
+                    Google Subject
+                  </label>
                   <input
                     id="dev-sub"
                     className="form-input"
@@ -1313,8 +1661,9 @@ export default function App() {
               </form>
 
               <div className="auth-note">
-                Production uses Google Identity Services. For local dev, enable{' '}
-                <code>AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true</code> on the backend.
+                Production uses Google Identity Services. For local dev, enable{" "}
+                <code>AUTH_INSECURE_SKIP_GOOGLE_VERIFY=true</code> on the
+                backend.
               </div>
             </>
           )}
@@ -1356,7 +1705,16 @@ export default function App() {
               onClick={() => setSidebarCollapsed(!sidebarCollapsed)}
               aria-label="Toggle sidebar"
             >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <svg
+                width="18"
+                height="18"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
                 <line x1="3" y1="12" x2="21" y2="12" />
                 <line x1="3" y1="6" x2="21" y2="6" />
                 <line x1="3" y1="18" x2="21" y2="18" />
@@ -1374,7 +1732,6 @@ export default function App() {
               disabled={models.length === 0 || updatingModelPreference}
             />
           </div>
-
         </header>
         {/* Messages */}
         <div ref={messagesContainerRef} className="messages-container">
@@ -1395,18 +1752,19 @@ export default function App() {
 
           {messages.map((message) => {
             const isActiveAssistant = message.id === activeAssistantMessageId;
-            const isEditingThisMessage = message.role === 'user' && editingMessageId === message.id;
+            const isEditingThisMessage =
+              message.role === "user" && editingMessageId === message.id;
             const disableUserActions =
-              isStreaming
-              || uploadingAttachments
-              || (editingMessageId !== null && editingMessageId !== message.id);
+              isStreaming ||
+              uploadingAttachments ||
+              (editingMessageId !== null && editingMessageId !== message.id);
             return (
               <ChatMessage
                 key={message.id}
                 message={message}
                 isStreaming={isStreaming && isActiveAssistant}
                 isEditing={isEditingThisMessage}
-                editDraft={isEditingThisMessage ? editingDraft : ''}
+                editDraft={isEditingThisMessage ? editingDraft : ""}
                 disableUserActions={disableUserActions}
                 onStartEdit={handleStartEditMessage}
                 onEditDraftChange={setEditingDraft}
@@ -1427,7 +1785,9 @@ export default function App() {
           reasoningEffort={selectedReasoningEffort}
           supportsReasoning={currentModelSupportsReasoning}
           reasoningDisabled={isStreaming || updatingReasoningPreset}
-          onReasoningEffortChange={(effort) => void handleReasoningEffortChange(effort)}
+          onReasoningEffortChange={(effort) =>
+            void handleReasoningEffortChange(effort)
+          }
           grounding={grounding}
           deepResearch={deepResearch}
           agentMode={agentMode}
@@ -1447,7 +1807,9 @@ export default function App() {
           streamWarning={streamWarning}
           sendDisabled={editingMessageId !== null}
           onEnhance={handleOpenEnhance}
-          enhanceDisabled={prompt.trim().length === 0 || isStreaming || uploadingAttachments}
+          enhanceDisabled={
+            prompt.trim().length === 0 || isStreaming || uploadingAttachments
+          }
           models={models}
           selectedSourceModels={selectedSourceModels}
           onSourceModelsChange={setSelectedSourceModels}

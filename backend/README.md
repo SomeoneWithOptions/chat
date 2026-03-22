@@ -48,7 +48,8 @@ cp backend/.env.example backend/.env
 - `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read safety limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
 - `AGENT_MODE_ENABLED` (optional; default `true`)
-- `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional async agent budgets)
+- `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional legacy async agent budgets)
+- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL`, `COUNCIL_SEARCH_RESULTS_PER_QUERY`, `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL`, `COUNCIL_TIMEOUT_SECONDS` (optional council-mode budgets)
 - `BRAVE_MONTHLY_QUERY_LIMIT`, `BRAVE_MONTHLY_QUERY_RESERVE` (optional Brave free-tier quota guardrails)
 - `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings for remote/background agent execution)
 
@@ -83,6 +84,8 @@ For temporary anonymous testing, set:
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Chat and deep research both support iterative agentic web research loops behind independent feature flags.
 - Agent mode creates a placeholder assistant message immediately, then completes in the background and is surfaced to the UI through message polling.
+- Council-mode agent runs execute sequential source-model passes, then persist `Sources`, `Analysis`, and `Result` state for reload and polling.
+- Council mode may run grounded or ungrounded. Legacy single-model agent mode remains grounded.
 - Research planner/decision calls in those loops use the same selected request model as final response generation.
 - Deep research uses larger loop/query/read budgets than normal chat and still respects `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

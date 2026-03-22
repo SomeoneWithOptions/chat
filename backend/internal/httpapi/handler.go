@@ -584,20 +584,25 @@ type usageResponse struct {
 }
 
 type messageResponse struct {
-	ID                  string             `json:"id"`
-	ConversationID      string             `json:"conversationId"`
-	Role                string             `json:"role"`
-	Content             string             `json:"content"`
-	ReasoningContent    *string            `json:"reasoningContent,omitempty"`
-	ThinkingTrace       *thinkingTrace     `json:"thinkingTrace,omitempty"`
-	ModelID             *string            `json:"modelId,omitempty"`
-	Usage               *usageResponse     `json:"usage,omitempty"`
-	GroundingEnabled    bool               `json:"groundingEnabled"`
-	DeepResearchEnabled bool               `json:"deepResearchEnabled"`
-	ResponseMode        string             `json:"responseMode"`
-	AgentSummaries      []agentSummary     `json:"agentSummaries,omitempty"`
-	Citations           []citationResponse `json:"citations"`
-	CreatedAt           string             `json:"createdAt"`
+	ID                  string                `json:"id"`
+	ConversationID      string                `json:"conversationId"`
+	Role                string                `json:"role"`
+	Content             string                `json:"content"`
+	ReasoningContent    *string               `json:"reasoningContent,omitempty"`
+	ThinkingTrace       *thinkingTrace        `json:"thinkingTrace,omitempty"`
+	ModelID             *string               `json:"modelId,omitempty"`
+	Usage               *usageResponse        `json:"usage,omitempty"`
+	GroundingEnabled    bool                  `json:"groundingEnabled"`
+	DeepResearchEnabled bool                  `json:"deepResearchEnabled"`
+	ResponseMode        string                `json:"responseMode"`
+	AgentSummaries      []agentSummary        `json:"agentSummaries,omitempty"`
+	AgentSources        []CouncilSourceResult `json:"agentSources,omitempty"`
+	AgentAnalysis       *CouncilAnalysis      `json:"agentAnalysis,omitempty"`
+	AgentResultModelID  string                `json:"agentResultModelId,omitempty"`
+	AgentResultUsage    *usageResponse        `json:"agentResultUsage,omitempty"`
+	AgentRunID          string                `json:"agentRunId,omitempty"`
+	Citations           []citationResponse    `json:"citations"`
+	CreatedAt           string                `json:"createdAt"`
 }
 
 func (h Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
@@ -699,7 +704,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.response_mode, m.agent_summaries_json, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.response_mode, m.agent_summaries_json, m.agent_sources_json, m.agent_analysis_json, m.agent_result_model_id, m.agent_result_usage_json, m.agent_run_id, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -728,6 +733,11 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		var usageProviderName sql.NullString
 		var responseMode sql.NullString
 		var agentSummariesJSON sql.NullString
+		var agentSourcesJSON sql.NullString
+		var agentAnalysisJSON sql.NullString
+		var agentResultModelID sql.NullString
+		var agentResultUsageJSON sql.NullString
+		var agentRunID sql.NullString
 		var groundingEnabled int
 		var deepResearchEnabled int
 
@@ -752,6 +762,11 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&deepResearchEnabled,
 			&responseMode,
 			&agentSummariesJSON,
+			&agentSourcesJSON,
+			&agentAnalysisJSON,
+			&agentResultModelID,
+			&agentResultUsageJSON,
+			&agentRunID,
 			&message.CreatedAt,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "db_error", "failed to parse messages")
@@ -784,6 +799,20 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		if agentSummaries, ok := decodeAgentSummariesJSON(agentSummariesJSON.String); ok {
 			message.AgentSummaries = agentSummaries
 		}
+		if agentSourcesJSON.Valid && agentSourcesJSON.String != "" {
+			_ = json.Unmarshal([]byte(agentSourcesJSON.String), &message.AgentSources)
+		}
+		if agentAnalysisJSON.Valid && agentAnalysisJSON.String != "" {
+			_ = json.Unmarshal([]byte(agentAnalysisJSON.String), &message.AgentAnalysis)
+		}
+		message.AgentResultModelID = strings.TrimSpace(agentResultModelID.String)
+		if agentResultUsageJSON.Valid && agentResultUsageJSON.String != "" {
+			_ = json.Unmarshal([]byte(agentResultUsageJSON.String), &message.AgentResultUsage)
+		} else if message.ResponseMode == "agent" && message.AgentResultModelID != "" && message.Usage != nil {
+			usageCopy := *message.Usage
+			message.AgentResultUsage = &usageCopy
+		}
+		message.AgentRunID = strings.TrimSpace(agentRunID.String)
 		message.Citations = make([]citationResponse, 0)
 		messages = append(messages, message)
 	}
@@ -989,12 +1018,15 @@ type CouncilFinalResult struct {
 }
 
 type AgentRunStatusResponse struct {
-	ID            string                `json:"id"`
-	Status        string                `json:"status"`
-	SourceResults []CouncilSourceResult `json:"sourceResults,omitempty"`
-	Analysis      *CouncilAnalysis      `json:"analysis,omitempty"`
-	Result        *CouncilFinalResult   `json:"result,omitempty"`
-	Warnings      []string              `json:"warnings,omitempty"`
+	ID               string                `json:"id"`
+	Status           string                `json:"status"`
+	SourceResults    []CouncilSourceResult `json:"sourceResults,omitempty"`
+	Analysis         *CouncilAnalysis      `json:"analysis,omitempty"`
+	Result           *CouncilFinalResult   `json:"result,omitempty"`
+	Warnings         []string              `json:"warnings,omitempty"`
+	CompletedSources int                   `json:"completedSources,omitempty"`
+	DegradedSources  int                   `json:"degradedSources,omitempty"`
+	FailedSources    int                   `json:"failedSources,omitempty"`
 }
 
 type chatMessageRequest struct {
@@ -1072,15 +1104,15 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	if req.Grounding != nil {
 		grounding = *req.Grounding
 	}
-	if responseMode == "agent" {
-		grounding = true
-	}
 	deepResearch := responseMode == "deep_research"
 
 	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
 	var reasoningEffort string
 
 	isCouncil := responseMode == "agent" && len(req.SourceModels) > 0
+	if responseMode == "agent" && !isCouncil {
+		grounding = true
+	}
 	if isCouncil {
 		if req.FusionModel == nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "fusionModel is required when sourceModels is provided")
@@ -1231,7 +1263,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 				FusionModel:    *req.FusionModel,
 				Message:        req.Message,
 				Prompt:         userPrompt,
-				Grounding:      true,
+				Grounding:      grounding,
 				History:        historyMessages,
 			})
 			return

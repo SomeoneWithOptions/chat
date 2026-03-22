@@ -8,43 +8,75 @@ import (
 	"fmt"
 	"log"
 	"strings"
-	"sync"
 	"time"
 
 	"chat/backend/internal/openrouter"
 	"chat/backend/internal/research"
 )
 
-// The overall executeCouncilRun orchestrator
+type councilStatusCounts struct {
+	completed int
+	degraded  int
+	failed    int
+}
+
 func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) error {
+	var config CouncilRunConfig
+	if err := json.Unmarshal([]byte(run.CouncilConfigJSON), &config); err != nil {
+		return h.failAgentRun(ctx, run.ID, "invalid council config")
+	}
+
 	traceCollector, err := h.loadMessageTrace(ctx, run.UserID, run.AssistantMessageID)
 	if err != nil {
 		traceCollector = newThinkingTraceCollector()
 	}
 
-	var agentSources []CouncilSourceResult
-	var agentAnalysis *CouncilAnalysis
-	var resultModelID string
-	var agentRunID = run.ID
+	agentSources := make([]CouncilSourceResult, len(config.SourceModels))
+	for i, sm := range config.SourceModels {
+		agentSources[i] = CouncilSourceResult{
+			ModelID: sm.ModelID,
+			Status:  "queued",
+		}
+	}
 
-	// Helper to persist state quickly
-	saveState := func(status string) {
+	var agentAnalysis *CouncilAnalysis
+	var finalResult *CouncilFinalResult
+	var warnings []string
+
+	saveState := func(runStatus, desiredTraceStatus string, finished bool) {
+		warnings = buildCouncilWarnings(agentSources, config.Grounding, h.cfg.CouncilTargetReadableSourcesPerModel)
+		content := ""
+		resultModelID := ""
+		var resultUsage *usageResponse
+		if finalResult != nil {
+			content = finalResult.Response
+			resultModelID = finalResult.ModelID
+			resultUsage = finalResult.Usage
+		}
 		_ = h.updateCouncilAssistantMessage(
-			ctx, run.UserID, run.AssistantMessageID, "", traceCollector, nil, nil, agentSources, agentAnalysis, resultModelID, agentRunID, status,
+			ctx,
+			run.UserID,
+			run.AssistantMessageID,
+			content,
+			traceCollector,
+			collectCouncilCitations(agentSources),
+			resultUsage,
+			agentSources,
+			agentAnalysis,
+			resultModelID,
+			warnings,
+			run.ID,
+			desiredTraceStatus,
 		)
+		_ = h.persistCouncilRunState(ctx, run.ID, runStatus, agentSources, agentAnalysis, finalResult, warnings, finished)
 	}
 
 	traceCollector.AppendProgress(research.Progress{
 		Phase:  research.PhasePlanning,
 		Title:  "Starting council workflow",
-		Detail: "Initializing multi-model generation",
+		Detail: "Preparing the sequential council run",
 	})
-	saveState(thinkingTraceStatusRunning)
-
-	var config CouncilRunConfig
-	if err := json.Unmarshal([]byte(run.CouncilConfigJSON), &config); err != nil {
-		return h.failAgentRun(ctx, run.ID, "invalid council config")
-	}
+	saveState("running", thinkingTraceStatusRunning, false)
 
 	historyMessages, err := h.listConversationPromptMessages(ctx, run.UserID, run.ConversationID, maxConversationHistoryMessages)
 	if err != nil {
@@ -70,111 +102,85 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 	}
 	timeSensitive := isTimeSensitivePrompt(userPrompt)
 
-	// Build the globally serialized Brave search coordinator for the council
-	searchCoordinator := newCouncilGroundingCoordinator(&h, run.ID, run.SearchBudget)
-
-	// Fan out to each source model
-	var wg sync.WaitGroup
-	var mu sync.Mutex
-
-	agentSources = make([]CouncilSourceResult, len(config.SourceModels))
-
-	for i, sm := range config.SourceModels {
-		agentSources[i] = CouncilSourceResult{
-			ModelID: sm.ModelID,
-			Status:  "queued",
-		}
-	}
-	saveState(thinkingTraceStatusRunning)
-
-	traceCollector.AppendProgress(research.Progress{
-		Phase:  research.PhaseSearching,
-		Title:  "Running source models",
-		Detail: fmt.Sprintf("Fanning out %d queries...", len(config.SourceModels)),
-	})
-	saveState(thinkingTraceStatusRunning)
+	searchCoordinator := newCouncilGroundingCoordinator(&h, run.ID, run.SearchBudget, h.cfg.CouncilSearchResultsPerQuery)
 
 	successCount := 0
 
 	for i, sm := range config.SourceModels {
-		wg.Add(1)
-		go func(idx int, sourceModel CouncilSourceSpec) {
-			defer wg.Done()
+		traceCollector.AppendProgress(research.Progress{
+			Phase:       research.PhaseSearching,
+			Title:       "Running source model",
+			Detail:      fmt.Sprintf("%s (%d of %d)", sm.ModelID, i+1, len(config.SourceModels)),
+			Pass:        i + 1,
+			TotalPasses: len(config.SourceModels),
+		})
+		agentSources[i].Status = "running"
+		saveState("running", thinkingTraceStatusRunning, false)
 
-			// Update status to running
-			mu.Lock()
-			agentSources[idx].Status = "running"
-			saveState(thinkingTraceStatusRunning)
-			mu.Unlock()
+		start := time.Now()
+		res, runErr := h.runCouncilSourceModel(ctx, sm, userPrompt, timeSensitive, config.Grounding, historyMessages, searchCoordinator)
+		duration := time.Since(start).Milliseconds()
 
-			start := time.Now()
-			res, err := h.runCouncilSourceModel(ctx, sourceModel, userPrompt, timeSensitive, config.Grounding, historyMessages, searchCoordinator)
-			duration := time.Since(start).Milliseconds()
-
-			mu.Lock()
-			defer mu.Unlock()
-
-			if err != nil {
-				agentSources[idx].Status = "failed"
-				agentSources[idx].Error = err.Error()
-				agentSources[idx].DurationMs = duration
-			} else {
-				agentSources[idx].Status = res.Status
-				agentSources[idx].Response = res.Response
-				agentSources[idx].ReasoningContent = res.ReasoningContent
-				agentSources[idx].Citations = res.Citations
-				agentSources[idx].Usage = res.Usage
-				agentSources[idx].SearchQueries = res.SearchQueries
-				agentSources[idx].ReadableSources = res.ReadableSources
-				agentSources[idx].Warnings = res.Warnings
-				agentSources[idx].DurationMs = duration
-
-				if res.Status == "complete" || res.Status == "degraded" {
-					successCount++
-				}
+		if runErr != nil {
+			agentSources[i].Status = "failed"
+			agentSources[i].Error = runErr.Error()
+			agentSources[i].DurationMs = duration
+		} else {
+			agentSources[i].Status = res.Status
+			agentSources[i].Response = res.Response
+			agentSources[i].ReasoningContent = res.ReasoningContent
+			agentSources[i].Citations = res.Citations
+			agentSources[i].Usage = res.Usage
+			agentSources[i].SearchQueries = res.SearchQueries
+			agentSources[i].ReadableSources = res.ReadableSources
+			agentSources[i].Warnings = res.Warnings
+			agentSources[i].DurationMs = duration
+			if res.Status == "complete" || res.Status == "degraded" {
+				successCount++
 			}
-			saveState(thinkingTraceStatusRunning)
-		}(i, sm)
-	}
+		}
 
-	wg.Wait()
+		saveState("running", thinkingTraceStatusRunning, false)
+	}
 
 	if successCount == 0 {
 		traceCollector.AppendProgress(research.Progress{
 			Phase:  research.PhaseEvaluating,
 			Title:  "Council failed",
-			Detail: "All source models failed to generate valid output.",
+			Detail: "Every source model failed before producing a usable answer.",
 		})
-		saveState(thinkingTraceStatusStopped)
+		saveState("running", thinkingTraceStatusStopped, false)
 		return h.failAgentRun(ctx, run.ID, "all source models failed")
 	}
 
 	traceCollector.AppendProgress(research.Progress{
 		Phase:  research.PhaseEvaluating,
 		Title:  "Running fusion analysis",
-		Detail: "Comparing source model answers...",
+		Detail: "Comparing the completed source passes",
 	})
-	saveState(thinkingTraceStatusRunning)
+	saveState("running", thinkingTraceStatusRunning, false)
 
 	analysis, err := h.runCouncilAnalysis(ctx, config.FusionModel, userPrompt, agentSources, historyMessages)
 	if err != nil {
 		log.Printf("council analysis failed: %v", err)
-		// We still proceed even if analysis fails to avoid blocking the final answer.
 	} else {
 		agentAnalysis = analysis
-		saveState(thinkingTraceStatusRunning)
+		saveState("running", thinkingTraceStatusRunning, false)
 	}
 
 	traceCollector.AppendProgress(research.Progress{
 		Phase:  research.PhaseSynthesizing,
 		Title:  "Writing final fused answer",
-		Detail: "Combining multi-model results",
+		Detail: "Combining the source passes into one answer",
 	})
-	saveState(thinkingTraceStatusRunning)
+	saveState("running", thinkingTraceStatusRunning, false)
 
-	finalResult, err := h.runCouncilSynthesis(ctx, config.FusionModel, userPrompt, agentSources, agentAnalysis, historyMessages)
+	finalResult, err = h.runCouncilSynthesis(ctx, config.FusionModel, userPrompt, agentSources, agentAnalysis, historyMessages)
 	if err != nil {
 		return h.failAgentRun(ctx, run.ID, "council synthesis failed")
+	}
+	if shouldWarnCouncilEvidenceQuality(agentSources, config.Grounding, h.cfg.CouncilTargetReadableSourcesPerModel) {
+		finalResult.Response = "Warning: evidence quality was below target because no grounded source model reached the readable-source goal.\n\n" + strings.TrimSpace(finalResult.Response)
 	}
 
 	traceCollector.AppendProgress(research.Progress{
@@ -183,33 +189,7 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 		Detail: "Saving final payload",
 	})
 	traceCollector.MarkDone()
-
-	// Compile all citations from all source models to save to the main message
-	var allCitations []citationResponse
-	seenCitations := make(map[string]bool)
-	for _, src := range agentSources {
-		for _, c := range src.Citations {
-			if !seenCitations[c.URL] {
-				seenCitations[c.URL] = true
-				allCitations = append(allCitations, c)
-			}
-		}
-	}
-
-	_ = h.updateCouncilAssistantMessage(
-		ctx, run.UserID, run.AssistantMessageID, finalResult.Response, traceCollector, allCitations, finalResult.Usage, agentSources, agentAnalysis, finalResult.ModelID, agentRunID, thinkingTraceStatusDone,
-	)
-
-	_, _ = h.db.ExecContext(ctx, `
-		UPDATE agent_runs
-		SET status = 'completed', 
-			source_results_json = ?, 
-			fusion_analysis_json = ?, 
-			fusion_result_json = ?, 
-			finished_at = CURRENT_TIMESTAMP, 
-			updated_at = CURRENT_TIMESTAMP
-		WHERE id = ?;
-	`, toJSONStr(agentSources), toJSONStr(agentAnalysis), toJSONStr(finalResult), run.ID)
+	saveState("completed", thinkingTraceStatusDone, true)
 
 	return nil
 }
@@ -248,10 +228,11 @@ func (h Handler) runCouncilSourceModel(
 	}
 
 	cfg := h.buildResearchConfig(research.ModeAgent)
-	cfg.MinSearchQueries = 1
-	cfg.MaxSearchQueries = 3
-	cfg.MaxSourcesRead = 15
-	cfg.SearchResultsPerQ = 15
+	cfg.MinSearchQueries = h.cfg.CouncilMaxSearchQueriesPerModel
+	cfg.MaxSearchQueries = h.cfg.CouncilMaxSearchQueriesPerModel
+	cfg.MaxSourcesRead = h.cfg.CouncilTargetReadableSourcesPerModel
+	cfg.SearchResultsPerQ = h.cfg.CouncilSearchResultsPerQuery
+	cfg.Timeout = time.Duration(h.cfg.CouncilTimeoutSeconds) * time.Second
 
 	plannerResponder := newOpenRouterPlannerResponder(h.openrouter, spec.ModelID, plannerReasoningEffort(spec.ReasoningEffort))
 	planner := research.NewJSONPlanner(plannerResponder)
@@ -263,7 +244,7 @@ func (h Handler) runCouncilSourceModel(
 	}
 
 	status := "complete"
-	if result.SourcesRead < 15 {
+	if result.SourcesRead < h.cfg.CouncilTargetReadableSourcesPerModel {
 		status = "degraded"
 	}
 
@@ -288,6 +269,134 @@ func (h Handler) runCouncilSourceModel(
 		ReadableSources:  result.SourcesRead,
 		Warnings:         result.Warnings,
 	}, nil
+}
+
+func summarizeCouncilSourceStatuses(sources []CouncilSourceResult) councilStatusCounts {
+	counts := councilStatusCounts{}
+	for _, source := range sources {
+		switch source.Status {
+		case "complete":
+			counts.completed++
+		case "degraded":
+			counts.degraded++
+		case "failed":
+			counts.failed++
+		}
+	}
+	return counts
+}
+
+func shouldWarnCouncilEvidenceQuality(sources []CouncilSourceResult, grounding bool, targetReadableSources int) bool {
+	if !grounding {
+		return false
+	}
+	counts := summarizeCouncilSourceStatuses(sources)
+	if counts.completed > 0 {
+		return false
+	}
+	return counts.degraded > 0 || counts.failed > 0
+}
+
+func buildCouncilWarnings(sources []CouncilSourceResult, grounding bool, targetReadableSources int) []string {
+	warnings := make([]string, 0, len(sources)+1)
+	for _, source := range sources {
+		warnings = append(warnings, source.Warnings...)
+	}
+	if shouldWarnCouncilEvidenceQuality(sources, grounding, targetReadableSources) {
+		warnings = append(warnings, fmt.Sprintf("Evidence quality was below target: no grounded source model reached %d readable sources.", targetReadableSources))
+	}
+	return dedupeStrings(warnings)
+}
+
+func dedupeStrings(items []string) []string {
+	if len(items) == 0 {
+		return nil
+	}
+	seen := make(map[string]struct{}, len(items))
+	out := make([]string, 0, len(items))
+	for _, item := range items {
+		item = strings.TrimSpace(item)
+		if item == "" {
+			continue
+		}
+		if _, ok := seen[item]; ok {
+			continue
+		}
+		seen[item] = struct{}{}
+		out = append(out, item)
+	}
+	return out
+}
+
+func collectCouncilCitations(sources []CouncilSourceResult) []citationResponse {
+	allCitations := make([]citationResponse, 0, len(sources)*4)
+	seen := make(map[string]struct{}, len(sources)*4)
+	for _, src := range sources {
+		for _, citation := range src.Citations {
+			if strings.TrimSpace(citation.URL) == "" {
+				continue
+			}
+			if _, ok := seen[citation.URL]; ok {
+				continue
+			}
+			seen[citation.URL] = struct{}{}
+			allCitations = append(allCitations, citation)
+		}
+	}
+	return allCitations
+}
+
+func buildCouncilPublicStatus(runID, runStatus string, sources []CouncilSourceResult, analysis *CouncilAnalysis, result *CouncilFinalResult, warnings []string) AgentRunStatusResponse {
+	counts := summarizeCouncilSourceStatuses(sources)
+	return AgentRunStatusResponse{
+		ID:               runID,
+		Status:           runStatus,
+		SourceResults:    sources,
+		Analysis:         analysis,
+		Result:           result,
+		Warnings:         warnings,
+		CompletedSources: counts.completed,
+		DegradedSources:  counts.degraded,
+		FailedSources:    counts.failed,
+	}
+}
+
+func (h Handler) persistCouncilRunState(ctx context.Context, runID, runStatus string, sources []CouncilSourceResult, analysis *CouncilAnalysis, result *CouncilFinalResult, warnings []string, finished bool) error {
+	publicStatus := buildCouncilPublicStatus(runID, runStatus, sources, analysis, result, warnings)
+	publicStatusJSON, err := json.Marshal(publicStatus)
+	if err != nil {
+		return err
+	}
+	counts := summarizeCouncilSourceStatuses(sources)
+	query := `
+UPDATE agent_runs
+SET status = ?,
+    source_results_json = COALESCE(?, source_results_json),
+    fusion_analysis_json = COALESCE(?, fusion_analysis_json),
+    fusion_result_json = COALESCE(?, fusion_result_json),
+    completed_sources = ?,
+    degraded_sources = ?,
+    failed_sources = ?,
+    public_status_json = ?,
+    finished_at = CASE WHEN ? THEN CURRENT_TIMESTAMP ELSE finished_at END,
+    updated_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+`
+	_, err = h.db.ExecContext(
+		ctx,
+		query,
+		runStatus,
+		toJSONStr(sources),
+		toJSONStr(analysis),
+		toJSONStr(result),
+		counts.completed,
+		counts.degraded,
+		counts.failed,
+		string(publicStatusJSON),
+		finished,
+		runID,
+	)
+	return err
 }
 
 func convertOpenRouterUsageToResponse(u *openrouter.Usage) *usageResponse {

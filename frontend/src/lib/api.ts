@@ -16,8 +16,8 @@ export type Model = {
   curated: boolean;
 };
 
-export type ReasoningMode = 'chat' | 'deep_research' | 'agent';
-export type ReasoningEffort = 'low' | 'medium' | 'high';
+export type ReasoningMode = "chat" | "deep_research" | "agent";
+export type ReasoningEffort = "low" | "medium" | "high";
 
 export type ReasoningPreset = {
   modelId: string;
@@ -63,7 +63,7 @@ export type CouncilSourceSpec = {
 
 export type CouncilSourceResult = {
   modelId: string;
-  status: 'queued' | 'running' | 'complete' | 'degraded' | 'failed';
+  status: "queued" | "running" | "complete" | "degraded" | "failed";
   response?: string;
   reasoningContent?: string;
   citations?: Citation[];
@@ -107,17 +107,20 @@ export type CouncilFinalResult = {
 
 export type AgentRunStatus = {
   id: string;
-  status: 'queued' | 'running' | 'completed' | 'failed';
+  status: "queued" | "running" | "completed" | "failed";
   sourceResults?: CouncilSourceResult[];
   analysis?: CouncilAnalysis;
   result?: CouncilFinalResult;
   warnings?: string[];
+  completedSources?: number;
+  degradedSources?: number;
+  failedSources?: number;
 };
 
 export type ConversationMessage = {
   id: string;
   conversationId: string;
-  role: 'system' | 'user' | 'assistant' | 'tool';
+  role: "system" | "user" | "assistant" | "tool";
   content: string;
   reasoningContent?: string | null;
   thinkingTrace?: ThinkingTrace | null;
@@ -177,8 +180,15 @@ export type ChatRequest = {
   fusionModel?: CouncilSourceSpec;
 };
 
-export type ResearchPhase = 'planning' | 'searching' | 'reading' | 'evaluating' | 'iterating' | 'synthesizing' | 'finalizing';
-export type ProgressDecision = 'search_more' | 'finalize' | 'fallback';
+export type ResearchPhase =
+  | "planning"
+  | "searching"
+  | "reading"
+  | "evaluating"
+  | "iterating"
+  | "synthesizing"
+  | "finalizing";
+export type ProgressDecision = "search_more" | "finalize" | "fallback";
 
 export type ThinkingTraceEntry = {
   phase: ResearchPhase;
@@ -195,14 +205,14 @@ export type ThinkingTraceEntry = {
 };
 
 export type ThinkingTrace = {
-  status: 'running' | 'done' | 'stopped';
+  status: "running" | "done" | "stopped";
   summary: string;
   entries: ThinkingTraceEntry[];
 };
 
 export type StreamEvent =
   | {
-      type: 'metadata';
+      type: "metadata";
       grounding: boolean;
       deepResearch: boolean;
       responseMode?: ReasoningMode;
@@ -213,7 +223,7 @@ export type StreamEvent =
       agentRunId?: string;
     }
   | {
-      type: 'progress';
+      type: "progress";
       phase: ResearchPhase;
       message?: string;
       pass?: number;
@@ -227,18 +237,18 @@ export type StreamEvent =
       isQuickStep?: boolean;
       decision?: ProgressDecision;
     }
-  | { type: 'warning'; scope: string; message: string }
-  | { type: 'citations'; citations: Citation[] }
-  | { type: 'token'; delta: string }
-  | { type: 'reasoning'; delta: string }
-  | { type: 'usage'; usage: Usage }
-  | { type: 'agent_summaries'; agentSummaries: AgentSummary[] }
-  | { type: 'error'; message: string }
-  | { type: 'done' };
+  | { type: "warning"; scope: string; message: string }
+  | { type: "citations"; citations: Citation[] }
+  | { type: "token"; delta: string }
+  | { type: "reasoning"; delta: string }
+  | { type: "usage"; usage: Usage }
+  | { type: "agent_summaries"; agentSummaries: AgentSummary[] }
+  | { type: "error"; message: string }
+  | { type: "done" };
 
 // ─── Prompt Enhance Types ───────────────────────
 
-export type EnhanceQuestionType = 'single_select' | 'multi_select' | 'yes_no';
+export type EnhanceQuestionType = "single_select" | "multi_select" | "yes_no";
 
 export type EnhanceQuestionOption = {
   id: string;
@@ -274,7 +284,7 @@ export type EnhanceResponse = {
   enhancedPrompt?: string;
 };
 
-const apiBase = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:8080';
+const apiBase = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
 
 type ErrorEnvelope = {
   error?: {
@@ -289,29 +299,32 @@ export class APIError extends Error {
 
   constructor(message: string, status: number, code?: string) {
     super(message);
-    this.name = 'APIError';
+    this.name = "APIError";
     this.status = status;
     this.code = code;
   }
 }
 
 function toAPIError(status: number, body: ErrorEnvelope | null): APIError {
-  const message = body?.error?.message ?? `Request failed with status ${status}`;
+  const message =
+    body?.error?.message ?? `Request failed with status ${status}`;
   return new APIError(message, status, body?.error?.code);
 }
 
 async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(`${apiBase}${path}`, {
-    credentials: 'include',
+    credentials: "include",
     ...init,
     headers: {
-      'Content-Type': 'application/json',
+      "Content-Type": "application/json",
       ...(init?.headers ?? {}),
     },
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
+    const body = (await response
+      .json()
+      .catch(() => null)) as ErrorEnvelope | null;
     throw toAPIError(response.status, body);
   }
 
@@ -319,15 +332,18 @@ async function requestJSON<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function getMe(): Promise<User> {
-  const response = await requestJSON<{ user: User }>('/v1/auth/me', {
-    method: 'GET',
+  const response = await requestJSON<{ user: User }>("/v1/auth/me", {
+    method: "GET",
   });
   return response.user;
 }
 
-export async function authWithGoogle(idToken: string, devHeaders?: Record<string, string>): Promise<User> {
-  const response = await requestJSON<{ user: User }>('/v1/auth/google', {
-    method: 'POST',
+export async function authWithGoogle(
+  idToken: string,
+  devHeaders?: Record<string, string>,
+): Promise<User> {
+  const response = await requestJSON<{ user: User }>("/v1/auth/google", {
+    method: "POST",
     body: JSON.stringify({ idToken }),
     headers: {
       ...(devHeaders ?? {}),
@@ -337,23 +353,29 @@ export async function authWithGoogle(idToken: string, devHeaders?: Record<string
 }
 
 export async function logout(): Promise<void> {
-  await requestJSON<{ success: boolean }>('/v1/auth/logout', {
-    method: 'POST',
+  await requestJSON<{ success: boolean }>("/v1/auth/logout", {
+    method: "POST",
   });
 }
 
 export async function listModels(): Promise<ModelCatalog> {
-  const response = await requestJSON<ModelCatalog>('/v1/models', {
-    method: 'GET',
+  const response = await requestJSON<ModelCatalog>("/v1/models", {
+    method: "GET",
   });
   return response;
 }
 
-export async function updateModelPreference(mode: ReasoningMode, modelId: string): Promise<ModelPreferences> {
-  const response = await requestJSON<{ preferences: ModelPreferences }>('/v1/models/preferences', {
-    method: 'PUT',
-    body: JSON.stringify({ mode, modelId }),
-  });
+export async function updateModelPreference(
+  mode: ReasoningMode,
+  modelId: string,
+): Promise<ModelPreferences> {
+  const response = await requestJSON<{ preferences: ModelPreferences }>(
+    "/v1/models/preferences",
+    {
+      method: "PUT",
+      body: JSON.stringify({ mode, modelId }),
+    },
+  );
   return response.preferences;
 }
 
@@ -362,67 +384,96 @@ export async function updateModelReasoningPreset(
   mode: ReasoningMode,
   effort: ReasoningEffort,
 ): Promise<ReasoningPreset[]> {
-  const response = await requestJSON<{ reasoningPresets: ReasoningPreset[] }>('/v1/models/reasoning-presets', {
-    method: 'PUT',
-    body: JSON.stringify({ modelId, mode, effort }),
-  });
+  const response = await requestJSON<{ reasoningPresets: ReasoningPreset[] }>(
+    "/v1/models/reasoning-presets",
+    {
+      method: "PUT",
+      body: JSON.stringify({ modelId, mode, effort }),
+    },
+  );
   return response.reasoningPresets;
 }
 
-export async function updateModelFavorite(modelId: string, favorite: boolean): Promise<string[]> {
-  const response = await requestJSON<{ favorites: string[] }>('/v1/models/favorites', {
-    method: 'PUT',
-    body: JSON.stringify({ modelId, favorite }),
-  });
+export async function updateModelFavorite(
+  modelId: string,
+  favorite: boolean,
+): Promise<string[]> {
+  const response = await requestJSON<{ favorites: string[] }>(
+    "/v1/models/favorites",
+    {
+      method: "PUT",
+      body: JSON.stringify({ modelId, favorite }),
+    },
+  );
   return response.favorites;
 }
 
-export async function createConversation(title?: string): Promise<Conversation> {
-  const response = await requestJSON<{ conversation: Conversation }>('/v1/conversations', {
-    method: 'POST',
-    body: JSON.stringify(title ? { title } : {}),
-  });
+export async function createConversation(
+  title?: string,
+): Promise<Conversation> {
+  const response = await requestJSON<{ conversation: Conversation }>(
+    "/v1/conversations",
+    {
+      method: "POST",
+      body: JSON.stringify(title ? { title } : {}),
+    },
+  );
   return response.conversation;
 }
 
 export async function listConversations(): Promise<Conversation[]> {
-  const response = await requestJSON<{ conversations: Conversation[] }>('/v1/conversations', {
-    method: 'GET',
-  });
+  const response = await requestJSON<{ conversations: Conversation[] }>(
+    "/v1/conversations",
+    {
+      method: "GET",
+    },
+  );
   return response.conversations;
 }
 
-export async function listConversationMessages(conversationId: string): Promise<ConversationMessage[]> {
-  const response = await requestJSON<{ messages: ConversationMessage[] }>(`/v1/conversations/${conversationId}/messages`, {
-    method: 'GET',
-  });
+export async function listConversationMessages(
+  conversationId: string,
+): Promise<ConversationMessage[]> {
+  const response = await requestJSON<{ messages: ConversationMessage[] }>(
+    `/v1/conversations/${conversationId}/messages`,
+    {
+      method: "GET",
+    },
+  );
   return response.messages;
 }
 
-export async function deleteConversation(conversationId: string): Promise<void> {
-  await requestJSON<{ success: boolean }>(`/v1/conversations/${conversationId}`, {
-    method: 'DELETE',
-  });
+export async function deleteConversation(
+  conversationId: string,
+): Promise<void> {
+  await requestJSON<{ success: boolean }>(
+    `/v1/conversations/${conversationId}`,
+    {
+      method: "DELETE",
+    },
+  );
 }
 
 export async function deleteAllConversations(): Promise<void> {
-  await requestJSON<{ success: boolean }>('/v1/conversations', {
-    method: 'DELETE',
+  await requestJSON<{ success: boolean }>("/v1/conversations", {
+    method: "DELETE",
   });
 }
 
 export async function uploadFile(file: File): Promise<UploadedFile> {
   const formData = new FormData();
-  formData.append('file', file);
+  formData.append("file", file);
 
   const response = await fetch(`${apiBase}/v1/files`, {
-    method: 'POST',
-    credentials: 'include',
+    method: "POST",
+    credentials: "include",
     body: formData,
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
+    const body = (await response
+      .json()
+      .catch(() => null)) as ErrorEnvelope | null;
     throw toAPIError(response.status, body);
   }
 
@@ -436,28 +487,30 @@ export async function streamMessage(
   options?: { signal?: AbortSignal },
 ): Promise<void> {
   const response = await fetch(`${apiBase}/v1/chat/messages`, {
-    method: 'POST',
-    credentials: 'include',
+    method: "POST",
+    credentials: "include",
     signal: options?.signal,
     headers: {
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
+      "Content-Type": "application/json",
+      Accept: "text/event-stream",
     },
     body: JSON.stringify(request),
   });
 
   if (!response.ok) {
-    const body = (await response.json().catch(() => null)) as ErrorEnvelope | null;
+    const body = (await response
+      .json()
+      .catch(() => null)) as ErrorEnvelope | null;
     throw toAPIError(response.status, body);
   }
 
   if (!response.body) {
-    throw new Error('Streaming response body is missing');
+    throw new Error("Streaming response body is missing");
   }
 
   const decoder = new TextDecoder();
   const reader = response.body.getReader();
-  let buffer = '';
+  let buffer = "";
 
   while (true) {
     const { done, value } = await reader.read();
@@ -467,17 +520,17 @@ export async function streamMessage(
 
     buffer += decoder.decode(value, { stream: true });
 
-    const chunks = buffer.split('\n\n');
-    buffer = chunks.pop() ?? '';
+    const chunks = buffer.split("\n\n");
+    buffer = chunks.pop() ?? "";
 
     for (const chunk of chunks) {
       const dataLines = chunk
-        .split('\n')
+        .split("\n")
         .map((line) => line.trim())
-        .filter((line) => line.startsWith('data:'));
+        .filter((line) => line.startsWith("data:"));
 
       for (const line of dataLines) {
-        const jsonPayload = line.slice('data:'.length).trim();
+        const jsonPayload = line.slice("data:".length).trim();
         if (!jsonPayload) {
           continue;
         }
@@ -493,10 +546,15 @@ export async function streamMessage(
   }
 }
 
-export async function getAgentRunStatus(runId: string): Promise<AgentRunStatus> {
-  const response = await requestJSON<AgentRunStatus>(`/v1/agent-runs/${runId}`, {
-    method: 'GET',
-  });
+export async function getAgentRunStatus(
+  runId: string,
+): Promise<AgentRunStatus> {
+  const response = await requestJSON<AgentRunStatus>(
+    `/v1/agent-runs/${runId}`,
+    {
+      method: "GET",
+    },
+  );
   return response;
 }
 
@@ -504,8 +562,8 @@ export async function enhancePrompt(
   request: EnhanceRequest,
   options?: { signal?: AbortSignal },
 ): Promise<EnhanceResponse> {
-  return requestJSON<EnhanceResponse>('/v1/prompt/enhance', {
-    method: 'POST',
+  return requestJSON<EnhanceResponse>("/v1/prompt/enhance", {
+    method: "POST",
     body: JSON.stringify(request),
     signal: options?.signal,
   });

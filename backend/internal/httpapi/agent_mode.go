@@ -299,6 +299,9 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 	if run == nil {
 		return nil
 	}
+	if run.WorkflowType == "council_fusion" {
+		return h.executeCouncilRun(ctx, run)
+	}
 
 	traceCollector, err := h.loadMessageTrace(ctx, run.UserID, run.AssistantMessageID)
 	if err != nil {
@@ -679,7 +682,16 @@ func (h Handler) failAgentRun(ctx context.Context, runID, message string) error 
 			traceCollector = newThinkingTraceCollector()
 		}
 		traceCollector.MarkStopped(message)
-		_ = h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
+		if run.WorkflowType == "council_fusion" {
+			_ = h.updateCouncilAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, nil, "", []string{message}, runID, thinkingTraceStatusStopped)
+			_ = h.persistCouncilPublicStatus(ctx, runID, AgentRunStatusResponse{
+				ID:       runID,
+				Status:   "failed",
+				Warnings: []string{message},
+			})
+		} else {
+			_ = h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
+		}
 	}
 	_, err = h.db.ExecContext(ctx, `
 UPDATE agent_runs
@@ -701,11 +713,11 @@ WHERE id = ?;
 func (h Handler) loadAgentRun(ctx context.Context, runID string) (*agentRunRecord, error) {
 	run := agentRunRecord{}
 	err := h.db.QueryRowContext(ctx, `
-SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, '')
+SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, ''), workflow_type, COALESCE(source_model_ids_json, ''), COALESCE(fusion_model_id, ''), grounding_enabled, COALESCE(council_config_json, '')
 FROM agent_runs
 WHERE id = ?
 LIMIT 1;
-`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError)
+`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError, &run.WorkflowType, &run.SourceModelIDsJSON, &run.FusionModelID, &run.GroundingEnabled, &run.CouncilConfigJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -1027,6 +1039,7 @@ func (h Handler) updateCouncilAssistantMessage(
 	agentSources []CouncilSourceResult,
 	agentAnalysis *CouncilAnalysis,
 	resultModelID string,
+	warnings []string,
 	agentRunID string,
 	desiredStatus string,
 ) error {
@@ -1051,6 +1064,12 @@ func (h Handler) updateCouncilAssistantMessage(
 		analysisJSON = string(analysisBytes)
 	}
 
+	var resultUsageJSON any
+	if usage != nil {
+		usageBytes, _ := json.Marshal(usage)
+		resultUsageJSON = string(usageBytes)
+	}
+
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -1064,6 +1083,7 @@ SET content = COALESCE(NULLIF(?, ''), content),
     agent_sources_json = COALESCE(?, agent_sources_json),
     agent_analysis_json = COALESCE(?, agent_analysis_json),
     agent_result_model_id = COALESCE(?, agent_result_model_id),
+    agent_result_usage_json = COALESCE(?, agent_result_usage_json),
     prompt_tokens = COALESCE(?, prompt_tokens),
     completion_tokens = COALESCE(?, completion_tokens),
     total_tokens = COALESCE(?, total_tokens),
@@ -1076,7 +1096,7 @@ SET content = COALESCE(NULLIF(?, ''), content),
     agent_run_id = COALESCE(?, agent_run_id),
     response_mode = 'agent'
 WHERE id = ? AND user_id = ?;
-`, content, traceJSON, sourcesJSON, analysisJSON, nullableString(resultModelID),
+`, content, traceJSON, sourcesJSON, analysisJSON, nullableString(resultModelID), resultUsageJSON,
 		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.PromptTokens }),
 		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.CompletionTokens }),
 		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.TotalTokens }),
@@ -1104,6 +1124,8 @@ VALUES (?, ?, ?, ?, ?, ?);
 			return err
 		}
 	}
+
+	_ = warnings
 
 	return tx.Commit()
 }
@@ -1197,17 +1219,21 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 		return
 	}
 
-	searchBudget, budgetErr := h.availableAgentSearchBudget(ctx)
-	if budgetErr != nil {
-		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to reserve Brave search budget"})
-		_ = writeSSEEvent(w, map[string]any{"type": "done"})
-		flusher.Flush()
-		_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, nil, "", runID, thinkingTraceStatusStopped)
-		return
+	searchBudget := 0
+	if input.Grounding {
+		var budgetErr error
+		searchBudget, budgetErr = h.availableAgentSearchBudget(ctx)
+		if budgetErr != nil {
+			_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to reserve Brave search budget"})
+			_ = writeSSEEvent(w, map[string]any{"type": "done"})
+			flusher.Flush()
+			_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusStopped)
+			return
+		}
 	}
 
 	minRequiredBudget := len(input.SourceModels) * 1
-	if searchBudget < minRequiredBudget && input.Grounding {
+	if input.Grounding && searchBudget < minRequiredBudget {
 		if err := h.insertAgentRun(ctx, agentRunRecord{
 			ID:                 runID,
 			UserID:             input.UserID,
@@ -1230,7 +1256,7 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 		})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
-		_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, nil, "", runID, thinkingTraceStatusStopped)
+		_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusStopped)
 		return
 	}
 
@@ -1279,7 +1305,7 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 	_ = writeSSEEvent(w, map[string]any{"type": "done"})
 	flusher.Flush()
 
-	if err := h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, nil, "", runID, thinkingTraceStatusRunning); err != nil {
+	if err := h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusRunning); err != nil {
 		log.Printf("council placeholder update failed: run_id=%s err=%v", runID, err)
 	}
 	if err := h.enqueueAgentRun(context.Background(), runID); err != nil {
@@ -1302,7 +1328,7 @@ func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	row := h.db.QueryRowContext(r.Context(), `
-		SELECT id, status, source_results_json, fusion_analysis_json, fusion_result_json, public_status_json 
+		SELECT id, status, source_results_json, fusion_analysis_json, fusion_result_json, public_status_json, completed_sources, degraded_sources, failed_sources
 		FROM agent_runs 
 		WHERE id = ? AND user_id = ?
 	`, runID, user.ID)
@@ -1313,10 +1339,13 @@ func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 		sourceResultsJSON sql.NullString
 		analysisJSON      sql.NullString
 		resultJSON        sql.NullString
-		warningsJSON      sql.NullString
+		publicStatusJSON  sql.NullString
+		completedSources  int
+		degradedSources   int
+		failedSources     int
 	)
 
-	if err := row.Scan(&id, &status, &sourceResultsJSON, &analysisJSON, &resultJSON, &warningsJSON); err != nil {
+	if err := row.Scan(&id, &status, &sourceResultsJSON, &analysisJSON, &resultJSON, &publicStatusJSON, &completedSources, &degradedSources, &failedSources); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "not_found", "agent run not found")
 			return
@@ -1326,20 +1355,64 @@ func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var resp AgentRunStatusResponse
+	if publicStatusJSON.Valid && publicStatusJSON.String != "" {
+		_ = json.Unmarshal([]byte(publicStatusJSON.String), &resp)
+	}
 	resp.ID = id
 	resp.Status = status
-	if sourceResultsJSON.Valid && sourceResultsJSON.String != "" {
+	if len(resp.SourceResults) == 0 && sourceResultsJSON.Valid && sourceResultsJSON.String != "" {
 		_ = json.Unmarshal([]byte(sourceResultsJSON.String), &resp.SourceResults)
 	}
-	if analysisJSON.Valid && analysisJSON.String != "" {
+	if resp.Analysis == nil && analysisJSON.Valid && analysisJSON.String != "" {
 		_ = json.Unmarshal([]byte(analysisJSON.String), &resp.Analysis)
 	}
-	if resultJSON.Valid && resultJSON.String != "" {
+	if resp.Result == nil && resultJSON.Valid && resultJSON.String != "" {
 		_ = json.Unmarshal([]byte(resultJSON.String), &resp.Result)
 	}
-	if warningsJSON.Valid && warningsJSON.String != "" {
-		_ = json.Unmarshal([]byte(warningsJSON.String), &resp.Warnings)
-	}
+	resp.CompletedSources = completedSources
+	resp.DegradedSources = degradedSources
+	resp.FailedSources = failedSources
 
 	writeJSON(w, http.StatusOK, resp)
+}
+
+func (h Handler) persistCouncilPublicStatus(ctx context.Context, runID string, status AgentRunStatusResponse) error {
+	var existingRaw sql.NullString
+	if err := h.db.QueryRowContext(ctx, `SELECT public_status_json FROM agent_runs WHERE id = ?`, runID).Scan(&existingRaw); err == nil && existingRaw.Valid && existingRaw.String != "" {
+		var existing AgentRunStatusResponse
+		if json.Unmarshal([]byte(existingRaw.String), &existing) == nil {
+			if len(status.SourceResults) == 0 {
+				status.SourceResults = existing.SourceResults
+			}
+			if status.Analysis == nil {
+				status.Analysis = existing.Analysis
+			}
+			if status.Result == nil {
+				status.Result = existing.Result
+			}
+			if len(status.Warnings) == 0 {
+				status.Warnings = existing.Warnings
+			}
+			if status.CompletedSources == 0 {
+				status.CompletedSources = existing.CompletedSources
+			}
+			if status.DegradedSources == 0 {
+				status.DegradedSources = existing.DegradedSources
+			}
+			if status.FailedSources == 0 {
+				status.FailedSources = existing.FailedSources
+			}
+		}
+	}
+	status.ID = runID
+	payload, err := json.Marshal(status)
+	if err != nil {
+		return err
+	}
+	_, err = h.db.ExecContext(ctx, `
+UPDATE agent_runs
+SET public_status_json = ?, updated_at = CURRENT_TIMESTAMP
+WHERE id = ?;
+`, string(payload), runID)
+	return err
 }
