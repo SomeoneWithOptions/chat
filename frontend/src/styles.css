@@ -2847,6 +2847,18 @@ code {
   margin-left: 2px;
 }
 
+.council-source-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-tertiary);
+  flex-shrink: 0;
+  transition: transform var(--duration-normal) var(--ease-out);
+}
+
+.council-source-chevron.open {
+  transform: rotate(180deg);
+}
+
 .council-source-body {
   padding: 16px;
   border-top: 1px solid var(--border);

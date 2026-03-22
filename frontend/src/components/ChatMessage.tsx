@@ -365,7 +365,7 @@ function CouncilSourceCard({
           />
         </div>
         <svg
-          className={`chevron ${expanded ? "open" : ""}`}
+          className={`council-source-chevron ${expanded ? "open" : ""}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
