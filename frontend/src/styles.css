@@ -2755,42 +2755,61 @@ code {
   position: relative;
 }
 
+/* Trigger button */
 .council-dropdown-trigger {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
+  gap: 5px;
   background: transparent;
-  border: 1px dashed var(--border);
+  border: 1px dashed rgba(255, 255, 255, 0.2);
   border-radius: var(--radius-sm);
   color: var(--text-secondary);
   font-size: 12px;
-  font-family: var(--font-body);
-  padding: 4px 8px;
+  font-family: inherit;
+  padding: 4px 10px;
   cursor: pointer;
   outline: none;
-  transition: border-color var(--duration-fast, 150ms) ease;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+  white-space: nowrap;
 }
 
 .council-dropdown-trigger:hover:not(:disabled) {
-  border-color: var(--text-tertiary);
+  border-color: rgba(255, 255, 255, 0.35);
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.04);
 }
 
 .council-dropdown-trigger:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
+/* Solid variant (Fusion model selector) */
 .council-dropdown-trigger--solid {
   border-style: solid;
-  border-color: var(--border);
+  border-color: rgba(255, 255, 255, 0.12);
   color: var(--text-primary);
-  background: var(--surface-elevated);
+  background: rgba(255, 255, 255, 0.06);
 }
 
+.council-dropdown-trigger--solid:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.09);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+/* Open state */
 .council-dropdown-trigger.open {
-  border-color: var(--border-focus, var(--accent));
+  border-color: var(--accent);
+  color: var(--text-primary);
+  background: rgba(0, 166, 226, 0.08);
 }
 
+.council-dropdown-trigger--solid.open {
+  border-color: var(--accent);
+  background: rgba(0, 166, 226, 0.1);
+}
+
+/* Chevron icon */
 .council-dropdown-chevron {
   width: 10px;
   height: 10px;
@@ -2801,93 +2820,142 @@ code {
 
 .council-dropdown-trigger.open .council-dropdown-chevron {
   transform: rotate(180deg);
+  color: var(--accent);
 }
 
+/* ── Panel — opens UPWARD to avoid covering the composer ── */
 .council-dropdown-panel {
   position: absolute;
-  top: calc(100% + 4px);
+  /* Open upward: sits above the trigger */
+  bottom: calc(100% + 6px);
   left: 0;
-  z-index: 100;
-  width: min(280px, 90vw);
-  background: var(--surface-elevated);
-  border: 1px solid var(--border);
+  z-index: 200;
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  /* Solid opaque background — critical */
+  background: #222222;
+  border: 1px solid rgba(255, 255, 255, 0.12);
   border-radius: var(--radius-md);
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
-  overflow: hidden;
+  box-shadow: 0 -4px 6px rgba(0,0,0,0.15), 0 16px 40px rgba(0, 0, 0, 0.7);
   display: flex;
   flex-direction: column;
+  overflow: hidden;
+  animation: councilDropIn 140ms ease;
 }
 
+@keyframes councilDropIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Search input area */
 .council-dropdown-search-wrap {
-  padding: 8px 10px;
-  border-bottom: 1px solid var(--border);
+  padding: 10px 10px 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  background: #1e1e1e;
 }
 
 .council-dropdown-search {
   width: 100%;
   box-sizing: border-box;
-  background: var(--surface-primary);
-  border: 1px solid var(--border);
+  background: #2a2a2a;
+  border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: var(--radius-sm);
-  color: var(--text-primary);
-  font-size: 12px;
-  font-family: var(--font-body);
-  padding: 5px 8px;
+  color: #e8e8e8;
+  font-size: 13px;
+  font-family: inherit;
+  padding: 7px 10px;
   outline: none;
+  transition: border-color 120ms ease;
 }
 
 .council-dropdown-search:focus {
-  border-color: var(--border-focus, var(--accent));
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(0, 166, 226, 0.15);
 }
 
 .council-dropdown-search::placeholder {
-  color: var(--text-tertiary);
+  color: #71717a;
 }
 
+/* Scrollable model list */
 .council-dropdown-list {
   overflow-y: auto;
-  max-height: 260px;
+  max-height: 280px;
+  padding: 4px 0 6px;
+  /* Custom scrollbar */
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255,255,255,0.15) transparent;
 }
 
+.council-dropdown-list::-webkit-scrollbar {
+  width: 4px;
+}
+
+.council-dropdown-list::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.council-dropdown-list::-webkit-scrollbar-thumb {
+  background: rgba(255,255,255,0.15);
+  border-radius: 2px;
+}
+
+/* Provider group header */
 .council-dropdown-group-header {
   font-size: 10px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-tertiary);
-  padding: 8px 10px 4px;
+  letter-spacing: 0.08em;
+  color: #71717a;
+  padding: 10px 12px 4px;
+  user-select: none;
 }
 
+/* First group: less top padding */
+.council-dropdown-list > div:first-child .council-dropdown-group-header {
+  padding-top: 4px;
+}
+
+/* Model option button */
 .council-dropdown-option {
   display: block;
   width: 100%;
   text-align: left;
   background: none;
   border: none;
-  padding: 6px 10px;
-  font-size: 12px;
-  font-family: var(--font-body);
-  color: var(--text-primary);
+  padding: 7px 12px;
+  font-size: 13px;
+  font-family: inherit;
+  color: #e8e8e8;
   cursor: pointer;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: background 80ms ease;
 }
 
 .council-dropdown-option:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
+  color: #ffffff;
 }
 
+.council-dropdown-option:active:not(:disabled) {
+  background: rgba(0, 166, 226, 0.12);
+}
+
+/* Already-selected source models: greyed out */
 .council-dropdown-option--disabled {
-  opacity: 0.4;
+  opacity: 0.35;
   cursor: not-allowed;
   pointer-events: none;
 }
 
+/* Empty state */
 .council-dropdown-empty {
-  padding: 12px 10px;
-  font-size: 12px;
-  color: var(--text-tertiary);
+  padding: 16px 12px;
+  font-size: 13px;
+  color: #71717a;
   text-align: center;
 }
 
