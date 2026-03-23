@@ -47,12 +47,8 @@ export default function ModelSelector({
 
   const filteredModels = models.filter((model) => {
     if (!search.trim()) return true;
-    const q = search.toLowerCase();
-    return (
-      model.name.toLowerCase().includes(q) ||
-      model.id.toLowerCase().includes(q) ||
-      model.provider.toLowerCase().includes(q)
-    );
+    const haystack = `${model.name} ${model.id} ${model.provider}`.toLowerCase();
+    return search.trim().toLowerCase().split(/\s+/).every((token) => haystack.includes(token));
   });
 
   useEffect(() => {

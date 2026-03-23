@@ -28,11 +28,10 @@ function groupAndSort(models: Model[], search: string): ModelGroup[] {
   const query = search.trim().toLowerCase();
 
   const filtered = query
-    ? models.filter(
-        (m) =>
-          m.name.toLowerCase().includes(query) ||
-          m.provider.toLowerCase().includes(query)
-      )
+    ? models.filter((m) => {
+        const haystack = `${m.name} ${m.provider}`.toLowerCase();
+        return query.split(/\s+/).every((token) => haystack.includes(token));
+      })
     : models;
 
   const providerMap = new Map<string, Model[]>();
