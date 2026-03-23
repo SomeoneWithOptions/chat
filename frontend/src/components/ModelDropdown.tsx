@@ -146,8 +146,8 @@ export default function ModelDropdown({
       : placeholder;
 
   const triggerClass = [
-    'council-dropdown-trigger',
-    variant === 'solid' ? 'council-dropdown-trigger--solid' : '',
+    'fusion-dropdown-trigger',
+    variant === 'solid' ? 'fusion-dropdown-trigger--solid' : '',
     isOpen ? 'open' : '',
   ]
     .filter(Boolean)
@@ -158,7 +158,7 @@ export default function ModelDropdown({
       ? createPortal(
           <div
             ref={panelRef}
-            className={`council-dropdown-panel${panelPos.openUp ? ' council-dropdown-panel--up' : ' council-dropdown-panel--down'}`}
+            className={`fusion-dropdown-panel${panelPos.openUp ? ' fusion-dropdown-panel--up' : ' fusion-dropdown-panel--down'}`}
             style={{
               position: 'fixed',
               top: panelPos.top,
@@ -167,11 +167,11 @@ export default function ModelDropdown({
               zIndex: 9999,
             }}
           >
-            <div className="council-dropdown-search-wrap">
+            <div className="fusion-dropdown-search-wrap">
               <input
                 ref={searchRef}
                 type="text"
-                className="council-dropdown-search"
+                className="fusion-dropdown-search"
                 placeholder="Search models..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
@@ -180,20 +180,20 @@ export default function ModelDropdown({
                 }}
               />
             </div>
-            <div className="council-dropdown-list">
+            <div className="fusion-dropdown-list">
               {groups.length === 0 && (
-                <div className="council-dropdown-empty">No models found</div>
+                <div className="fusion-dropdown-empty">No models found</div>
               )}
               {groups.map(({ provider, models: providerModels }) => (
                 <div key={provider}>
-                  <div className="council-dropdown-group-header">{provider}</div>
+                  <div className="fusion-dropdown-group-header">{provider}</div>
                   {providerModels.map((model) => {
                     const isDisabled = disabledIds.includes(model.id);
                     return (
                       <button
                         key={model.id}
                         type="button"
-                        className={`council-dropdown-option${isDisabled ? ' council-dropdown-option--disabled' : ''}`}
+                        className={`fusion-dropdown-option${isDisabled ? ' fusion-dropdown-option--disabled' : ''}`}
                         onClick={() => !isDisabled && handleSelect(model.id)}
                         disabled={isDisabled}
                       >
@@ -222,7 +222,7 @@ export default function ModelDropdown({
       >
         <span>{triggerLabel}</span>
         <svg
-          className="council-dropdown-chevron"
+          className="fusion-dropdown-chevron"
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"

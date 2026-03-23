@@ -42,7 +42,7 @@ type Handler struct {
 	files          fileObjectStore
 }
 
-type agentSummary struct {
+type fusionSummary struct {
 	Role        string   `json:"role"`
 	Summary     string   `json:"summary"`
 	Objections  []string `json:"objections,omitempty"`
@@ -122,11 +122,11 @@ type modelResponse struct {
 }
 
 type modelPreferencesResponse struct {
-	LastUsedModelID             string   `json:"lastUsedModelId"`
-	LastUsedDeepResearchModelID string   `json:"lastUsedDeepResearchModelId"`
-	LastUsedAgentModelID        string   `json:"lastUsedAgentModelId"`
-	LastUsedAgentSourceModelIDs []string `json:"lastUsedAgentSourceModelIds,omitempty"`
-	LastUsedAgentFusionModelID  string   `json:"lastUsedAgentFusionModelId,omitempty"`
+	LastUsedModelID              string   `json:"lastUsedModelId"`
+	LastUsedDeepResearchModelID  string   `json:"lastUsedDeepResearchModelId"`
+	LastUsedFusionModeModelID    string   `json:"lastUsedFusionModeModelId"`
+	LastUsedFusionSourceModelIDs []string `json:"lastUsedFusionSourceModelIds,omitempty"`
+	LastUsedFusionModelID        string   `json:"lastUsedFusionModelId,omitempty"`
 }
 
 type reasoningPresetResponse struct {
@@ -436,7 +436,7 @@ func (h Handler) UpdateModelPreferences(w http.ResponseWriter, r *http.Request) 
 
 	mode := strings.TrimSpace(req.Mode)
 	if !isValidResponseMode(mode) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, agent")
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, fusion")
 		return
 	}
 
@@ -525,7 +525,7 @@ func (h Handler) UpdateModelReasoningPreset(w http.ResponseWriter, r *http.Reque
 
 	mode := strings.TrimSpace(req.Mode)
 	if !isValidResponseMode(mode) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, agent")
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, fusion")
 		return
 	}
 
@@ -584,25 +584,25 @@ type usageResponse struct {
 }
 
 type messageResponse struct {
-	ID                  string                `json:"id"`
-	ConversationID      string                `json:"conversationId"`
-	Role                string                `json:"role"`
-	Content             string                `json:"content"`
-	ReasoningContent    *string               `json:"reasoningContent,omitempty"`
-	ThinkingTrace       *thinkingTrace        `json:"thinkingTrace,omitempty"`
-	ModelID             *string               `json:"modelId,omitempty"`
-	Usage               *usageResponse        `json:"usage,omitempty"`
-	GroundingEnabled    bool                  `json:"groundingEnabled"`
-	DeepResearchEnabled bool                  `json:"deepResearchEnabled"`
-	ResponseMode        string                `json:"responseMode"`
-	AgentSummaries      []agentSummary        `json:"agentSummaries,omitempty"`
-	AgentSources        []CouncilSourceResult `json:"agentSources,omitempty"`
-	AgentAnalysis       *CouncilAnalysis      `json:"agentAnalysis,omitempty"`
-	AgentResultModelID  string                `json:"agentResultModelId,omitempty"`
-	AgentResultUsage    *usageResponse        `json:"agentResultUsage,omitempty"`
-	AgentRunID          string                `json:"agentRunId,omitempty"`
-	Citations           []citationResponse    `json:"citations"`
-	CreatedAt           string                `json:"createdAt"`
+	ID                  string               `json:"id"`
+	ConversationID      string               `json:"conversationId"`
+	Role                string               `json:"role"`
+	Content             string               `json:"content"`
+	ReasoningContent    *string              `json:"reasoningContent,omitempty"`
+	ThinkingTrace       *thinkingTrace       `json:"thinkingTrace,omitempty"`
+	ModelID             *string              `json:"modelId,omitempty"`
+	Usage               *usageResponse       `json:"usage,omitempty"`
+	GroundingEnabled    bool                 `json:"groundingEnabled"`
+	DeepResearchEnabled bool                 `json:"deepResearchEnabled"`
+	ResponseMode        string               `json:"responseMode"`
+	FusionSummaries     []fusionSummary      `json:"fusionSummaries,omitempty"`
+	FusionSources       []FusionSourceResult `json:"fusionSources,omitempty"`
+	FusionAnalysis      *FusionAnalysis      `json:"fusionAnalysis,omitempty"`
+	FusionResultModelID string               `json:"fusionResultModelId,omitempty"`
+	FusionResultUsage   *usageResponse       `json:"fusionResultUsage,omitempty"`
+	FusionRunID         string               `json:"fusionRunId,omitempty"`
+	Citations           []citationResponse   `json:"citations"`
+	CreatedAt           string               `json:"createdAt"`
 }
 
 func (h Handler) CreateConversation(w http.ResponseWriter, r *http.Request) {
@@ -704,7 +704,7 @@ func (h Handler) ListConversationMessages(w http.ResponseWriter, r *http.Request
 	}
 
 	rows, err := h.db.QueryContext(r.Context(), `
-SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.response_mode, m.agent_summaries_json, m.agent_sources_json, m.agent_analysis_json, m.agent_result_model_id, m.agent_result_usage_json, m.agent_run_id, m.created_at
+SELECT m.id, m.conversation_id, m.role, m.content, m.reasoning_content, m.thinking_trace_json, m.model_id, m.prompt_tokens, m.completion_tokens, m.total_tokens, m.reasoning_tokens, m.cost_microusd, m.byok_inference_cost_microusd, m.tokens_per_second, m.usage_model_id, m.usage_provider_name, m.grounding_enabled, m.deep_research_enabled, m.response_mode, m.fusion_summaries_json, m.fusion_sources_json, m.fusion_analysis_json, m.fusion_result_model_id, m.fusion_result_usage_json, m.fusion_run_id, m.created_at
 FROM messages m
 JOIN conversations c ON c.id = m.conversation_id
 WHERE m.conversation_id = ? AND c.user_id = ?
@@ -732,12 +732,12 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		var usageModelID sql.NullString
 		var usageProviderName sql.NullString
 		var responseMode sql.NullString
-		var agentSummariesJSON sql.NullString
-		var agentSourcesJSON sql.NullString
-		var agentAnalysisJSON sql.NullString
-		var agentResultModelID sql.NullString
-		var agentResultUsageJSON sql.NullString
-		var agentRunID sql.NullString
+		var fusionSummariesJSON sql.NullString
+		var fusionSourcesJSON sql.NullString
+		var fusionAnalysisJSON sql.NullString
+		var fusionResultModelID sql.NullString
+		var fusionResultUsageJSON sql.NullString
+		var fusionRunID sql.NullString
 		var groundingEnabled int
 		var deepResearchEnabled int
 
@@ -761,12 +761,12 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			&groundingEnabled,
 			&deepResearchEnabled,
 			&responseMode,
-			&agentSummariesJSON,
-			&agentSourcesJSON,
-			&agentAnalysisJSON,
-			&agentResultModelID,
-			&agentResultUsageJSON,
-			&agentRunID,
+			&fusionSummariesJSON,
+			&fusionSourcesJSON,
+			&fusionAnalysisJSON,
+			&fusionResultModelID,
+			&fusionResultUsageJSON,
+			&fusionRunID,
 			&message.CreatedAt,
 		); err != nil {
 			writeError(w, http.StatusInternalServerError, "db_error", "failed to parse messages")
@@ -796,23 +796,23 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 		message.GroundingEnabled = groundingEnabled == 1
 		message.DeepResearchEnabled = deepResearchEnabled == 1
 		message.ResponseMode = normalizeResponseMode(responseMode.String, message.DeepResearchEnabled)
-		if agentSummaries, ok := decodeAgentSummariesJSON(agentSummariesJSON.String); ok {
-			message.AgentSummaries = agentSummaries
+		if fusionSummaries, ok := decodeFusionSummariesJSON(fusionSummariesJSON.String); ok {
+			message.FusionSummaries = fusionSummaries
 		}
-		if agentSourcesJSON.Valid && agentSourcesJSON.String != "" {
-			_ = json.Unmarshal([]byte(agentSourcesJSON.String), &message.AgentSources)
+		if fusionSourcesJSON.Valid && fusionSourcesJSON.String != "" {
+			_ = json.Unmarshal([]byte(fusionSourcesJSON.String), &message.FusionSources)
 		}
-		if agentAnalysisJSON.Valid && agentAnalysisJSON.String != "" {
-			_ = json.Unmarshal([]byte(agentAnalysisJSON.String), &message.AgentAnalysis)
+		if fusionAnalysisJSON.Valid && fusionAnalysisJSON.String != "" {
+			_ = json.Unmarshal([]byte(fusionAnalysisJSON.String), &message.FusionAnalysis)
 		}
-		message.AgentResultModelID = strings.TrimSpace(agentResultModelID.String)
-		if agentResultUsageJSON.Valid && agentResultUsageJSON.String != "" {
-			_ = json.Unmarshal([]byte(agentResultUsageJSON.String), &message.AgentResultUsage)
-		} else if message.ResponseMode == "agent" && message.AgentResultModelID != "" && message.Usage != nil {
+		message.FusionResultModelID = strings.TrimSpace(fusionResultModelID.String)
+		if fusionResultUsageJSON.Valid && fusionResultUsageJSON.String != "" {
+			_ = json.Unmarshal([]byte(fusionResultUsageJSON.String), &message.FusionResultUsage)
+		} else if message.ResponseMode == "fusion" && message.FusionResultModelID != "" && message.Usage != nil {
 			usageCopy := *message.Usage
-			message.AgentResultUsage = &usageCopy
+			message.FusionResultUsage = &usageCopy
 		}
-		message.AgentRunID = strings.TrimSpace(agentRunID.String)
+		message.FusionRunID = strings.TrimSpace(fusionRunID.String)
 		message.Citations = make([]citationResponse, 0)
 		messages = append(messages, message)
 	}
@@ -962,18 +962,18 @@ WHERE user_id = ?;
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
 }
 
-type CouncilSourceSpec struct {
+type FusionSourceSpec struct {
 	ModelID         string `json:"modelId"`
 	ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
 
-type CouncilRunConfig struct {
-	SourceModels []CouncilSourceSpec `json:"sourceModels"`
-	FusionModel  CouncilSourceSpec   `json:"fusionModel"`
-	Grounding    bool                `json:"grounding"`
+type FusionRunConfig struct {
+	SourceModels []FusionSourceSpec `json:"sourceModels"`
+	FusionModel  FusionSourceSpec   `json:"fusionModel"`
+	Grounding    bool               `json:"grounding"`
 }
 
-type CouncilSourceResult struct {
+type FusionSourceResult struct {
 	ModelID          string             `json:"modelId"`
 	Status           string             `json:"status"`
 	Response         string             `json:"response,omitempty"`
@@ -987,60 +987,60 @@ type CouncilSourceResult struct {
 	Error            string             `json:"error,omitempty"`
 }
 
-type CouncilAnalysisItem struct {
+type FusionAnalysisItem struct {
 	Point        string   `json:"point"`
 	SourceModels []string `json:"sourceModels,omitempty"`
 }
 
-type CouncilDifferencePosition struct {
+type FusionDifferencePosition struct {
 	SourceModel string `json:"sourceModel"`
 	Summary     string `json:"summary"`
 }
 
-type CouncilDifferenceGroup struct {
-	Topic     string                      `json:"topic"`
-	Positions []CouncilDifferencePosition `json:"positions"`
+type FusionDifferenceGroup struct {
+	Topic     string                     `json:"topic"`
+	Positions []FusionDifferencePosition `json:"positions"`
 }
 
-type CouncilAnalysis struct {
-	Agreement       []CouncilAnalysisItem    `json:"agreement"`
-	KeyDifferences  []CouncilDifferenceGroup `json:"keyDifferences"`
-	PartialCoverage []CouncilAnalysisItem    `json:"partialCoverage"`
-	UniqueInsights  []CouncilAnalysisItem    `json:"uniqueInsights"`
-	BlindSpots      []CouncilAnalysisItem    `json:"blindSpots"`
+type FusionAnalysis struct {
+	Agreement       []FusionAnalysisItem    `json:"agreement"`
+	KeyDifferences  []FusionDifferenceGroup `json:"keyDifferences"`
+	PartialCoverage []FusionAnalysisItem    `json:"partialCoverage"`
+	UniqueInsights  []FusionAnalysisItem    `json:"uniqueInsights"`
+	BlindSpots      []FusionAnalysisItem    `json:"blindSpots"`
 }
 
-type CouncilFinalResult struct {
+type FusionFinalResult struct {
 	ModelID          string         `json:"modelId"`
 	Response         string         `json:"response"`
 	ReasoningContent string         `json:"reasoningContent,omitempty"`
 	Usage            *usageResponse `json:"usage,omitempty"`
 }
 
-type AgentRunStatusResponse struct {
-	ID               string                `json:"id"`
-	Status           string                `json:"status"`
-	SourceResults    []CouncilSourceResult `json:"sourceResults,omitempty"`
-	Analysis         *CouncilAnalysis      `json:"analysis,omitempty"`
-	Result           *CouncilFinalResult   `json:"result,omitempty"`
-	Warnings         []string              `json:"warnings,omitempty"`
-	CompletedSources int                   `json:"completedSources,omitempty"`
-	DegradedSources  int                   `json:"degradedSources,omitempty"`
-	FailedSources    int                   `json:"failedSources,omitempty"`
+type FusionRunStatusResponse struct {
+	ID               string               `json:"id"`
+	Status           string               `json:"status"`
+	SourceResults    []FusionSourceResult `json:"sourceResults,omitempty"`
+	Analysis         *FusionAnalysis      `json:"analysis,omitempty"`
+	Result           *FusionFinalResult   `json:"result,omitempty"`
+	Warnings         []string             `json:"warnings,omitempty"`
+	CompletedSources int                  `json:"completedSources,omitempty"`
+	DegradedSources  int                  `json:"degradedSources,omitempty"`
+	FailedSources    int                  `json:"failedSources,omitempty"`
 }
 
 type chatMessageRequest struct {
-	ConversationID  string              `json:"conversationId"`
-	EditMessageID   string              `json:"editMessageId"`
-	Message         string              `json:"message"`
-	ModelID         string              `json:"modelId"`
-	Mode            string              `json:"mode"`
-	ReasoningEffort string              `json:"reasoningEffort"`
-	Grounding       *bool               `json:"grounding"`
-	DeepResearch    *bool               `json:"deepResearch"`
-	FileIDs         []string            `json:"fileIds"`
-	SourceModels    []CouncilSourceSpec `json:"sourceModels,omitempty"`
-	FusionModel     *CouncilSourceSpec  `json:"fusionModel,omitempty"`
+	ConversationID  string             `json:"conversationId"`
+	EditMessageID   string             `json:"editMessageId"`
+	Message         string             `json:"message"`
+	ModelID         string             `json:"modelId"`
+	Mode            string             `json:"mode"`
+	ReasoningEffort string             `json:"reasoningEffort"`
+	Grounding       *bool              `json:"grounding"`
+	DeepResearch    *bool              `json:"deepResearch"`
+	FileIDs         []string           `json:"fileIds"`
+	SourceModels    []FusionSourceSpec `json:"sourceModels,omitempty"`
+	FusionModel     *FusionSourceSpec  `json:"fusionModel,omitempty"`
 }
 
 func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
@@ -1092,11 +1092,11 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 
 	responseMode := normalizeRequestedResponseMode(req.Mode, req.DeepResearch)
 	if !isValidResponseMode(responseMode) {
-		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, agent")
+		writeError(w, http.StatusBadRequest, "invalid_request", "mode must be one of: chat, deep_research, fusion")
 		return
 	}
-	if responseMode == "agent" && !h.cfg.AgentModeEnabled {
-		writeError(w, http.StatusBadRequest, "invalid_request", "agent mode is disabled")
+	if responseMode == "fusion" && !h.cfg.FusionModeEnabled {
+		writeError(w, http.StatusBadRequest, "invalid_request", "fusion mode is disabled")
 		return
 	}
 
@@ -1109,11 +1109,11 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 	modelID := fallback(req.ModelID, h.cfg.OpenRouterDefaultModel)
 	var reasoningEffort string
 
-	isCouncil := responseMode == "agent" && len(req.SourceModels) > 0
-	if responseMode == "agent" && !isCouncil {
+	isFusion := responseMode == "fusion" && len(req.SourceModels) > 0
+	if responseMode == "fusion" && !isFusion {
 		grounding = true
 	}
-	if isCouncil {
+	if isFusion {
 		if req.FusionModel == nil {
 			writeError(w, http.StatusBadRequest, "invalid_request", "fusionModel is required when sourceModels is provided")
 			return
@@ -1146,7 +1146,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		}
 		req.FusionModel.ReasoningEffort = resolvedFusionEffort
 
-		if _, err := h.persistCouncilModelSelection(r.Context(), user.ID, req.SourceModels, *req.FusionModel); err != nil {
+		if _, err := h.persistFusionModelSelection(r.Context(), user.ID, req.SourceModels, *req.FusionModel); err != nil {
 			writeError(w, http.StatusInternalServerError, "db_error", "failed to persist model preferences")
 			return
 		}
@@ -1253,9 +1253,9 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 		})
 		return
 	}
-	if responseMode == "agent" {
-		if isCouncil {
-			h.streamCouncilQueuedResponse(r.Context(), w, flusher, councilQueuedStreamInput{
+	if responseMode == "fusion" {
+		if isFusion {
+			h.streamMultiModelFusionQueuedResponse(r.Context(), w, flusher, multiModelFusionQueuedStreamInput{
 				UserID:         user.ID,
 				UserMessageID:  userMessageID,
 				ConversationID: conversationID,
@@ -1269,7 +1269,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		h.streamAgentQueuedResponse(r.Context(), w, flusher, agentQueuedStreamInput{
+		h.streamFusionQueuedResponse(r.Context(), w, flusher, fusionQueuedStreamInput{
 			UserID:          user.ID,
 			UserMessageID:   userMessageID,
 			ConversationID:  conversationID,
@@ -1934,7 +1934,7 @@ func (h Handler) insertMessageWithCitations(
 	citations []citationResponse,
 	thinkingTrace *thinkingTrace,
 	usage *messageUsage,
-	agentSummaries []agentSummary,
+	fusionSummaries []fusionSummary,
 ) (string, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1961,7 +1961,7 @@ func (h Handler) insertMessageWithCitations(
 	if err != nil {
 		return "", err
 	}
-	agentSummariesJSON, err := encodeAgentSummariesJSON(agentSummaries)
+	fusionSummariesJSON, err := encodeFusionSummariesJSON(fusionSummaries)
 	if err != nil {
 		return "", err
 	}
@@ -1998,10 +1998,10 @@ INSERT INTO messages (
   grounding_enabled,
   deep_research_enabled,
   response_mode,
-  agent_summaries_json
+  fusion_summaries_json
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), thinkingTraceJSON, nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled), normalizeResponseMode(responseMode, deepResearchEnabled), agentSummariesJSON); err != nil {
+`, messageID, conversationID, userID, role, content, nullableString(reasoningContent), thinkingTraceJSON, nullableModelID, promptTokensValue, completionTokensValue, totalTokensValue, reasoningTokensValue, costMicrosUSDValue, byokInferenceCostMicrosUSDValue, tokensPerSecondValue, usageModelIDValue, usageProviderNameValue, boolToInt(groundingEnabled), boolToInt(deepResearchEnabled), normalizeResponseMode(responseMode, deepResearchEnabled), fusionSummariesJSON); err != nil {
 		return "", err
 	}
 
@@ -2053,30 +2053,30 @@ func (h Handler) persistModelSelection(ctx context.Context, userID, mode, modelI
 
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedAgentModelID sql.NullString
-	var lastUsedAgentSourceModelIDsJSON sql.NullString
-	var lastUsedAgentFusionModelID sql.NullString
+	var lastUsedFusionModeModelID sql.NullString
+	var lastUsedFusionSourceModelIDsJSON sql.NullString
+	var lastUsedFusionModelID sql.NullString
 	err = tx.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id, last_used_agent_source_model_ids_json, last_used_agent_fusion_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id, last_used_fusion_source_model_ids_json, last_used_fusion_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID, &lastUsedAgentSourceModelIDsJSON, &lastUsedAgentFusionModelID)
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID, &lastUsedFusionSourceModelIDsJSON, &lastUsedFusionModelID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, err
 	}
 
-	var lastUsedAgentSourceModelIDs []string
-	if lastUsedAgentSourceModelIDsJSON.Valid && lastUsedAgentSourceModelIDsJSON.String != "" {
-		_ = json.Unmarshal([]byte(lastUsedAgentSourceModelIDsJSON.String), &lastUsedAgentSourceModelIDs)
+	var lastUsedFusionSourceModelIDs []string
+	if lastUsedFusionSourceModelIDsJSON.Valid && lastUsedFusionSourceModelIDsJSON.String != "" {
+		_ = json.Unmarshal([]byte(lastUsedFusionSourceModelIDsJSON.String), &lastUsedFusionSourceModelIDs)
 	}
 
 	preferences := modelPreferencesResponse{
-		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
-		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
-		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
-		LastUsedAgentSourceModelIDs: lastUsedAgentSourceModelIDs,
-		LastUsedAgentFusionModelID:  strings.TrimSpace(lastUsedAgentFusionModelID.String),
+		LastUsedModelID:              strings.TrimSpace(lastUsedModelID.String),
+		LastUsedDeepResearchModelID:  strings.TrimSpace(lastUsedDeepResearchModelID.String),
+		LastUsedFusionModeModelID:    strings.TrimSpace(lastUsedFusionModeModelID.String),
+		LastUsedFusionSourceModelIDs: lastUsedFusionSourceModelIDs,
+		LastUsedFusionModelID:        strings.TrimSpace(lastUsedFusionModelID.String),
 	}
 
 	switch mode {
@@ -2085,19 +2085,19 @@ LIMIT 1;
 		if preferences.LastUsedDeepResearchModelID == "" {
 			preferences.LastUsedDeepResearchModelID = resolvedModelID
 		}
-		if preferences.LastUsedAgentModelID == "" {
-			preferences.LastUsedAgentModelID = resolvedModelID
+		if preferences.LastUsedFusionModeModelID == "" {
+			preferences.LastUsedFusionModeModelID = resolvedModelID
 		}
 	case "deep_research":
 		preferences.LastUsedDeepResearchModelID = resolvedModelID
 		if preferences.LastUsedModelID == "" {
 			preferences.LastUsedModelID = resolvedModelID
 		}
-		if preferences.LastUsedAgentModelID == "" {
-			preferences.LastUsedAgentModelID = resolvedModelID
+		if preferences.LastUsedFusionModeModelID == "" {
+			preferences.LastUsedFusionModeModelID = resolvedModelID
 		}
-	case "agent":
-		preferences.LastUsedAgentModelID = resolvedModelID
+	case "fusion":
+		preferences.LastUsedFusionModeModelID = resolvedModelID
 		if preferences.LastUsedModelID == "" {
 			preferences.LastUsedModelID = resolvedModelID
 		}
@@ -2117,7 +2117,7 @@ LIMIT 1;
 	return preferences, nil
 }
 
-func (h Handler) persistCouncilModelSelection(ctx context.Context, userID string, sourceModels []CouncilSourceSpec, fusionModel CouncilSourceSpec) (modelPreferencesResponse, error) {
+func (h Handler) persistFusionModelSelection(ctx context.Context, userID string, sourceModels []FusionSourceSpec, fusionModel FusionSourceSpec) (modelPreferencesResponse, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return modelPreferencesResponse{}, err
@@ -2140,34 +2140,34 @@ func (h Handler) persistCouncilModelSelection(ctx context.Context, userID string
 
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedAgentModelID sql.NullString
-	var lastUsedAgentSourceModelIDsJSON sql.NullString
-	var lastUsedAgentFusionModelID sql.NullString
+	var lastUsedFusionModeModelID sql.NullString
+	var lastUsedFusionSourceModelIDsJSON sql.NullString
+	var lastUsedFusionModelID sql.NullString
 	err = tx.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id, last_used_agent_source_model_ids_json, last_used_agent_fusion_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id, last_used_fusion_source_model_ids_json, last_used_fusion_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID, &lastUsedAgentSourceModelIDsJSON, &lastUsedAgentFusionModelID)
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID, &lastUsedFusionSourceModelIDsJSON, &lastUsedFusionModelID)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, err
 	}
 
-	var lastUsedAgentSourceModelIDs []string
-	if lastUsedAgentSourceModelIDsJSON.Valid && lastUsedAgentSourceModelIDsJSON.String != "" {
-		_ = json.Unmarshal([]byte(lastUsedAgentSourceModelIDsJSON.String), &lastUsedAgentSourceModelIDs)
+	var lastUsedFusionSourceModelIDs []string
+	if lastUsedFusionSourceModelIDsJSON.Valid && lastUsedFusionSourceModelIDsJSON.String != "" {
+		_ = json.Unmarshal([]byte(lastUsedFusionSourceModelIDsJSON.String), &lastUsedFusionSourceModelIDs)
 	}
 
 	preferences := modelPreferencesResponse{
-		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
-		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
-		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
-		LastUsedAgentSourceModelIDs: lastUsedAgentSourceModelIDs,
-		LastUsedAgentFusionModelID:  strings.TrimSpace(lastUsedAgentFusionModelID.String),
+		LastUsedModelID:              strings.TrimSpace(lastUsedModelID.String),
+		LastUsedDeepResearchModelID:  strings.TrimSpace(lastUsedDeepResearchModelID.String),
+		LastUsedFusionModeModelID:    strings.TrimSpace(lastUsedFusionModeModelID.String),
+		LastUsedFusionSourceModelIDs: lastUsedFusionSourceModelIDs,
+		LastUsedFusionModelID:        strings.TrimSpace(lastUsedFusionModelID.String),
 	}
 
-	preferences.LastUsedAgentSourceModelIDs = sourceModelIDs
-	preferences.LastUsedAgentFusionModelID = resolvedFusion
+	preferences.LastUsedFusionSourceModelIDs = sourceModelIDs
+	preferences.LastUsedFusionModelID = resolvedFusion
 
 	if preferences.LastUsedModelID == "" {
 		preferences.LastUsedModelID = resolvedFusion
@@ -2175,8 +2175,8 @@ LIMIT 1;
 	if preferences.LastUsedDeepResearchModelID == "" {
 		preferences.LastUsedDeepResearchModelID = resolvedFusion
 	}
-	if preferences.LastUsedAgentModelID == "" {
-		preferences.LastUsedAgentModelID = resolvedFusion
+	if preferences.LastUsedFusionModeModelID == "" {
+		preferences.LastUsedFusionModeModelID = resolvedFusion
 	}
 
 	if err := upsertUserModelPreferences(ctx, tx, userID, preferences); err != nil {
@@ -2281,13 +2281,13 @@ ORDER BY f.created_at DESC, f.model_id ASC;
 func (h Handler) readUserModelPreferences(ctx context.Context, userID string) (modelPreferencesResponse, error) {
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedAgentModelID sql.NullString
+	var lastUsedFusionModeModelID sql.NullString
 	err := h.db.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID)
+`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, nil
 	}
@@ -2298,7 +2298,7 @@ LIMIT 1;
 	return modelPreferencesResponse{
 		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
 		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
-		LastUsedAgentModelID:        strings.TrimSpace(lastUsedAgentModelID.String),
+		LastUsedFusionModeModelID:   strings.TrimSpace(lastUsedFusionModeModelID.String),
 	}, nil
 }
 
@@ -2398,34 +2398,34 @@ LIMIT 1;
 func upsertUserModelPreferences(ctx context.Context, tx *sql.Tx, userID string, preferences modelPreferencesResponse) error {
 	normalModelID := nullableString(preferences.LastUsedModelID)
 	deepModelID := nullableString(preferences.LastUsedDeepResearchModelID)
-	agentModelID := nullableString(preferences.LastUsedAgentModelID)
+	fusionModeModelID := nullableString(preferences.LastUsedFusionModeModelID)
 
 	var sourcesJSON sql.NullString
-	if len(preferences.LastUsedAgentSourceModelIDs) > 0 {
-		b, _ := json.Marshal(preferences.LastUsedAgentSourceModelIDs)
+	if len(preferences.LastUsedFusionSourceModelIDs) > 0 {
+		b, _ := json.Marshal(preferences.LastUsedFusionSourceModelIDs)
 		sourcesJSON = sql.NullString{String: string(b), Valid: true}
 	}
-	fusionModelID := nullableString(preferences.LastUsedAgentFusionModelID)
+	fusionModelID := nullableString(preferences.LastUsedFusionModelID)
 
 	_, err := tx.ExecContext(ctx, `
 INSERT INTO user_model_preferences (
   user_id,
   last_used_model_id,
   last_used_deep_research_model_id,
-  last_used_agent_model_id,
-  last_used_agent_source_model_ids_json,
-  last_used_agent_fusion_model_id,
+  last_used_fusion_mode_model_id,
+  last_used_fusion_source_model_ids_json,
+  last_used_fusion_model_id,
   updated_at
 )
 VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
 ON CONFLICT(user_id) DO UPDATE SET
   last_used_model_id = excluded.last_used_model_id,
   last_used_deep_research_model_id = excluded.last_used_deep_research_model_id,
-  last_used_agent_model_id = excluded.last_used_agent_model_id,
-  last_used_agent_source_model_ids_json = excluded.last_used_agent_source_model_ids_json,
-  last_used_agent_fusion_model_id = excluded.last_used_agent_fusion_model_id,
+  last_used_fusion_mode_model_id = excluded.last_used_fusion_mode_model_id,
+  last_used_fusion_source_model_ids_json = excluded.last_used_fusion_source_model_ids_json,
+  last_used_fusion_model_id = excluded.last_used_fusion_model_id,
   updated_at = CURRENT_TIMESTAMP;
-`, userID, normalModelID, deepModelID, agentModelID, sourcesJSON, fusionModelID)
+`, userID, normalModelID, deepModelID, fusionModeModelID, sourcesJSON, fusionModelID)
 	if err != nil {
 		log.Printf("upsertUserModelPreferences error: %v", err)
 	}
@@ -2589,11 +2589,17 @@ func normalizeModelPreferences(preferences modelPreferencesResponse, available m
 	if preferences.LastUsedDeepResearchModelID == "" {
 		preferences.LastUsedDeepResearchModelID = preferences.LastUsedModelID
 	}
-	if _, ok := available[preferences.LastUsedAgentModelID]; !ok {
-		preferences.LastUsedAgentModelID = preferences.LastUsedModelID
+	if _, ok := available[preferences.LastUsedFusionModeModelID]; !ok {
+		preferences.LastUsedFusionModeModelID = preferences.LastUsedModelID
 	}
-	if preferences.LastUsedAgentModelID == "" {
-		preferences.LastUsedAgentModelID = preferences.LastUsedModelID
+	if preferences.LastUsedFusionModeModelID == "" {
+		preferences.LastUsedFusionModeModelID = preferences.LastUsedModelID
+	}
+	if _, ok := available[preferences.LastUsedFusionModelID]; !ok {
+		preferences.LastUsedFusionModelID = preferences.LastUsedFusionModeModelID
+	}
+	if preferences.LastUsedFusionModelID == "" {
+		preferences.LastUsedFusionModelID = preferences.LastUsedFusionModeModelID
 	}
 
 	return preferences
@@ -2663,7 +2669,7 @@ func normalizeReasoningEffort(raw string) (string, bool) {
 }
 
 func (h Handler) defaultReasoningEffortForMode(mode string) string {
-	if mode == "deep_research" || mode == "agent" {
+	if mode == "deep_research" || mode == "fusion" {
 		effort, ok := normalizeReasoningEffort(h.cfg.DefaultDeepReasoningEffort)
 		if ok {
 			return effort
@@ -3004,7 +3010,7 @@ func nullableFloatPointer(value sql.NullFloat64) *float64 {
 
 func isValidResponseMode(mode string) bool {
 	switch strings.TrimSpace(mode) {
-	case "chat", "deep_research", "agent":
+	case "chat", "deep_research", "fusion":
 		return true
 	default:
 		return false
@@ -3033,7 +3039,7 @@ func normalizeResponseMode(mode string, deepResearchEnabled bool) string {
 	return "chat"
 }
 
-func encodeAgentSummariesJSON(summaries []agentSummary) (any, error) {
+func encodeFusionSummariesJSON(summaries []fusionSummary) (any, error) {
 	if len(summaries) == 0 {
 		return nil, nil
 	}
@@ -3044,12 +3050,12 @@ func encodeAgentSummariesJSON(summaries []agentSummary) (any, error) {
 	return string(encoded), nil
 }
 
-func decodeAgentSummariesJSON(raw string) ([]agentSummary, bool) {
+func decodeFusionSummariesJSON(raw string) ([]fusionSummary, bool) {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {
 		return nil, false
 	}
-	var parsed []agentSummary
+	var parsed []fusionSummary
 	if err := json.Unmarshal([]byte(trimmed), &parsed); err != nil {
 		return nil, false
 	}

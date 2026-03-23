@@ -19,7 +19,7 @@ const deleteConversationMock = vi.fn();
 const deleteAllConversationsMock = vi.fn();
 const uploadFileMock = vi.fn();
 const streamMessageMock = vi.fn();
-const getAgentRunStatusMock = vi.fn();
+const getFusionRunStatusMock = vi.fn();
 
 beforeEach(() => {
   vi.restoreAllMocks();
@@ -38,7 +38,7 @@ beforeEach(() => {
   deleteAllConversationsMock.mockReset();
   uploadFileMock.mockReset();
   streamMessageMock.mockReset();
-  getAgentRunStatusMock.mockReset();
+  getFusionRunStatusMock.mockReset();
 
   getMeMock.mockResolvedValue({
     id: "user-1",
@@ -78,13 +78,13 @@ beforeEach(() => {
     preferences: {
       lastUsedModelId: "openrouter/free",
       lastUsedDeepResearchModelId: "openrouter/free",
-      lastUsedAgentModelId: "openrouter/free",
+      lastUsedFusionModeModelId: "openrouter/free",
     },
   });
   updateModelPreferenceMock.mockResolvedValue({
     lastUsedModelId: "openrouter/free",
     lastUsedDeepResearchModelId: "openrouter/free",
-    lastUsedAgentModelId: "openrouter/free",
+    lastUsedFusionModeModelId: "openrouter/free",
   });
   updateModelFavoriteMock.mockResolvedValue([]);
   updateModelReasoningPresetMock.mockImplementation(
@@ -124,7 +124,7 @@ beforeEach(() => {
     createdAt: "2026-02-10T00:00:00Z",
   });
   streamMessageMock.mockResolvedValue(undefined);
-  getAgentRunStatusMock.mockResolvedValue({ id: "run-1", status: "running" });
+  getFusionRunStatusMock.mockResolvedValue({ id: "run-1", status: "running" });
 
   vi.spyOn(api, "getMe").mockImplementation(getMeMock);
   vi.spyOn(api, "authWithGoogle").mockImplementation(authWithGoogleMock);
@@ -154,7 +154,7 @@ beforeEach(() => {
   );
   vi.spyOn(api, "uploadFile").mockImplementation(uploadFileMock);
   vi.spyOn(api, "streamMessage").mockImplementation(streamMessageMock);
-  vi.spyOn(api, "getAgentRunStatus").mockImplementation(getAgentRunStatusMock);
+  vi.spyOn(api, "getFusionRunStatus").mockImplementation(getFusionRunStatusMock);
 });
 
 afterEach(() => {
@@ -725,7 +725,7 @@ describe("Deep research streaming UX", () => {
     });
   });
 
-  it("sends mode=agent, keeps grounding on, and leaves the placeholder running after queue confirmation", async () => {
+  it("sends mode=fusion, keeps grounding on, and leaves the placeholder running after queue confirmation", async () => {
     streamMessageMock.mockImplementation(
       async (
         _request: api.ChatRequest,
@@ -735,15 +735,15 @@ describe("Deep research streaming UX", () => {
           type: "metadata",
           grounding: true,
           deepResearch: false,
-          responseMode: "agent",
+          responseMode: "fusion",
           modelId: "openrouter/free",
           conversationId: "conv-1",
         });
         onEvent({
           type: "progress",
           phase: "planning",
-          title: "Queueing agent run",
-          detail: "Preparing multi-agent workflow",
+          title: "Queueing fusion run",
+          detail: "Preparing multi-fusion workflow",
         });
         onEvent({ type: "done" });
       },
@@ -755,12 +755,12 @@ describe("Deep research streaming UX", () => {
     await screen.findByPlaceholderText("Ask anything...");
 
     const groundingButton = screen.getByRole("button", { name: /grounding/i });
-    await user.click(screen.getByRole("button", { name: /agent/i }));
+    await user.click(screen.getByRole("button", { name: /fusion/i }));
     expect(groundingButton).toBeDisabled();
 
     await user.type(
       screen.getByPlaceholderText("Ask anything..."),
-      "Run the agent workflow",
+      "Run the fusion workflow",
     );
     await user.click(screen.getAllByRole("button", { name: /send/i })[0]);
 
@@ -769,7 +769,7 @@ describe("Deep research streaming UX", () => {
     });
 
     expect(streamMessageMock.mock.calls[0][0]).toMatchObject({
-      mode: "agent",
+      mode: "fusion",
       grounding: true,
       deepResearch: false,
     });
@@ -1128,7 +1128,7 @@ describe("Model selector filtering", () => {
       preferences: {
         lastUsedModelId: "openrouter/latest-used",
         lastUsedDeepResearchModelId: "openrouter/latest-used",
-        lastUsedAgentModelId: "openrouter/latest-used",
+        lastUsedFusionModeModelId: "openrouter/latest-used",
       },
     });
 
@@ -1194,7 +1194,7 @@ describe("Model selector filtering", () => {
       preferences: {
         lastUsedModelId: "openrouter/million-context",
         lastUsedDeepResearchModelId: "openrouter/million-context",
-        lastUsedAgentModelId: "openrouter/million-context",
+        lastUsedFusionModeModelId: "openrouter/million-context",
       },
     });
 
@@ -1222,7 +1222,7 @@ describe("Model selector filtering", () => {
     ).toBeInTheDocument();
   });
 
-  it("sends council sourceModels and fusionModel in the request payload", async () => {
+  it("sends fusion sourceModels and fusionModel in the request payload", async () => {
     listModelsMock.mockResolvedValueOnce({
       models: [
         {
@@ -1261,34 +1261,32 @@ describe("Model selector filtering", () => {
       reasoningPresets: [
         { modelId: "openrouter/free", mode: "chat", effort: "medium" },
         { modelId: "openrouter/free", mode: "deep_research", effort: "high" },
-        { modelId: "openrouter/free", mode: "agent", effort: "medium" },
+        { modelId: "openrouter/free", mode: "fusion", effort: "medium" },
       ],
       preferences: {
         lastUsedModelId: "openrouter/free",
         lastUsedDeepResearchModelId: "openrouter/free",
-        lastUsedAgentModelId: "openrouter/free",
+        lastUsedFusionModeModelId: "openrouter/free",
       },
     });
 
     const user = userEvent.setup();
-    const { container } = render(<App />);
+    render(<App />);
 
     await screen.findByPlaceholderText("Ask anything...");
-    await user.click(screen.getByRole("button", { name: /agent/i }));
+    await user.click(screen.getByRole("button", { name: /fusion/i }));
 
-    const initialCouncilSelects = container.querySelectorAll(
-      "select.council-select",
+    await user.click(screen.getByRole("button", { name: /add source/i }));
+    await user.click(screen.getByRole("button", { name: "Source Alpha" }));
+
+    await user.click(
+      screen.getByRole("button", { name: /select fusion model/i }),
     );
-    expect(initialCouncilSelects.length).toBe(1);
-    await user.selectOptions(initialCouncilSelects[0], "source-a");
-
-    const councilSelects = container.querySelectorAll("select.council-select");
-    expect(councilSelects.length).toBe(2);
-    await user.selectOptions(councilSelects[1], "fusion-model");
+    await user.click(screen.getByRole("button", { name: "Fusion Model" }));
 
     await user.type(
       screen.getByPlaceholderText("Ask anything..."),
-      "Run council mode",
+      "Run fusion mode",
     );
     await user.click(screen.getAllByRole("button", { name: /send/i })[0]);
 
@@ -1297,16 +1295,16 @@ describe("Model selector filtering", () => {
     });
 
     expect(streamMessageMock.mock.calls[0][0]).toMatchObject({
-      mode: "agent",
+      mode: "fusion",
       sourceModels: [{ modelId: "source-a", reasoningEffort: "medium" }],
       fusionModel: { modelId: "fusion-model", reasoningEffort: "medium" },
     });
   });
 
-  it("stops council polling and marks the trace done when the run completes", async () => {
+  it("stops fusion polling and marks the trace done when the run completes", async () => {
     const existingConversation: api.Conversation = {
       id: "conv-1",
-      title: "Council Chat",
+      title: "Fusion Chat",
       createdAt: "2026-02-10T00:00:00Z",
       updatedAt: "2026-02-10T00:00:00Z",
     };
@@ -1317,7 +1315,7 @@ describe("Model selector filtering", () => {
         id: "msg-user",
         conversationId: "conv-1",
         role: "user",
-        content: "Poll council status",
+        content: "Poll fusion status",
         groundingEnabled: false,
         deepResearchEnabled: false,
         citations: [],
@@ -1328,12 +1326,12 @@ describe("Model selector filtering", () => {
         conversationId: "conv-1",
         role: "assistant",
         content: "",
-        responseMode: "agent",
-        agentRunId: "run-1",
+        responseMode: "fusion",
+        fusionRunId: "run-1",
         thinkingTrace: {
           status: "running",
-          summary: "Coordinating the council workflow",
-          entries: [{ phase: "planning", title: "Starting council workflow" }],
+          summary: "Coordinating the fusion workflow",
+          entries: [{ phase: "planning", title: "Starting fusion workflow" }],
         },
         groundingEnabled: false,
         deepResearchEnabled: false,
@@ -1341,7 +1339,7 @@ describe("Model selector filtering", () => {
         createdAt: "2026-02-10T00:00:01Z",
       },
     ]);
-    getAgentRunStatusMock.mockResolvedValue({
+    getFusionRunStatusMock.mockResolvedValue({
       id: "run-1",
       status: "completed",
       sourceResults: [
@@ -1352,7 +1350,7 @@ describe("Model selector filtering", () => {
           response: "Source answer",
         },
       ],
-      result: { modelId: "fusion-model", response: "Final council answer" },
+      result: { modelId: "fusion-model", response: "Final fusion answer" },
     });
     streamMessageMock.mockImplementation(
       async (
@@ -1363,10 +1361,10 @@ describe("Model selector filtering", () => {
           type: "metadata",
           grounding: false,
           deepResearch: false,
-          responseMode: "agent",
+          responseMode: "fusion",
           modelId: "fusion-model",
           conversationId: "conv-1",
-          agentRunId: "run-1",
+          fusionRunId: "run-1",
         });
         onEvent({ type: "done" });
       },
@@ -1378,7 +1376,7 @@ describe("Model selector filtering", () => {
     await screen.findByPlaceholderText("Ask anything...");
     await user.type(
       screen.getByPlaceholderText("Ask anything..."),
-      "Poll council status",
+      "Poll fusion status",
     );
     await user.click(screen.getAllByRole("button", { name: /send/i })[0]);
 
@@ -1391,15 +1389,15 @@ describe("Model selector filtering", () => {
     });
 
     await waitFor(() => {
-      expect(getAgentRunStatusMock).toHaveBeenCalledWith("run-1");
+      expect(getFusionRunStatusMock).toHaveBeenCalledWith("run-1");
     });
-    expect(screen.getByText("Final council answer")).toBeInTheDocument();
-    expect(screen.getByText("Council result ready")).toBeInTheDocument();
+    expect(screen.getByText("Final fusion answer")).toBeInTheDocument();
+    expect(screen.getByText("Fusion result ready")).toBeInTheDocument();
 
-    getAgentRunStatusMock.mockClear();
+    getFusionRunStatusMock.mockClear();
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 2200));
     });
-    expect(getAgentRunStatusMock).not.toHaveBeenCalled();
+    expect(getFusionRunStatusMock).not.toHaveBeenCalled();
   }, 10000);
 });

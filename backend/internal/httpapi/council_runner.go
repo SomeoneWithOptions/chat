@@ -13,16 +13,16 @@ import (
 	"chat/backend/internal/research"
 )
 
-type councilStatusCounts struct {
+type fusionStatusCounts struct {
 	completed int
 	degraded  int
 	failed    int
 }
 
-func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) error {
-	var config CouncilRunConfig
-	if err := json.Unmarshal([]byte(run.CouncilConfigJSON), &config); err != nil {
-		return h.failAgentRun(ctx, run.ID, "invalid council config")
+func (h Handler) executeMultiModelFusionRun(ctx context.Context, run *fusionRunRecord) error {
+	var config FusionRunConfig
+	if err := json.Unmarshal([]byte(run.FusionConfigJSON), &config); err != nil {
+		return h.failFusionRun(ctx, run.ID, "invalid fusion config")
 	}
 
 	traceCollector, err := h.loadMessageTrace(ctx, run.UserID, run.AssistantMessageID)
@@ -30,20 +30,20 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 		traceCollector = newThinkingTraceCollector()
 	}
 
-	agentSources := make([]CouncilSourceResult, len(config.SourceModels))
+	fusionSources := make([]FusionSourceResult, len(config.SourceModels))
 	for i, sm := range config.SourceModels {
-		agentSources[i] = CouncilSourceResult{
+		fusionSources[i] = FusionSourceResult{
 			ModelID: sm.ModelID,
 			Status:  "queued",
 		}
 	}
 
-	var agentAnalysis *CouncilAnalysis
-	var finalResult *CouncilFinalResult
+	var fusionAnalysis *FusionAnalysis
+	var finalResult *FusionFinalResult
 	var warnings []string
 
 	saveState := func(runStatus, desiredTraceStatus string, finished bool) {
-		warnings = buildCouncilWarnings(agentSources, config.Grounding, h.cfg.CouncilTargetReadableSourcesPerModel)
+		warnings = buildFusionWarnings(fusionSources, config.Grounding, h.cfg.FusionTargetReadableSourcesPerModel)
 		content := ""
 		resultModelID := ""
 		var resultUsage *usageResponse
@@ -52,34 +52,34 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 			resultModelID = finalResult.ModelID
 			resultUsage = finalResult.Usage
 		}
-		_ = h.updateCouncilAssistantMessage(
+		_ = h.updateMultiModelFusionAssistantMessage(
 			ctx,
 			run.UserID,
 			run.AssistantMessageID,
 			content,
 			traceCollector,
-			collectCouncilCitations(agentSources),
+			collectFusionCitations(fusionSources),
 			resultUsage,
-			agentSources,
-			agentAnalysis,
+			fusionSources,
+			fusionAnalysis,
 			resultModelID,
 			warnings,
 			run.ID,
 			desiredTraceStatus,
 		)
-		_ = h.persistCouncilRunState(ctx, run.ID, runStatus, agentSources, agentAnalysis, finalResult, warnings, finished)
+		_ = h.persistFusionRunState(ctx, run.ID, runStatus, fusionSources, fusionAnalysis, finalResult, warnings, finished)
 	}
 
 	traceCollector.AppendProgress(research.Progress{
 		Phase:  research.PhasePlanning,
-		Title:  "Starting council workflow",
-		Detail: "Preparing the sequential council run",
+		Title:  "Starting fusion workflow",
+		Detail: "Preparing the sequential fusion run",
 	})
 	saveState("running", thinkingTraceStatusRunning, false)
 
 	historyMessages, err := h.listConversationPromptMessages(ctx, run.UserID, run.ConversationID, maxConversationHistoryMessages)
 	if err != nil {
-		return h.failAgentRun(ctx, run.ID, "failed to load conversation history")
+		return h.failFusionRun(ctx, run.ID, "failed to load conversation history")
 	}
 
 	userPrompt := ""
@@ -90,18 +90,18 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 		}
 	}
 	if strings.TrimSpace(userPrompt) == "" {
-		return h.failAgentRun(ctx, run.ID, "failed to resolve prompt")
+		return h.failFusionRun(ctx, run.ID, "failed to resolve prompt")
 	}
 
 	attachedFiles, err := h.listFilesForMessage(ctx, run.UserID, run.UserMessageID)
 	if err != nil {
-		log.Printf("council attachment lookup failed: run_id=%s message_id=%s err=%v", run.ID, run.UserMessageID, err)
+		log.Printf("fusion attachment lookup failed: run_id=%s message_id=%s err=%v", run.ID, run.UserMessageID, err)
 	} else if len(attachedFiles) > 0 {
 		userPrompt = h.appendFileContextToPrompt(userPrompt, attachedFiles)
 	}
 	timeSensitive := isTimeSensitivePrompt(userPrompt)
 
-	searchCoordinator := newCouncilGroundingCoordinator(&h, run.ID, run.SearchBudget, h.cfg.CouncilSearchResultsPerQuery)
+	searchCoordinator := newFusionGroundingCoordinator(&h, run.ID, run.SearchBudget, h.cfg.FusionSearchResultsPerQuery)
 
 	successCount := 0
 
@@ -113,27 +113,27 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 			Pass:        i + 1,
 			TotalPasses: len(config.SourceModels),
 		})
-		agentSources[i].Status = "running"
+		fusionSources[i].Status = "running"
 		saveState("running", thinkingTraceStatusRunning, false)
 
 		start := time.Now()
-		res, runErr := h.runCouncilSourceModel(ctx, sm, userPrompt, timeSensitive, config.Grounding, historyMessages, searchCoordinator)
+		res, runErr := h.runMultiModelFusionSource(ctx, sm, userPrompt, timeSensitive, config.Grounding, historyMessages, searchCoordinator)
 		duration := time.Since(start).Milliseconds()
 
 		if runErr != nil {
-			agentSources[i].Status = "failed"
-			agentSources[i].Error = runErr.Error()
-			agentSources[i].DurationMs = duration
+			fusionSources[i].Status = "failed"
+			fusionSources[i].Error = runErr.Error()
+			fusionSources[i].DurationMs = duration
 		} else {
-			agentSources[i].Status = res.Status
-			agentSources[i].Response = res.Response
-			agentSources[i].ReasoningContent = res.ReasoningContent
-			agentSources[i].Citations = res.Citations
-			agentSources[i].Usage = res.Usage
-			agentSources[i].SearchQueries = res.SearchQueries
-			agentSources[i].ReadableSources = res.ReadableSources
-			agentSources[i].Warnings = res.Warnings
-			agentSources[i].DurationMs = duration
+			fusionSources[i].Status = res.Status
+			fusionSources[i].Response = res.Response
+			fusionSources[i].ReasoningContent = res.ReasoningContent
+			fusionSources[i].Citations = res.Citations
+			fusionSources[i].Usage = res.Usage
+			fusionSources[i].SearchQueries = res.SearchQueries
+			fusionSources[i].ReadableSources = res.ReadableSources
+			fusionSources[i].Warnings = res.Warnings
+			fusionSources[i].DurationMs = duration
 			if res.Status == "complete" || res.Status == "degraded" {
 				successCount++
 			}
@@ -145,11 +145,11 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 	if successCount == 0 {
 		traceCollector.AppendProgress(research.Progress{
 			Phase:  research.PhaseEvaluating,
-			Title:  "Council failed",
+			Title:  "Fusion failed",
 			Detail: "Every source model failed before producing a usable answer.",
 		})
 		saveState("running", thinkingTraceStatusStopped, false)
-		return h.failAgentRun(ctx, run.ID, "all source models failed")
+		return h.failFusionRun(ctx, run.ID, "all source models failed")
 	}
 
 	traceCollector.AppendProgress(research.Progress{
@@ -159,11 +159,11 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 	})
 	saveState("running", thinkingTraceStatusRunning, false)
 
-	analysis, err := h.runCouncilAnalysis(ctx, config.FusionModel, userPrompt, agentSources, historyMessages)
+	analysis, err := h.runFusionAnalysis(ctx, config.FusionModel, userPrompt, fusionSources, historyMessages)
 	if err != nil {
-		log.Printf("council analysis failed: %v", err)
+		log.Printf("fusion analysis failed: %v", err)
 	} else {
-		agentAnalysis = analysis
+		fusionAnalysis = analysis
 		saveState("running", thinkingTraceStatusRunning, false)
 	}
 
@@ -174,17 +174,17 @@ func (h Handler) executeCouncilRun(ctx context.Context, run *agentRunRecord) err
 	})
 	saveState("running", thinkingTraceStatusRunning, false)
 
-	finalResult, err = h.runCouncilSynthesis(ctx, config.FusionModel, userPrompt, agentSources, agentAnalysis, historyMessages)
+	finalResult, err = h.runMultiModelFusionSynthesis(ctx, config.FusionModel, userPrompt, fusionSources, fusionAnalysis, historyMessages)
 	if err != nil {
-		return h.failAgentRun(ctx, run.ID, "council synthesis failed")
+		return h.failFusionRun(ctx, run.ID, "fusion synthesis failed")
 	}
-	if shouldWarnCouncilEvidenceQuality(agentSources, config.Grounding, h.cfg.CouncilTargetReadableSourcesPerModel) {
+	if shouldWarnFusionEvidenceQuality(fusionSources, config.Grounding, h.cfg.FusionTargetReadableSourcesPerModel) {
 		finalResult.Response = "Warning: evidence quality was below target because no grounded source model reached the readable-source goal.\n\n" + strings.TrimSpace(finalResult.Response)
 	}
 
 	traceCollector.AppendProgress(research.Progress{
 		Phase:  research.PhaseFinalizing,
-		Title:  "Finalizing council run",
+		Title:  "Finalizing fusion run",
 		Detail: "Saving final payload",
 	})
 	traceCollector.MarkDone()
@@ -204,28 +204,28 @@ func toJSONStr(v any) sql.NullString {
 	return sql.NullString{String: string(b), Valid: true}
 }
 
-func (h Handler) runCouncilSourceModel(
+func (h Handler) runMultiModelFusionSource(
 	ctx context.Context,
-	spec CouncilSourceSpec,
+	spec FusionSourceSpec,
 	prompt string,
 	timeSensitive bool,
 	grounding bool,
 	history []openrouter.Message,
-	searchCoordinator *councilGroundingCoordinator,
-) (*CouncilSourceResult, error) {
+	searchCoordinator *fusionGroundingCoordinator,
+) (*FusionSourceResult, error) {
 	sourceCtx := ctx
 	cancel := func() {}
-	if h.cfg.CouncilTimeoutSeconds > 0 {
-		sourceCtx, cancel = context.WithTimeout(ctx, time.Duration(h.cfg.CouncilTimeoutSeconds)*time.Second)
+	if h.cfg.FusionSourceTimeoutSeconds > 0 {
+		sourceCtx, cancel = context.WithTimeout(ctx, time.Duration(h.cfg.FusionSourceTimeoutSeconds)*time.Second)
 	}
 	defer cancel()
 
 	if !grounding {
-		answer, reasoningContent, usage, err := h.runAgentSynthesis(sourceCtx, spec.ModelID, spec.ReasoningEffort, prompt, history, nil, nil)
+		answer, reasoningContent, usage, err := h.runFusionSynthesis(sourceCtx, spec.ModelID, spec.ReasoningEffort, prompt, history, nil, nil)
 		if err != nil {
 			return nil, err
 		}
-		return &CouncilSourceResult{
+		return &FusionSourceResult{
 			Status:           "complete",
 			Response:         answer,
 			ReasoningContent: reasoningContent,
@@ -233,22 +233,22 @@ func (h Handler) runCouncilSourceModel(
 		}, nil
 	}
 
-	groundingResult, err := h.runCouncilSinglePassGrounding(sourceCtx, prompt, timeSensitive, searchCoordinator)
+	groundingResult, err := h.runFusionSinglePassGrounding(sourceCtx, prompt, timeSensitive, searchCoordinator)
 	if err != nil {
 		return nil, err
 	}
 
 	status := "complete"
-	if groundingResult.ReadableSources < h.cfg.CouncilTargetReadableSourcesPerModel {
+	if groundingResult.ReadableSources < h.cfg.FusionTargetReadableSourcesPerModel {
 		status = "degraded"
 	}
 
-	answer, reasoningContent, usage, synthErr := h.runAgentSynthesis(sourceCtx, spec.ModelID, spec.ReasoningEffort, prompt, history, groundingResult.Citations, nil)
+	answer, reasoningContent, usage, synthErr := h.runFusionSynthesis(sourceCtx, spec.ModelID, spec.ReasoningEffort, prompt, history, groundingResult.Citations, nil)
 	if synthErr != nil {
 		return nil, fmt.Errorf("source synthesis failed: %w", synthErr)
 	}
 
-	return &CouncilSourceResult{
+	return &FusionSourceResult{
 		Status:           status,
 		Response:         answer,
 		ReasoningContent: reasoningContent,
@@ -260,8 +260,8 @@ func (h Handler) runCouncilSourceModel(
 	}, nil
 }
 
-func summarizeCouncilSourceStatuses(sources []CouncilSourceResult) councilStatusCounts {
-	counts := councilStatusCounts{}
+func summarizeFusionSourceStatuses(sources []FusionSourceResult) fusionStatusCounts {
+	counts := fusionStatusCounts{}
 	for _, source := range sources {
 		switch source.Status {
 		case "complete":
@@ -275,23 +275,23 @@ func summarizeCouncilSourceStatuses(sources []CouncilSourceResult) councilStatus
 	return counts
 }
 
-func shouldWarnCouncilEvidenceQuality(sources []CouncilSourceResult, grounding bool, targetReadableSources int) bool {
+func shouldWarnFusionEvidenceQuality(sources []FusionSourceResult, grounding bool, targetReadableSources int) bool {
 	if !grounding {
 		return false
 	}
-	counts := summarizeCouncilSourceStatuses(sources)
+	counts := summarizeFusionSourceStatuses(sources)
 	if counts.completed > 0 {
 		return false
 	}
 	return counts.degraded > 0 || counts.failed > 0
 }
 
-func buildCouncilWarnings(sources []CouncilSourceResult, grounding bool, targetReadableSources int) []string {
+func buildFusionWarnings(sources []FusionSourceResult, grounding bool, targetReadableSources int) []string {
 	warnings := make([]string, 0, len(sources)+1)
 	for _, source := range sources {
 		warnings = append(warnings, source.Warnings...)
 	}
-	if shouldWarnCouncilEvidenceQuality(sources, grounding, targetReadableSources) {
+	if shouldWarnFusionEvidenceQuality(sources, grounding, targetReadableSources) {
 		warnings = append(warnings, fmt.Sprintf("Evidence quality was below target: no grounded source model reached %d readable sources.", targetReadableSources))
 	}
 	return dedupeStrings(warnings)
@@ -317,7 +317,7 @@ func dedupeStrings(items []string) []string {
 	return out
 }
 
-func collectCouncilCitations(sources []CouncilSourceResult) []citationResponse {
+func collectFusionCitations(sources []FusionSourceResult) []citationResponse {
 	allCitations := make([]citationResponse, 0, len(sources)*4)
 	seen := make(map[string]struct{}, len(sources)*4)
 	for _, src := range sources {
@@ -335,9 +335,9 @@ func collectCouncilCitations(sources []CouncilSourceResult) []citationResponse {
 	return allCitations
 }
 
-func buildCouncilPublicStatus(runID, runStatus string, sources []CouncilSourceResult, analysis *CouncilAnalysis, result *CouncilFinalResult, warnings []string) AgentRunStatusResponse {
-	counts := summarizeCouncilSourceStatuses(sources)
-	return AgentRunStatusResponse{
+func buildFusionPublicStatus(runID, runStatus string, sources []FusionSourceResult, analysis *FusionAnalysis, result *FusionFinalResult, warnings []string) FusionRunStatusResponse {
+	counts := summarizeFusionSourceStatuses(sources)
+	return FusionRunStatusResponse{
 		ID:               runID,
 		Status:           runStatus,
 		SourceResults:    sources,
@@ -350,15 +350,15 @@ func buildCouncilPublicStatus(runID, runStatus string, sources []CouncilSourceRe
 	}
 }
 
-func (h Handler) persistCouncilRunState(ctx context.Context, runID, runStatus string, sources []CouncilSourceResult, analysis *CouncilAnalysis, result *CouncilFinalResult, warnings []string, finished bool) error {
-	publicStatus := buildCouncilPublicStatus(runID, runStatus, sources, analysis, result, warnings)
+func (h Handler) persistFusionRunState(ctx context.Context, runID, runStatus string, sources []FusionSourceResult, analysis *FusionAnalysis, result *FusionFinalResult, warnings []string, finished bool) error {
+	publicStatus := buildFusionPublicStatus(runID, runStatus, sources, analysis, result, warnings)
 	publicStatusJSON, err := json.Marshal(publicStatus)
 	if err != nil {
 		return err
 	}
-	counts := summarizeCouncilSourceStatuses(sources)
+	counts := summarizeFusionSourceStatuses(sources)
 	query := `
-UPDATE agent_runs
+UPDATE fusion_runs
 SET status = ?,
     source_results_json = COALESCE(?, source_results_json),
     fusion_analysis_json = COALESCE(?, fusion_analysis_json),
@@ -404,13 +404,13 @@ func convertOpenRouterUsageToResponse(u *openrouter.Usage) *usageResponse {
 	}
 }
 
-func (h Handler) runCouncilAnalysis(
+func (h Handler) runFusionAnalysis(
 	ctx context.Context,
-	fusionModel CouncilSourceSpec,
+	fusionModel FusionSourceSpec,
 	prompt string,
-	sources []CouncilSourceResult,
+	sources []FusionSourceResult,
 	history []openrouter.Message,
-) (*CouncilAnalysis, error) {
+) (*FusionAnalysis, error) {
 	var input strings.Builder
 	input.WriteString("Compare the following answers provided by different AI models to the user's prompt.\n")
 	input.WriteString("Extract the areas of agreement, key differences, partial coverage, unique insights, and blind spots.\n")
@@ -455,7 +455,7 @@ func (h Handler) runCouncilAnalysis(
 		contentStr = strings.TrimSuffix(contentStr, "```")
 	}
 
-	var analysis CouncilAnalysis
+	var analysis FusionAnalysis
 	if err := json.Unmarshal([]byte(contentStr), &analysis); err != nil {
 		return nil, err
 	}
@@ -463,14 +463,14 @@ func (h Handler) runCouncilAnalysis(
 	return &analysis, nil
 }
 
-func (h Handler) runCouncilSynthesis(
+func (h Handler) runMultiModelFusionSynthesis(
 	ctx context.Context,
-	fusionModel CouncilSourceSpec,
+	fusionModel FusionSourceSpec,
 	prompt string,
-	sources []CouncilSourceResult,
-	analysis *CouncilAnalysis,
+	sources []FusionSourceResult,
+	analysis *FusionAnalysis,
 	history []openrouter.Message,
-) (*CouncilFinalResult, error) {
+) (*FusionFinalResult, error) {
 	var input strings.Builder
 	input.WriteString("Write the best possible final answer for the user by fusing the following source model answers and analysis.\n")
 	input.WriteString("Preserve important consensus points. Incorporate valuable unique insights where justified. Mention unresolved differences when they matter. Preserve citation discipline when grounding is enabled [1], [2]. Surface uncertainty honestly when the evidence is incomplete.\n\n")
@@ -506,7 +506,7 @@ func (h Handler) runCouncilSynthesis(
 		return nil, err
 	}
 
-	return &CouncilFinalResult{
+	return &FusionFinalResult{
 		ModelID:          fusionModel.ModelID,
 		Response:         content,
 		ReasoningContent: result.reasoning,

@@ -88,25 +88,25 @@ func TestLoadDefaults(t *testing.T) {
 	if cfg.ResearchMaxCitationsDeep != 12 {
 		t.Fatalf("unexpected deep max citations default: %d", cfg.ResearchMaxCitationsDeep)
 	}
-	if !cfg.AgentModeEnabled {
-		t.Fatalf("expected agent mode enabled by default")
+	if !cfg.FusionModeEnabled {
+		t.Fatalf("expected fusion mode enabled by default")
 	}
-	if cfg.AgentMinSearchQueries != 20 || cfg.AgentSoftMaxSearchQueries != 60 || cfg.AgentHardMaxSearchQueries != 200 {
-		t.Fatalf("unexpected agent query defaults: min=%d soft=%d hard=%d", cfg.AgentMinSearchQueries, cfg.AgentSoftMaxSearchQueries, cfg.AgentHardMaxSearchQueries)
+	if cfg.FusionMinSearchQueries != 20 || cfg.FusionSoftMaxSearchQueries != 60 || cfg.FusionHardMaxSearchQueries != 200 {
+		t.Fatalf("unexpected fusion query defaults: min=%d soft=%d hard=%d", cfg.FusionMinSearchQueries, cfg.FusionSoftMaxSearchQueries, cfg.FusionHardMaxSearchQueries)
 	}
-	if cfg.AgentMaxSourcesRead != 80 || cfg.AgentTimeoutSeconds != 1200 {
-		t.Fatalf("unexpected agent defaults: max_sources=%d timeout=%d", cfg.AgentMaxSourcesRead, cfg.AgentTimeoutSeconds)
+	if cfg.FusionMaxSourcesRead != 80 || cfg.FusionTimeoutSeconds != 1200 {
+		t.Fatalf("unexpected fusion defaults: max_sources=%d timeout=%d", cfg.FusionMaxSourcesRead, cfg.FusionTimeoutSeconds)
 	}
-	if cfg.CouncilTargetReadableSourcesPerModel != 15 ||
-		cfg.CouncilSearchResultsPerQuery != 15 ||
-		cfg.CouncilMaxSearchQueriesPerModel != 4 ||
-		cfg.CouncilTimeoutSeconds != 1200 {
+	if cfg.FusionTargetReadableSourcesPerModel != 15 ||
+		cfg.FusionSearchResultsPerQuery != 15 ||
+		cfg.FusionMaxSearchQueriesPerModel != 4 ||
+		cfg.FusionSourceTimeoutSeconds != 1200 {
 		t.Fatalf(
-			"unexpected council defaults: target_reads=%d results_per_q=%d max_queries=%d timeout=%d",
-			cfg.CouncilTargetReadableSourcesPerModel,
-			cfg.CouncilSearchResultsPerQuery,
-			cfg.CouncilMaxSearchQueriesPerModel,
-			cfg.CouncilTimeoutSeconds,
+			"unexpected fusion multi-model defaults: target_reads=%d results_per_q=%d max_queries=%d source_timeout=%d",
+			cfg.FusionTargetReadableSourcesPerModel,
+			cfg.FusionSearchResultsPerQuery,
+			cfg.FusionMaxSearchQueriesPerModel,
+			cfg.FusionSourceTimeoutSeconds,
 		)
 	}
 	if cfg.BraveMonthlyQueryLimit != 2000 || cfg.BraveMonthlyQueryReserve != 200 {
@@ -193,10 +193,10 @@ func TestLoadClampsInvalidResearchBudgetsToDefaults(t *testing.T) {
 	t.Setenv("RESEARCH_SOURCE_MAX_BYTES", "0")
 	t.Setenv("RESEARCH_MAX_CITATIONS_CHAT", "0")
 	t.Setenv("RESEARCH_MAX_CITATIONS_DEEP", "-4")
-	t.Setenv("COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL", "0")
-	t.Setenv("COUNCIL_SEARCH_RESULTS_PER_QUERY", "-3")
-	t.Setenv("COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL", "0")
-	t.Setenv("COUNCIL_TIMEOUT_SECONDS", "-1")
+	t.Setenv("FUSION_TARGET_READABLE_SOURCES_PER_MODEL", "0")
+	t.Setenv("FUSION_SEARCH_RESULTS_PER_QUERY", "-3")
+	t.Setenv("FUSION_MAX_SEARCH_QUERIES_PER_MODEL", "0")
+	t.Setenv("FUSION_SOURCE_TIMEOUT_SECONDS", "-1")
 
 	cfg, err := Load()
 	if err != nil {
@@ -214,10 +214,10 @@ func TestLoadClampsInvalidResearchBudgetsToDefaults(t *testing.T) {
 		cfg.ResearchSourceMaxBytes != 1_500_000 ||
 		cfg.ResearchMaxCitationsChat != 8 ||
 		cfg.ResearchMaxCitationsDeep != 12 ||
-		cfg.CouncilTargetReadableSourcesPerModel != 15 ||
-		cfg.CouncilSearchResultsPerQuery != 15 ||
-		cfg.CouncilMaxSearchQueriesPerModel != 4 ||
-		cfg.CouncilTimeoutSeconds != 1200 {
+		cfg.FusionTargetReadableSourcesPerModel != 15 ||
+		cfg.FusionSearchResultsPerQuery != 15 ||
+		cfg.FusionMaxSearchQueriesPerModel != 4 ||
+		cfg.FusionSourceTimeoutSeconds != 1200 {
 		t.Fatalf("expected invalid budgets to clamp to defaults, got %+v", cfg)
 	}
 }

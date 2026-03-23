@@ -60,7 +60,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 	r.Get("/health", h.Healthz)
 	r.Get("/healthz", h.Healthz)
 	r.Get("/healthz/", h.Healthz)
-	r.Post("/internal/agent-runs/{id}", h.InternalRunAgent)
+	r.Post("/internal/fusion-runs/{id}", h.InternalRunFusion)
 
 	r.Route("/v1", func(v1 chi.Router) {
 		v1.Route("/auth", func(authR chi.Router) {
@@ -85,7 +85,7 @@ func NewRouter(cfg config.Config, db *sql.DB) http.Handler {
 			p.Delete("/conversations/{id}", h.DeleteConversation)
 			p.Get("/conversations/{id}/messages", h.ListConversationMessages)
 			p.Post("/chat/messages", h.ChatMessages)
-			p.Get("/agent-runs/{id}", h.GetAgentRun)
+			p.Get("/fusion-runs/{id}", h.GetFusionRun)
 		})
 	})
 

@@ -6,13 +6,13 @@ import {
   useState,
 } from "react";
 import {
-  type AgentSummary,
+  type FusionSummary,
   type Citation,
   type ProgressDecision,
   type ThinkingTrace,
   type Usage,
-  type CouncilSourceResult,
-  type CouncilAnalysis,
+  type FusionSourceResult,
+  type FusionAnalysis,
 } from "../lib/api";
 import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -25,13 +25,13 @@ type MessageData = {
   thinkingTrace?: ThinkingTrace | null;
   modelId?: string | null;
   usage?: Usage | null;
-  responseMode?: "chat" | "deep_research" | "agent";
-  agentSummaries?: AgentSummary[];
-  agentSources?: import("../lib/api").CouncilSourceResult[];
-  agentAnalysis?: import("../lib/api").CouncilAnalysis;
-  agentResultModelId?: string;
-  agentResultUsage?: Usage;
-  agentRunId?: string;
+  responseMode?: "chat" | "deep_research" | "fusion";
+  fusionSummaries?: FusionSummary[];
+  fusionSources?: import("../lib/api").FusionSourceResult[];
+  fusionAnalysis?: import("../lib/api").FusionAnalysis;
+  fusionResultModelId?: string;
+  fusionResultUsage?: Usage;
+  fusionRunId?: string;
   citations: Citation[];
   groundingEnabled?: boolean;
   deepResearchEnabled?: boolean;
@@ -159,7 +159,7 @@ function generationStatusMeta(status: NonNullable<ThinkingTrace["status"]>): {
   return { label: "Ready", tone: "done", animate: false };
 }
 
-function sourceStatusMeta(status: CouncilSourceResult["status"]): {
+function sourceStatusMeta(status: FusionSourceResult["status"]): {
   label: string;
   tone: StatusTone;
   animate: boolean;
@@ -313,11 +313,11 @@ function ThinkingStatusChip({
   );
 }
 
-function CouncilSourceCard({
+function FusionSourceCard({
   source,
   isStreaming,
 }: {
-  source: CouncilSourceResult;
+  source: FusionSourceResult;
   isStreaming: boolean;
 }) {
   const [expanded, setExpanded] = useState(false);
@@ -330,19 +330,19 @@ function CouncilSourceCard({
     (source.warnings?.length ?? 0) > 0;
 
   return (
-    <div className={`council-source-card status-${source.status}`}>
+    <div className={`fusion-source-card status-${source.status}`}>
       <button
-        className="council-source-header"
+        className="fusion-source-header"
         onClick={() => setExpanded(!expanded)}
         type="button"
       >
-        <span className="council-source-heading">
-          <span className="council-source-title">{source.modelId}</span>
-          <span className="council-source-summary">
+        <span className="fusion-source-heading">
+          <span className="fusion-source-title">{source.modelId}</span>
+          <span className="fusion-source-summary">
             {statusMeta.description}
           </span>
         </span>
-        <div className="council-source-badges">
+        <div className="fusion-source-badges">
           {source.readableSources !== undefined && (
             <span
               className="badge"
@@ -361,11 +361,11 @@ function CouncilSourceCard({
             label={statusMeta.label}
             tone={statusMeta.tone}
             animate={statusMeta.animate}
-            className="council-source-status"
+            className="fusion-source-status"
           />
         </div>
         <svg
-          className={`council-source-chevron ${expanded ? "open" : ""}`}
+          className={`fusion-source-chevron ${expanded ? "open" : ""}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -378,7 +378,7 @@ function CouncilSourceCard({
       </button>
 
       {expanded && (
-        <div className="council-source-body">
+        <div className="fusion-source-body">
           {source.error ? (
             <div className="error-message">{source.error}</div>
           ) : source.response ? (
@@ -393,7 +393,7 @@ function CouncilSourceCard({
               </ReactMarkdown>
             </>
           ) : isWorking || isStreaming ? (
-            <div className="council-source-placeholder">
+            <div className="fusion-source-placeholder">
               <ThinkingStatusChip
                 label={statusMeta.label}
                 tone={statusMeta.tone}
@@ -402,7 +402,7 @@ function CouncilSourceCard({
               <p>{statusMeta.description}</p>
             </div>
           ) : (
-            <p className="council-source-empty">
+            <p className="fusion-source-empty">
               No source response was recorded for this pass.
             </p>
           )}
@@ -412,10 +412,10 @@ function CouncilSourceCard({
   );
 }
 
-function CouncilAnalysisView({ analysis }: { analysis: CouncilAnalysis }) {
+function FusionAnalysisView({ analysis }: { analysis: FusionAnalysis }) {
   return (
-    <div className="council-analysis-view">
-      <h3 className="council-section-title">Analysis</h3>
+    <div className="fusion-analysis-view">
+      <h3 className="fusion-section-title">Analysis</h3>
       {analysis.agreement && analysis.agreement.length > 0 && (
         <details className="analysis-category">
           <summary>Agreement</summary>
@@ -525,7 +525,7 @@ export default function ChatMessage({
   const [copiedUserMessage, setCopiedUserMessage] = useState(false);
   const [generationExpanded, setGenerationExpanded] = useState(false);
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
-  const [agentsExpanded, setAgentsExpanded] = useState(false);
+  const [fusionsExpanded, setFusionExpanded] = useState(false);
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [usageExpanded, setUsageExpanded] = useState(false);
   const generationPanelID = `${message.id}-generation-trace`;
@@ -536,14 +536,14 @@ export default function ChatMessage({
     thinkingTrace?.summary?.trim() ||
     (isStreaming ? "Working on your request" : "Thought process");
   const reasoningPanelID = `${message.id}-reasoning`;
-  const agentsPanelID = `${message.id}-agents`;
+  const fusionsPanelID = `${message.id}-fusions`;
   const sourcesPanelID = `${message.id}-sources`;
   const usagePanelID = `${message.id}-usage`;
   const hasUsage = isAssistant && !!message.usage;
-  const hasAgentSummaries =
+  const hasFusionSummaries =
     isAssistant &&
-    !!message.agentSummaries &&
-    message.agentSummaries.length > 0;
+    !!message.fusionSummaries &&
+    message.fusionSummaries.length > 0;
   const latestTraceIndex = thinkingTrace?.entries.length
     ? thinkingTrace.entries.length - 1
     : -1;
@@ -551,7 +551,7 @@ export default function ChatMessage({
   useEffect(() => {
     setGenerationExpanded(false);
     setReasoningExpanded(false);
-    setAgentsExpanded(false);
+    setFusionExpanded(false);
     setSourcesExpanded(false);
     setUsageExpanded(false);
   }, [message.id]);
@@ -734,12 +734,12 @@ export default function ChatMessage({
             </div>
           )}
 
-          {message.agentSources && message.agentSources.length > 0 && (
-            <div className="council-sources-container">
-              <h3 className="council-section-title">Sources</h3>
-              <div className="council-sources-list">
-                {message.agentSources.map((source, idx) => (
-                  <CouncilSourceCard
+          {message.fusionSources && message.fusionSources.length > 0 && (
+            <div className="fusion-sources-container">
+              <h3 className="fusion-section-title">Sources</h3>
+              <div className="fusion-sources-list">
+                {message.fusionSources.map((source, idx) => (
+                  <FusionSourceCard
                     key={idx}
                     source={source}
                     isStreaming={!!isStreaming}
@@ -749,17 +749,17 @@ export default function ChatMessage({
             </div>
           )}
 
-          {message.agentAnalysis && (
-            <CouncilAnalysisView analysis={message.agentAnalysis} />
+          {message.fusionAnalysis && (
+            <FusionAnalysisView analysis={message.fusionAnalysis} />
           )}
 
-          {message.agentResultModelId || message.agentSources?.length ? (
-            <div className="council-result-container">
-              <h3 className="council-section-title">
+          {message.fusionResultModelId || message.fusionSources?.length ? (
+            <div className="fusion-result-container">
+              <h3 className="fusion-section-title">
                 Result{" "}
-                {message.agentResultModelId && (
-                  <span className="council-fused-badge">
-                    Fused by {message.agentResultModelId}
+                {message.fusionResultModelId && (
+                  <span className="fusion-fused-badge">
+                    Fused by {message.fusionResultModelId}
                   </span>
                 )}
               </h3>
@@ -952,25 +952,25 @@ export default function ChatMessage({
           </div>
         )}
 
-        {hasAgentSummaries && message.agentSummaries && (
-          <div className="agent-summaries">
+        {hasFusionSummaries && message.fusionSummaries && (
+          <div className="fusion-summaries">
             <button
               type="button"
-              className="agent-summaries-toggle"
-              onClick={() => setAgentsExpanded((open) => !open)}
-              aria-expanded={agentsExpanded}
-              aria-controls={agentsPanelID}
+              className="fusion-summaries-toggle"
+              onClick={() => setFusionExpanded((open) => !open)}
+              aria-expanded={fusionsExpanded}
+              aria-controls={fusionsPanelID}
             >
-              <span className="agent-summaries-heading">
-                <span className="agent-summaries-title">Agents</span>
-                {!agentsExpanded && (
-                  <span className="agent-summaries-count">
-                    {message.agentSummaries.length} summaries
+              <span className="fusion-summaries-heading">
+                <span className="fusion-summaries-title">Fusion</span>
+                {!fusionsExpanded && (
+                  <span className="fusion-summaries-count">
+                    {message.fusionSummaries.length} summaries
                   </span>
                 )}
               </span>
               <svg
-                className={`agent-summaries-chevron ${agentsExpanded ? "open" : ""}`}
+                className={`fusion-summaries-chevron ${fusionsExpanded ? "open" : ""}`}
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -983,29 +983,29 @@ export default function ChatMessage({
               </svg>
             </button>
             <div
-              id={agentsPanelID}
-              className={`agent-summaries-content ${agentsExpanded ? "expanded" : "collapsed"}`}
+              id={fusionsPanelID}
+              className={`fusion-summaries-content ${fusionsExpanded ? "expanded" : "collapsed"}`}
             >
-              {agentsExpanded && (
-                <ol className="agent-summaries-list">
-                  {message.agentSummaries.map((summary) => (
+              {fusionsExpanded && (
+                <ol className="fusion-summaries-list">
+                  {message.fusionSummaries.map((summary) => (
                     <li
                       key={`${message.id}-${summary.role}`}
-                      className="agent-summary-item"
+                      className="fusion-summary-item"
                     >
-                      <div className="agent-summary-head">
-                        <span className="agent-summary-role">
+                      <div className="fusion-summary-head">
+                        <span className="fusion-summary-role">
                           {summary.role}
                         </span>
                         {typeof summary.confidence === "number" && (
-                          <span className="agent-summary-confidence">
+                          <span className="fusion-summary-confidence">
                             {Math.round(summary.confidence * 100)}%
                           </span>
                         )}
                       </div>
-                      <p className="agent-summary-text">{summary.summary}</p>
+                      <p className="fusion-summary-text">{summary.summary}</p>
                       {summary.objections && summary.objections.length > 0 && (
-                        <p className="agent-summary-objections">
+                        <p className="fusion-summary-objections">
                           {summary.objections.join(" · ")}
                         </p>
                       )}

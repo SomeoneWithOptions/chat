@@ -36,11 +36,11 @@ function ComposerHarness({ onSend }: { onSend: (event: FormEvent<HTMLFormElement
       onReasoningEffortChange={() => undefined}
       grounding
       deepResearch={false}
-      agentMode={false}
+      fusionMode={false}
       groundingLocked={false}
       onToggleGrounding={() => undefined}
       onToggleDeepResearch={() => undefined}
-      onToggleAgentMode={() => undefined}
+      onToggleFusionMode={() => undefined}
       isStreaming={false}
       uploadingAttachments={false}
       pendingAttachments={[]}

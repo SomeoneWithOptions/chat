@@ -391,7 +391,7 @@ VALUES (?, ?);
 	}
 
 	if _, err := db.Exec(`
-INSERT INTO user_model_preferences (user_id, last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id)
+INSERT INTO user_model_preferences (user_id, last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id)
 VALUES (?, ?, ?, ?);
 `, user.ID, "anthropic/claude-3.5-haiku", "openrouter/free", "openrouter/free"); err != nil {
 		t.Fatalf("seed preferences: %v", err)
@@ -873,12 +873,12 @@ LIMIT 1;
 
 	var lastUsedModelID sql.NullString
 	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedAgentModelID sql.NullString
+	var lastUsedFusionModelID sql.NullString
 	if err := db.QueryRow(`
-SELECT last_used_model_id, last_used_deep_research_model_id, last_used_agent_model_id
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id
 FROM user_model_preferences
 WHERE user_id = ?;
-`, user.ID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedAgentModelID); err != nil {
+`, user.ID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModelID); err != nil {
 		t.Fatalf("query model preferences: %v", err)
 	}
 	if !lastUsedModelID.Valid || lastUsedModelID.String != "openrouter/free" {
@@ -887,8 +887,8 @@ WHERE user_id = ?;
 	if !lastUsedDeepResearchModelID.Valid || lastUsedDeepResearchModelID.String != "openrouter/free" {
 		t.Fatalf("unexpected last_used_deep_research_model_id: %+v", lastUsedDeepResearchModelID)
 	}
-	if !lastUsedAgentModelID.Valid || lastUsedAgentModelID.String != "openrouter/free" {
-		t.Fatalf("unexpected last_used_agent_model_id: %+v", lastUsedAgentModelID)
+	if !lastUsedFusionModelID.Valid || lastUsedFusionModelID.String != "openrouter/free" {
+		t.Fatalf("unexpected last_used_fusion_mode_model_id: %+v", lastUsedFusionModelID)
 	}
 }
 
@@ -2886,7 +2886,7 @@ func TestCreateConversationInAuthDisabledMode(t *testing.T) {
 	}
 }
 
-func TestChatMessagesAgentModeQueuesAndCompletesAsyncRun(t *testing.T) {
+func TestChatMessagesFusionModeQueuesAndCompletesAsyncRun(t *testing.T) {
 	var (
 		mu           sync.Mutex
 		plannerCalls int
@@ -2921,7 +2921,7 @@ func TestChatMessagesAgentModeQueuesAndCompletesAsyncRun(t *testing.T) {
 					response = `{"nextAction":"finalize","queries":[],"coverageGaps":[],"targetSourceTypes":[],"confidence":0.82,"reason":"Evidence is sufficient."}`
 				}
 			case systemPrompt == "You are a structured JSON generator.":
-				roleName := "Agent"
+				roleName := "Fusion"
 				switch {
 				case strings.Contains(prompt, "You are Scout."):
 					roleName = "Scout"
@@ -2934,7 +2934,7 @@ func TestChatMessagesAgentModeQueuesAndCompletesAsyncRun(t *testing.T) {
 				}
 				response = fmt.Sprintf(`{"role":%q,"summary":%q,"objections":["Check caveats"],"confidence":0.74,"evidenceIds":[1]}`, roleName, roleName+" summary")
 			default:
-				response = "Final agent answer [1]"
+				response = "Final fusion answer [1]"
 				if onUsage != nil {
 					if err := onUsage(openrouter.Usage{
 						PromptTokens:     120,
@@ -2953,11 +2953,11 @@ func TestChatMessagesAgentModeQueuesAndCompletesAsyncRun(t *testing.T) {
 
 	handler, db := newTestHandler(t, streamer)
 	t.Cleanup(func() { _ = db.Close() })
-	handler.cfg.AgentMinSearchQueries = 1
-	handler.cfg.AgentSoftMaxSearchQueries = 1
-	handler.cfg.AgentHardMaxSearchQueries = 1
-	handler.cfg.AgentMaxSourcesRead = 1
-	handler.cfg.AgentTimeoutSeconds = 30
+	handler.cfg.FusionMinSearchQueries = 1
+	handler.cfg.FusionSoftMaxSearchQueries = 1
+	handler.cfg.FusionHardMaxSearchQueries = 1
+	handler.cfg.FusionMaxSourcesRead = 1
+	handler.cfg.FusionTimeoutSeconds = 30
 	handler.cfg.BraveMonthlyQueryLimit = 50
 	handler.cfg.BraveMonthlyQueryReserve = 0
 	handler.cfg.InternalWorkerBearerToken = "test-worker-token"
@@ -2982,9 +2982,9 @@ func TestChatMessagesAgentModeQueuesAndCompletesAsyncRun(t *testing.T) {
 	}
 
 	workerServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		runID := strings.TrimPrefix(r.URL.Path, "/internal/agent-runs/")
+		runID := strings.TrimPrefix(r.URL.Path, "/internal/fusion-runs/")
 		r = requestWithRouteParam(r, "id", runID)
-		handler.InternalRunAgent(w, r)
+		handler.InternalRunFusion(w, r)
 	}))
 	defer workerServer.Close()
 	handler.cfg.InternalWorkerBaseURL = workerServer.URL
@@ -3003,7 +3003,7 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/chat/messages",
-		strings.NewReader(`{"message":"Research this with the attachment","modelId":"openrouter/free","mode":"agent","fileIds":["file-1"]}`),
+		strings.NewReader(`{"message":"Research this with the attachment","modelId":"openrouter/free","mode":"fusion","fileIds":["file-1"]}`),
 	)
 	req = requestWithSessionUser(req, user)
 	resp := httptest.NewRecorder()
@@ -3014,8 +3014,8 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 		t.Fatalf("expected status %d, got %d (%s)", http.StatusOK, resp.Code, resp.Body.String())
 	}
 	body := resp.Body.String()
-	if !strings.Contains(body, `"responseMode":"agent"`) {
-		t.Fatalf("expected agent metadata in stream body: %s", body)
+	if !strings.Contains(body, `"responseMode":"fusion"`) {
+		t.Fatalf("expected fusion metadata in stream body: %s", body)
 	}
 	if !strings.Contains(body, `"type":"done"`) {
 		t.Fatalf("expected done event in stream body: %s", body)
@@ -3028,8 +3028,8 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 	)
 	deadline := time.Now().Add(3 * time.Second)
 	for {
-		if err := db.QueryRow(`SELECT status, searches_used, last_error FROM agent_runs LIMIT 1;`).Scan(&runStatus, &searchesUsed, &persistedError); err != nil {
-			t.Fatalf("load agent run: %v", err)
+		if err := db.QueryRow(`SELECT status, searches_used, last_error FROM fusion_runs LIMIT 1;`).Scan(&runStatus, &searchesUsed, &persistedError); err != nil {
+			t.Fatalf("load fusion run: %v", err)
 		}
 		if runStatus == "completed" || runStatus == "failed" || time.Now().After(deadline) {
 			break
@@ -3037,7 +3037,7 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 		time.Sleep(25 * time.Millisecond)
 	}
 	if runStatus != "completed" {
-		t.Fatalf("expected completed agent run, got %q (error=%q)", runStatus, persistedError.String)
+		t.Fatalf("expected completed fusion run, got %q (error=%q)", runStatus, persistedError.String)
 	}
 	if searchesUsed != 1 {
 		t.Fatalf("expected exactly one Brave query, got %d", searchesUsed)
@@ -3074,14 +3074,14 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 		t.Fatalf("expected 2 messages, got %d", len(payload.Messages))
 	}
 	assistant := payload.Messages[1]
-	if assistant.ResponseMode != "agent" {
-		t.Fatalf("expected assistant response mode agent, got %q", assistant.ResponseMode)
+	if assistant.ResponseMode != "fusion" {
+		t.Fatalf("expected assistant response mode fusion, got %q", assistant.ResponseMode)
 	}
-	if assistant.Content != "Final agent answer [1]" {
+	if assistant.Content != "Final fusion answer [1]" {
 		t.Fatalf("unexpected assistant content: %q", assistant.Content)
 	}
-	if len(assistant.AgentSummaries) != 4 {
-		t.Fatalf("expected 4 agent summaries, got %d", len(assistant.AgentSummaries))
+	if len(assistant.FusionSummaries) != 4 {
+		t.Fatalf("expected 4 fusion summaries, got %d", len(assistant.FusionSummaries))
 	}
 	if len(assistant.Citations) != 1 {
 		t.Fatalf("expected 1 citation, got %d", len(assistant.Citations))
@@ -3100,15 +3100,15 @@ VALUES ('file-1', ?, 'brief.txt', 'text/plain', 32, 'local', '/tmp/brief.txt', '
 		}
 	}
 	if !foundAttachmentPrompt {
-		t.Fatalf("expected queued agent run to include attachment excerpts in downstream prompts: %#v", prompts)
+		t.Fatalf("expected queued fusion run to include attachment excerpts in downstream prompts: %#v", prompts)
 	}
 }
 
-func TestChatMessagesAgentModeRejectsWhenBraveBudgetBelowMinimum(t *testing.T) {
+func TestChatMessagesFusionModeRejectsWhenBraveBudgetBelowMinimum(t *testing.T) {
 	handler, db := newTestHandler(t, stubStreamer{})
 	t.Cleanup(func() { _ = db.Close() })
-	handler.cfg.AgentMinSearchQueries = 20
-	handler.cfg.AgentHardMaxSearchQueries = 200
+	handler.cfg.FusionMinSearchQueries = 20
+	handler.cfg.FusionHardMaxSearchQueries = 200
 	handler.cfg.BraveMonthlyQueryLimit = 25
 	handler.cfg.BraveMonthlyQueryReserve = 10
 
@@ -3119,7 +3119,7 @@ func TestChatMessagesAgentModeRejectsWhenBraveBudgetBelowMinimum(t *testing.T) {
 	req := httptest.NewRequest(
 		http.MethodPost,
 		"/v1/chat/messages",
-		strings.NewReader(`{"message":"Do the agent workflow","modelId":"openrouter/free","mode":"agent"}`),
+		strings.NewReader(`{"message":"Do the fusion workflow","modelId":"openrouter/free","mode":"fusion"}`),
 	)
 	req = requestWithSessionUser(req, user)
 	resp := httptest.NewRecorder()
@@ -3133,8 +3133,8 @@ func TestChatMessagesAgentModeRejectsWhenBraveBudgetBelowMinimum(t *testing.T) {
 	if !strings.Contains(body, `"type":"warning"`) {
 		t.Fatalf("expected warning event in stream body: %s", body)
 	}
-	if !strings.Contains(body, `"responseMode":"agent"`) {
-		t.Fatalf("expected agent metadata in stream body: %s", body)
+	if !strings.Contains(body, `"responseMode":"fusion"`) {
+		t.Fatalf("expected fusion metadata in stream body: %s", body)
 	}
 
 	var (
@@ -3142,8 +3142,8 @@ func TestChatMessagesAgentModeRejectsWhenBraveBudgetBelowMinimum(t *testing.T) {
 		searchBudget int
 		lastError    sql.NullString
 	)
-	if err := db.QueryRow(`SELECT status, search_budget, last_error FROM agent_runs LIMIT 1;`).Scan(&runStatus, &searchBudget, &lastError); err != nil {
-		t.Fatalf("load failed agent run: %v", err)
+	if err := db.QueryRow(`SELECT status, search_budget, last_error FROM fusion_runs LIMIT 1;`).Scan(&runStatus, &searchBudget, &lastError); err != nil {
+		t.Fatalf("load failed fusion run: %v", err)
 	}
 	if runStatus != "failed" {
 		t.Fatalf("expected failed run, got %q", runStatus)
@@ -3212,12 +3212,12 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 		ResearchSourceMaxBytes:     1_500_000,
 		ResearchMaxCitationsChat:   8,
 		ResearchMaxCitationsDeep:   12,
-		AgentModeEnabled:           true,
-		AgentMinSearchQueries:      20,
-		AgentSoftMaxSearchQueries:  60,
-		AgentHardMaxSearchQueries:  200,
-		AgentMaxSourcesRead:        80,
-		AgentTimeoutSeconds:        1200,
+		FusionModeEnabled:           true,
+		FusionMinSearchQueries:      20,
+		FusionSoftMaxSearchQueries:  60,
+		FusionHardMaxSearchQueries:  200,
+		FusionMaxSourcesRead:        80,
+		FusionTimeoutSeconds:        1200,
 		BraveMonthlyQueryLimit:     2000,
 		BraveMonthlyQueryReserve:   200,
 	}
@@ -3522,14 +3522,14 @@ CREATE TABLE user_model_preferences (
   user_id TEXT PRIMARY KEY,
   last_used_model_id TEXT,
   last_used_deep_research_model_id TEXT,
-  last_used_agent_model_id TEXT,
-  last_used_agent_source_model_ids_json TEXT,
-  last_used_agent_fusion_model_id TEXT,
+  last_used_fusion_mode_model_id TEXT,
+  last_used_fusion_source_model_ids_json TEXT,
+  last_used_fusion_model_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (last_used_model_id) REFERENCES models(id) ON DELETE SET NULL,
   FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL,
-  FOREIGN KEY (last_used_agent_model_id) REFERENCES models(id) ON DELETE SET NULL
+  FOREIGN KEY (last_used_fusion_mode_model_id) REFERENCES models(id) ON DELETE SET NULL
 );
 
 CREATE TABLE user_model_favorites (
@@ -3544,7 +3544,7 @@ CREATE TABLE user_model_favorites (
 CREATE TABLE user_model_reasoning_presets (
   user_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research', 'agent')),
+  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research', 'fusion')),
   effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high')),
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, model_id, mode),
@@ -3581,13 +3581,13 @@ CREATE TABLE messages (
   usage_provider_name TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
-  response_mode TEXT NOT NULL DEFAULT 'chat' CHECK (response_mode IN ('chat', 'deep_research', 'agent')),
-  agent_summaries_json TEXT,
-  agent_sources_json TEXT,
-  agent_analysis_json TEXT,
-  agent_result_model_id TEXT,
-  agent_result_usage_json TEXT,
-  agent_run_id TEXT,
+  response_mode TEXT NOT NULL DEFAULT 'chat' CHECK (response_mode IN ('chat', 'deep_research', 'fusion')),
+  fusion_summaries_json TEXT,
+  fusion_sources_json TEXT,
+  fusion_analysis_json TEXT,
+  fusion_result_model_id TEXT,
+  fusion_result_usage_json TEXT,
+  fusion_run_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -3627,7 +3627,7 @@ CREATE TABLE message_files (
   FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
 );
 
-CREATE TABLE agent_runs (
+CREATE TABLE fusion_runs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   conversation_id TEXT NOT NULL,
@@ -3644,7 +3644,7 @@ CREATE TABLE agent_runs (
   source_model_ids_json TEXT,
   fusion_model_id TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
-  council_config_json TEXT,
+  fusion_config_json TEXT,
   source_results_json TEXT,
   fusion_analysis_json TEXT,
   fusion_result_json TEXT,

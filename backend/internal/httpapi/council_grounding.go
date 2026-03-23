@@ -14,15 +14,15 @@ import (
 	"chat/backend/internal/research"
 )
 
-type councilGroundingResult struct {
+type fusionGroundingResult struct {
 	Citations       []citationResponse
 	SearchQueries   int
 	ReadableSources int
 	Warnings        []string
 }
 
-// A globally serialized searcher for the council run.
-type councilGroundingCoordinator struct {
+// A globally serialized searcher for the fusion run.
+type fusionGroundingCoordinator struct {
 	mu           sync.Mutex
 	handler      *Handler
 	runID        string
@@ -33,11 +33,11 @@ type councilGroundingCoordinator struct {
 	minSpacing   time.Duration
 }
 
-func newCouncilGroundingCoordinator(h *Handler, runID string, budget int, defaultCount int) *councilGroundingCoordinator {
+func newFusionGroundingCoordinator(h *Handler, runID string, budget int, defaultCount int) *fusionGroundingCoordinator {
 	if defaultCount < 1 {
 		defaultCount = 15
 	}
-	return &councilGroundingCoordinator{
+	return &fusionGroundingCoordinator{
 		handler:      h,
 		runID:        runID,
 		runBudget:    budget,
@@ -46,15 +46,15 @@ func newCouncilGroundingCoordinator(h *Handler, runID string, budget int, defaul
 	}
 }
 
-func (c *councilGroundingCoordinator) Search(ctx context.Context, query string, count int) ([]brave.SearchResult, error) {
+func (c *fusionGroundingCoordinator) Search(ctx context.Context, query string, count int) ([]brave.SearchResult, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	if c.searchesUsed >= c.runBudget {
-		return nil, errors.New("council search budget exhausted")
+		return nil, errors.New("fusion search budget exhausted")
 	}
 
-	// Wait to enforce global spacing for this council run
+	// Wait to enforce global spacing for this fusion run
 	elapsed := time.Since(c.lastSearchAt)
 	if elapsed < c.minSpacing {
 		select {
@@ -81,35 +81,35 @@ func (c *councilGroundingCoordinator) Search(ctx context.Context, query string, 
 
 	results, err := c.handler.grounding.Search(ctx, query, count)
 	if err != nil {
-		_ = c.handler.recordAgentRunSearches(ctx, c.runID, c.searchesUsed)
+		_ = c.handler.recordFusionRunSearches(ctx, c.runID, c.searchesUsed)
 		return nil, err
 	}
-	_ = c.handler.recordAgentRunSearches(ctx, c.runID, c.searchesUsed)
+	_ = c.handler.recordFusionRunSearches(ctx, c.runID, c.searchesUsed)
 
 	return results, nil
 }
 
-func (h Handler) runCouncilSinglePassGrounding(
+func (h Handler) runFusionSinglePassGrounding(
 	ctx context.Context,
 	prompt string,
 	timeSensitive bool,
-	searchCoordinator *councilGroundingCoordinator,
-) (councilGroundingResult, error) {
+	searchCoordinator *fusionGroundingCoordinator,
+) (fusionGroundingResult, error) {
 	if searchCoordinator == nil {
-		return councilGroundingResult{}, errors.New("council grounding coordinator unavailable")
+		return fusionGroundingResult{}, errors.New("fusion grounding coordinator unavailable")
 	}
 
 	query := strings.TrimSpace(research.BuildSingleQuery(prompt, timeSensitive))
 	if query == "" {
-		return councilGroundingResult{}, errors.New("council grounding query is empty")
+		return fusionGroundingResult{}, errors.New("fusion grounding query is empty")
 	}
 
-	results, err := searchCoordinator.Search(ctx, query, h.cfg.CouncilSearchResultsPerQuery)
+	results, err := searchCoordinator.Search(ctx, query, h.cfg.FusionSearchResultsPerQuery)
 	if err != nil {
-		return councilGroundingResult{}, err
+		return fusionGroundingResult{}, err
 	}
 	if len(results) == 0 {
-		return councilGroundingResult{}, errors.New("council grounding returned no sources")
+		return fusionGroundingResult{}, errors.New("fusion grounding returned no sources")
 	}
 
 	citations := make([]citationResponse, 0, len(results))
@@ -120,11 +120,11 @@ func (h Handler) runCouncilSinglePassGrounding(
 	for _, item := range results {
 		citation := citationResponse{
 			URL:            strings.TrimSpace(item.URL),
-			Title:          trimCouncilText(strings.TrimSpace(item.Title), 240),
-			Snippet:        trimCouncilText(strings.TrimSpace(item.Snippet), 800),
+			Title:          trimFusionText(strings.TrimSpace(item.Title), 240),
+			Snippet:        trimFusionText(strings.TrimSpace(item.Snippet), 800),
 			SourceProvider: "brave",
 		}
-		canonical := canonicalCouncilURL(citation.URL)
+		canonical := canonicalFusionURL(citation.URL)
 		if canonical == "" {
 			canonical = citation.URL
 		}
@@ -141,9 +141,9 @@ func (h Handler) runCouncilSinglePassGrounding(
 			if readErr == nil {
 				readableSources++
 				if title := strings.TrimSpace(readResult.Title); title != "" {
-					citation.Title = trimCouncilText(title, 240)
+					citation.Title = trimFusionText(title, 240)
 				}
-				if snippet := councilReadSnippet(readResult); snippet != "" {
+				if snippet := fusionReadSnippet(readResult); snippet != "" {
 					citation.Snippet = snippet
 				}
 			} else {
@@ -158,7 +158,7 @@ func (h Handler) runCouncilSinglePassGrounding(
 	}
 
 	if len(citations) == 0 {
-		return councilGroundingResult{}, errors.New("council grounding produced no usable citations")
+		return fusionGroundingResult{}, errors.New("fusion grounding produced no usable citations")
 	}
 
 	warnings := make([]string, 0, 1)
@@ -168,7 +168,7 @@ func (h Handler) runCouncilSinglePassGrounding(
 		warnings = append(warnings, fmt.Sprintf("Used Brave snippets for %d source(s) that could not be read directly.", readFailures))
 	}
 
-	return councilGroundingResult{
+	return fusionGroundingResult{
 		Citations:       citations,
 		SearchQueries:   1,
 		ReadableSources: readableSources,
@@ -176,15 +176,15 @@ func (h Handler) runCouncilSinglePassGrounding(
 	}, nil
 }
 
-func councilReadSnippet(result research.ReadResult) string {
+func fusionReadSnippet(result research.ReadResult) string {
 	snippet := strings.TrimSpace(result.Snippet)
 	if snippet == "" {
 		snippet = strings.TrimSpace(result.Text)
 	}
-	return trimCouncilText(snippet, 800)
+	return trimFusionText(snippet, 800)
 }
 
-func trimCouncilText(raw string, limit int) string {
+func trimFusionText(raw string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
@@ -194,7 +194,7 @@ func trimCouncilText(raw string, limit int) string {
 	return string([]rune(raw)[:limit])
 }
 
-func canonicalCouncilURL(raw string) string {
+func canonicalFusionURL(raw string) string {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	if err != nil {
 		return ""

@@ -23,19 +23,19 @@ import (
 
 const braveProviderName = "brave"
 
-type councilQueuedStreamInput struct {
+type multiModelFusionQueuedStreamInput struct {
 	UserID         string
 	UserMessageID  string
 	ConversationID string
-	SourceModels   []CouncilSourceSpec
-	FusionModel    CouncilSourceSpec
+	SourceModels   []FusionSourceSpec
+	FusionModel    FusionSourceSpec
 	Message        string
 	Prompt         string
 	Grounding      bool
 	History        []openrouter.Message
 }
 
-type agentQueuedStreamInput struct {
+type fusionQueuedStreamInput struct {
 	UserID          string
 	UserMessageID   string
 	ConversationID  string
@@ -47,7 +47,7 @@ type agentQueuedStreamInput struct {
 	History         []openrouter.Message
 }
 
-type agentRunRecord struct {
+type fusionRunRecord struct {
 	ID                 string
 	UserID             string
 	ConversationID     string
@@ -64,15 +64,15 @@ type agentRunRecord struct {
 	SourceModelIDsJSON string
 	FusionModelID      string
 	GroundingEnabled   bool
-	CouncilConfigJSON  string
+	FusionConfigJSON  string
 }
 
-type agentRoleDefinition struct {
+type fusionPerspectiveDefinition struct {
 	Name   string
 	System string
 }
 
-type agentRoleResult struct {
+type fusionPerspectiveResult struct {
 	Role        string   `json:"role"`
 	Summary     string   `json:"summary"`
 	Objections  []string `json:"objections,omitempty"`
@@ -80,7 +80,7 @@ type agentRoleResult struct {
 	EvidenceIDs []int    `json:"evidenceIds,omitempty"`
 }
 
-func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input agentQueuedStreamInput) {
+func (h Handler) streamFusionQueuedResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input fusionQueuedStreamInput) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -89,7 +89,7 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 		"type":           "metadata",
 		"grounding":      true,
 		"deepResearch":   false,
-		"responseMode":   "agent",
+		"responseMode":   "fusion",
 		"modelId":        input.ModelID,
 		"conversationId": input.ConversationID,
 		"userMessageId":  input.UserMessageID,
@@ -102,7 +102,7 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 	traceCollector := newThinkingTraceCollector()
 	initialProgress := summarizedProgress(research.Progress{
 		Phase:   research.PhasePlanning,
-		Message: "Queueing agent run",
+		Message: "Queueing fusion run",
 	}, research.ProgressSummaryInput{
 		Phase: research.PhasePlanning,
 	})
@@ -120,31 +120,31 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 		input.ModelID,
 		true,
 		false,
-		"agent",
+		"fusion",
 		nil,
 		traceCollector.Snapshot(),
 		nil,
 		nil,
 	)
 	if err != nil {
-		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to create agent placeholder"})
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to create fusion placeholder"})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
 		return
 	}
 
-	searchBudget, budgetErr := h.availableAgentSearchBudget(ctx)
+	searchBudget, budgetErr := h.availableFusionSearchBudget(ctx)
 	if budgetErr != nil {
 		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to reserve Brave search budget"})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
-		_ = h.updateAgentAssistantMessage(ctx, input.UserID, assistantMessageID, "Agent mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
+		_ = h.updateFusionAssistantMessage(ctx, input.UserID, assistantMessageID, "Fusion mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
 		return
 	}
 
 	runID := uuid.NewString()
-	if searchBudget < h.cfg.AgentMinSearchQueries {
-		if err := h.insertAgentRun(ctx, agentRunRecord{
+	if searchBudget < h.cfg.FusionMinSearchQueries {
+		if err := h.insertFusionRun(ctx, fusionRunRecord{
 			ID:                 runID,
 			UserID:             input.UserID,
 			ConversationID:     input.ConversationID,
@@ -154,22 +154,22 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 			ReasoningEffort:    input.ReasoningEffort,
 			Status:             "failed",
 			SearchBudget:       searchBudget,
-			LastError:          "Not enough Brave monthly budget remains for agent mode.",
+			LastError:          "Not enough Brave monthly budget remains for fusion mode.",
 		}); err != nil {
-			log.Printf("agent run persist failed: %v", err)
+			log.Printf("fusion run persist failed: %v", err)
 		}
 		_ = writeSSEEvent(w, map[string]any{
 			"type":    "warning",
-			"scope":   "agent",
-			"message": "Agent mode needs at least 20 Brave searches, but the remaining monthly Brave budget is too low right now.",
+			"scope":   "fusion",
+			"message": "Fusion mode needs at least 20 Brave searches, but the remaining monthly Brave budget is too low right now.",
 		})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
-		_ = h.updateAgentAssistantMessage(ctx, input.UserID, assistantMessageID, "Agent mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
+		_ = h.updateFusionAssistantMessage(ctx, input.UserID, assistantMessageID, "Fusion mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
 		return
 	}
 
-	if err := h.insertAgentRun(ctx, agentRunRecord{
+	if err := h.insertFusionRun(ctx, fusionRunRecord{
 		ID:                 runID,
 		UserID:             input.UserID,
 		ConversationID:     input.ConversationID,
@@ -180,7 +180,7 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 		Status:             "queued",
 		SearchBudget:       searchBudget,
 	}); err != nil {
-		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to queue agent run"})
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to queue fusion run"})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
 		return
@@ -188,7 +188,7 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 
 	queuedProgress := summarizedProgress(research.Progress{
 		Phase:   research.PhasePlanning,
-		Message: "Queued agent workflow",
+		Message: "Queued fusion workflow",
 	}, research.ProgressSummaryInput{
 		Phase: research.PhasePlanning,
 	})
@@ -197,28 +197,28 @@ func (h Handler) streamAgentQueuedResponse(ctx context.Context, w http.ResponseW
 	_ = writeSSEEvent(w, map[string]any{"type": "done"})
 	flusher.Flush()
 
-	if err := h.updateAgentAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, thinkingTraceStatusRunning); err != nil {
-		log.Printf("agent placeholder update failed: run_id=%s err=%v", runID, err)
+	if err := h.updateFusionAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, thinkingTraceStatusRunning); err != nil {
+		log.Printf("fusion placeholder update failed: run_id=%s err=%v", runID, err)
 	}
-	if err := h.enqueueAgentRun(context.Background(), runID); err != nil {
-		log.Printf("agent enqueue failed: run_id=%s err=%v", runID, err)
-		_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+	if err := h.enqueueFusionRun(context.Background(), runID); err != nil {
+		log.Printf("fusion enqueue failed: run_id=%s err=%v", runID, err)
+		_ = h.failFusionRun(context.Background(), runID, "failed to enqueue fusion run")
 	}
 }
 
-func (h Handler) InternalRunAgent(w http.ResponseWriter, r *http.Request) {
+func (h Handler) InternalRunFusion(w http.ResponseWriter, r *http.Request) {
 	if err := h.requireInternalWorkerToken(r); err != nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized", err.Error())
 		return
 	}
 	runID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if runID == "" {
-		writeError(w, http.StatusBadRequest, "invalid_request", "agent run id is required")
+		writeError(w, http.StatusBadRequest, "invalid_request", "fusion run id is required")
 		return
 	}
-	if err := h.executeAgentRun(r.Context(), runID); err != nil {
-		log.Printf("agent worker failed: run_id=%s err=%v", runID, err)
-		writeError(w, http.StatusInternalServerError, "agent_run_failed", "agent run failed")
+	if err := h.executeFusionRun(r.Context(), runID); err != nil {
+		log.Printf("fusion worker failed: run_id=%s err=%v", runID, err)
+		writeError(w, http.StatusInternalServerError, "fusion_run_failed", "fusion run failed")
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"success": true})
@@ -250,27 +250,27 @@ func subtleConstantTimeCompare(a, b string) bool {
 	return diff == 0
 }
 
-func (h Handler) enqueueAgentRun(ctx context.Context, runID string) error {
+func (h Handler) enqueueFusionRun(ctx context.Context, runID string) error {
 	baseURL := strings.TrimRight(strings.TrimSpace(h.cfg.InternalWorkerBaseURL), "/")
 	if baseURL == "" {
 		go func() {
-			localCtx, cancel := context.WithTimeout(context.Background(), time.Duration(h.cfg.AgentTimeoutSeconds+30)*time.Second)
+			localCtx, cancel := context.WithTimeout(context.Background(), time.Duration(h.cfg.FusionTimeoutSeconds+30)*time.Second)
 			defer cancel()
-			if err := h.executeAgentRun(localCtx, runID); err != nil {
-				log.Printf("agent local worker failed: run_id=%s err=%v", runID, err)
+			if err := h.executeFusionRun(localCtx, runID); err != nil {
+				log.Printf("fusion local worker failed: run_id=%s err=%v", runID, err)
 			}
 		}()
 		return nil
 	}
 
 	go func() {
-		workerCtx, cancel := context.WithTimeout(context.Background(), time.Duration(h.cfg.AgentTimeoutSeconds+30)*time.Second)
+		workerCtx, cancel := context.WithTimeout(context.Background(), time.Duration(h.cfg.FusionTimeoutSeconds+30)*time.Second)
 		defer cancel()
 
-		req, err := http.NewRequestWithContext(workerCtx, http.MethodPost, baseURL+"/internal/agent-runs/"+runID, bytes.NewReader(nil))
+		req, err := http.NewRequestWithContext(workerCtx, http.MethodPost, baseURL+"/internal/fusion-runs/"+runID, bytes.NewReader(nil))
 		if err != nil {
-			log.Printf("agent remote worker request build failed: run_id=%s err=%v", runID, err)
-			_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+			log.Printf("fusion remote worker request build failed: run_id=%s err=%v", runID, err)
+			_ = h.failFusionRun(context.Background(), runID, "failed to enqueue fusion run")
 			return
 		}
 		if token := strings.TrimSpace(h.cfg.InternalWorkerBearerToken); token != "" {
@@ -278,29 +278,29 @@ func (h Handler) enqueueAgentRun(ctx context.Context, runID string) error {
 		}
 		resp, err := http.DefaultClient.Do(req)
 		if err != nil {
-			log.Printf("agent remote worker request failed: run_id=%s err=%v", runID, err)
-			_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+			log.Printf("fusion remote worker request failed: run_id=%s err=%v", runID, err)
+			_ = h.failFusionRun(context.Background(), runID, "failed to enqueue fusion run")
 			return
 		}
 		defer resp.Body.Close()
 		if resp.StatusCode < http.StatusOK || resp.StatusCode >= http.StatusMultipleChoices {
-			log.Printf("agent remote worker returned non-2xx: run_id=%s status=%d", runID, resp.StatusCode)
-			_ = h.failAgentRun(context.Background(), runID, "failed to enqueue agent run")
+			log.Printf("fusion remote worker returned non-2xx: run_id=%s status=%d", runID, resp.StatusCode)
+			_ = h.failFusionRun(context.Background(), runID, "failed to enqueue fusion run")
 		}
 	}()
 	return nil
 }
 
-func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
-	run, err := h.claimAgentRun(ctx, runID)
+func (h Handler) executeFusionRun(ctx context.Context, runID string) error {
+	run, err := h.claimFusionRun(ctx, runID)
 	if err != nil {
 		return err
 	}
 	if run == nil {
 		return nil
 	}
-	if run.WorkflowType == "council_fusion" {
-		return h.executeCouncilRun(ctx, run)
+	if run.WorkflowType == "multi_model" {
+		return h.executeMultiModelFusionRun(ctx, run)
 	}
 
 	traceCollector, err := h.loadMessageTrace(ctx, run.UserID, run.AssistantMessageID)
@@ -309,13 +309,13 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 	}
 	appendStageProgress := func(progress research.Progress) {
 		traceCollector.AppendProgress(progress)
-		if updateErr := h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, "", traceCollector, nil, nil, nil, thinkingTraceStatusRunning); updateErr != nil {
-			log.Printf("agent progress persist failed: run_id=%s err=%v", run.ID, updateErr)
+		if updateErr := h.updateFusionAssistantMessage(ctx, run.UserID, run.AssistantMessageID, "", traceCollector, nil, nil, nil, thinkingTraceStatusRunning); updateErr != nil {
+			log.Printf("fusion progress persist failed: run_id=%s err=%v", run.ID, updateErr)
 		}
 	}
 	appendStageProgress(research.Progress{
 		Phase:  research.PhasePlanning,
-		Title:  "Starting agent workflow",
+		Title:  "Starting fusion workflow",
 		Detail: "Worker picked up the queued run",
 	})
 
@@ -325,11 +325,11 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 		runBudget: run.SearchBudget,
 	}
 
-	cfg := h.buildResearchConfig(research.ModeAgent)
-	cfg.MinSearchQueries = h.cfg.AgentMinSearchQueries
+	cfg := h.buildResearchConfig(research.ModeFusion)
+	cfg.MinSearchQueries = h.cfg.FusionMinSearchQueries
 	cfg.MaxSearchQueries = run.SearchBudget
-	cfg.MaxSourcesRead = h.cfg.AgentMaxSourcesRead
-	cfg.Timeout = time.Duration(h.cfg.AgentTimeoutSeconds) * time.Second
+	cfg.MaxSourcesRead = h.cfg.FusionMaxSourcesRead
+	cfg.Timeout = time.Duration(h.cfg.FusionTimeoutSeconds) * time.Second
 
 	plannerResponder := newOpenRouterPlannerResponder(h.openrouter, run.ModelID, plannerReasoningEffort(run.ReasoningEffort))
 	planner := research.NewJSONPlanner(plannerResponder)
@@ -337,7 +337,7 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 
 	historyMessages, err := h.listConversationPromptMessages(ctx, run.UserID, run.ConversationID, maxConversationHistoryMessages)
 	if err != nil {
-		return h.failAgentRun(ctx, run.ID, "failed to load agent conversation history")
+		return h.failFusionRun(ctx, run.ID, "failed to load fusion conversation history")
 	}
 
 	userPrompt := ""
@@ -348,11 +348,11 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 		}
 	}
 	if strings.TrimSpace(userPrompt) == "" {
-		return h.failAgentRun(ctx, run.ID, "failed to resolve agent prompt")
+		return h.failFusionRun(ctx, run.ID, "failed to resolve fusion prompt")
 	}
 	attachedFiles, err := h.listFilesForMessage(ctx, run.UserID, run.UserMessageID)
 	if err != nil {
-		log.Printf("agent attachment lookup failed: run_id=%s message_id=%s err=%v", run.ID, run.UserMessageID, err)
+		log.Printf("fusion attachment lookup failed: run_id=%s message_id=%s err=%v", run.ID, run.UserMessageID, err)
 	} else if len(attachedFiles) > 0 {
 		userPrompt = h.appendFileContextToPrompt(userPrompt, attachedFiles)
 	}
@@ -365,36 +365,36 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 		appendStageProgress(progress)
 	})
 	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		log.Printf("agent research failed: run_id=%s err=%v", run.ID, err)
+		log.Printf("fusion research failed: run_id=%s err=%v", run.ID, err)
 	}
 
 	citations := convertResearchCitations(researchResult.Citations, h.cfg.ResearchMaxCitationsDeep)
-	roles, roleErr := h.runAgentRoleDebate(ctx, run.ModelID, run.ReasoningEffort, userPrompt, citations, appendStageProgress)
+	roles, roleErr := h.runFusionPerspectiveReview(ctx, run.ModelID, run.ReasoningEffort, userPrompt, citations, appendStageProgress)
 	if roleErr != nil {
-		return h.failAgentRun(ctx, run.ID, "agent debate failed")
+		return h.failFusionRun(ctx, run.ID, "fusion debate failed")
 	}
 	appendStageProgress(research.Progress{
 		Phase:  research.PhaseSynthesizing,
 		Title:  "Writing final answer",
 		Detail: "Combining evidence and debate results",
 	})
-	answer, reasoningContent, usage, synthErr := h.runAgentSynthesis(ctx, run.ModelID, run.ReasoningEffort, userPrompt, historyMessages, citations, roles)
+	answer, reasoningContent, usage, synthErr := h.runFusionSynthesis(ctx, run.ModelID, run.ReasoningEffort, userPrompt, historyMessages, citations, roles)
 	if synthErr != nil {
-		return h.failAgentRun(ctx, run.ID, "agent synthesis failed")
+		return h.failFusionRun(ctx, run.ID, "fusion synthesis failed")
 	}
 
 	orderedCitations := orderCitationsByClaims(citations, answer)
 	appendStageProgress(research.Progress{
 		Phase:  research.PhaseFinalizing,
 		Title:  "Finalizing response",
-		Detail: "Saving answer, citations, and agent summaries",
+		Detail: "Saving answer, citations, and fusion summaries",
 	})
 	traceCollector.MarkDone()
-	if err := h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, answer, traceCollector, orderedCitations, messageUsageFromOpenRouter(usage), toAgentSummaries(roles), thinkingTraceStatusDone); err != nil {
+	if err := h.updateFusionAssistantMessage(ctx, run.UserID, run.AssistantMessageID, answer, traceCollector, orderedCitations, messageUsageFromOpenRouter(usage), toFusionSummaries(roles), thinkingTraceStatusDone); err != nil {
 		return err
 	}
 
-	if err := h.finishAgentRun(ctx, run.ID, "completed", "", searcher.searchesUsed, researchResult.SourcesRead); err != nil {
+	if err := h.finishFusionRun(ctx, run.ID, "completed", "", searcher.searchesUsed, researchResult.SourcesRead); err != nil {
 		return err
 	}
 	if usage != nil {
@@ -404,19 +404,19 @@ func (h Handler) executeAgentRun(ctx context.Context, runID string) error {
 	return nil
 }
 
-func (h Handler) runAgentRoleDebate(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, onProgress func(research.Progress)) ([]agentRoleResult, error) {
-	roles := []agentRoleDefinition{
+func (h Handler) runFusionPerspectiveReview(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, onProgress func(research.Progress)) ([]fusionPerspectiveResult, error) {
+	roles := []fusionPerspectiveDefinition{
 		{Name: "Scout", System: "You are Scout. Find the strongest broad answer and the most useful resource directions."},
 		{Name: "Skeptic", System: "You are Skeptic. Look for contradictions, edge cases, and reasons the obvious answer may be incomplete."},
 		{Name: "Verifier", System: "You are Verifier. Focus on source quality, recency, and citation discipline."},
 		{Name: "User Advocate", System: "You are User Advocate. Focus on what the user actually needs, what would make the answer clearer, and what actionability is missing."},
 	}
 
-	firstRound := make([]agentRoleResult, len(roles))
+	firstRound := make([]fusionPerspectiveResult, len(roles))
 	if onProgress != nil {
 		onProgress(research.Progress{
 			Phase:       research.PhaseEvaluating,
-			Title:       "Comparing agent viewpoints",
+			Title:       "Comparing fusion viewpoints",
 			Detail:      "Round 1 of 2",
 			Pass:        1,
 			TotalPasses: 2,
@@ -426,7 +426,7 @@ func (h Handler) runAgentRoleDebate(ctx context.Context, modelID, reasoningEffor
 		return nil, err
 	}
 
-	secondRound := make([]agentRoleResult, len(roles))
+	secondRound := make([]fusionPerspectiveResult, len(roles))
 	if onProgress != nil {
 		onProgress(research.Progress{
 			Phase:       research.PhaseIterating,
@@ -442,7 +442,7 @@ func (h Handler) runAgentRoleDebate(ctx context.Context, modelID, reasoningEffor
 	return secondRound, nil
 }
 
-func (h Handler) runRoleRound(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, peerResults []agentRoleResult, defs []agentRoleDefinition, out []agentRoleResult) error {
+func (h Handler) runRoleRound(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, peerResults []fusionPerspectiveResult, defs []fusionPerspectiveDefinition, out []fusionPerspectiveResult) error {
 	var wg sync.WaitGroup
 	errCh := make(chan error, len(defs))
 	for i, def := range defs {
@@ -468,7 +468,7 @@ func (h Handler) runRoleRound(ctx context.Context, modelID, reasoningEffort, que
 	return nil
 }
 
-func (h Handler) runRolePrompt(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, peerResults []agentRoleResult, def agentRoleDefinition) (agentRoleResult, error) {
+func (h Handler) runRolePrompt(ctx context.Context, modelID, reasoningEffort, question string, citations []citationResponse, peerResults []fusionPerspectiveResult, def fusionPerspectiveDefinition) (fusionPerspectiveResult, error) {
 	var prompt strings.Builder
 	prompt.WriteString(def.System)
 	prompt.WriteString("\nReturn strict JSON with keys: role, summary, objections, confidence, evidenceIds.\n")
@@ -495,11 +495,11 @@ func (h Handler) runRolePrompt(ctx context.Context, modelID, reasoningEffort, qu
 		{Role: "user", Content: prompt.String()},
 	})
 	if err != nil {
-		return agentRoleResult{}, err
+		return fusionPerspectiveResult{}, err
 	}
-	var parsed agentRoleResult
+	var parsed fusionPerspectiveResult
 	if err := json.Unmarshal([]byte(extractJSONObject(response)), &parsed); err != nil {
-		return agentRoleResult{
+		return fusionPerspectiveResult{
 			Role:       def.Name,
 			Summary:    strings.TrimSpace(response),
 			Confidence: 0.5,
@@ -514,7 +514,7 @@ func (h Handler) runRolePrompt(ctx context.Context, modelID, reasoningEffort, qu
 	return parsed, nil
 }
 
-func (h Handler) runAgentSynthesis(ctx context.Context, modelID, reasoningEffort, question string, history []openrouter.Message, citations []citationResponse, roles []agentRoleResult) (string, string, *openrouter.Usage, error) {
+func (h Handler) runFusionSynthesis(ctx context.Context, modelID, reasoningEffort, question string, history []openrouter.Message, citations []citationResponse, roles []fusionPerspectiveResult) (string, string, *openrouter.Usage, error) {
 	var prompt strings.Builder
 	prompt.WriteString("Write the best possible answer for the user using the cited evidence")
 	if len(roles) > 0 {
@@ -608,10 +608,10 @@ func extractJSONObject(raw string) string {
 	return trimmed
 }
 
-func toAgentSummaries(results []agentRoleResult) []agentSummary {
-	summaries := make([]agentSummary, 0, len(results))
+func toFusionSummaries(results []fusionPerspectiveResult) []fusionSummary {
+	summaries := make([]fusionSummary, 0, len(results))
 	for _, result := range results {
-		summaries = append(summaries, agentSummary{
+		summaries = append(summaries, fusionSummary{
 			Role:        result.Role,
 			Summary:     result.Summary,
 			Objections:  result.Objections,
@@ -622,33 +622,33 @@ func toAgentSummaries(results []agentRoleResult) []agentSummary {
 	return summaries
 }
 
-func (h Handler) insertAgentRun(ctx context.Context, run agentRunRecord) error {
+func (h Handler) insertFusionRun(ctx context.Context, run fusionRunRecord) error {
 	if run.WorkflowType == "" {
 		run.WorkflowType = "single_model"
 	}
 	_, err := h.db.ExecContext(ctx, `
-INSERT INTO agent_runs (
-  id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, reasoning_effort, status, search_budget, searches_used, sources_read, last_error, workflow_type, source_model_ids_json, fusion_model_id, grounding_enabled, council_config_json, created_at, updated_at
+INSERT INTO fusion_runs (
+  id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, reasoning_effort, status, search_budget, searches_used, sources_read, last_error, workflow_type, source_model_ids_json, fusion_model_id, grounding_enabled, fusion_config_json, created_at, updated_at
 )
 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
-`, run.ID, run.UserID, run.ConversationID, run.UserMessageID, run.AssistantMessageID, run.ModelID, nullableString(run.ReasoningEffort), run.Status, run.SearchBudget, run.SearchesUsed, run.SourcesRead, nullableString(run.LastError), run.WorkflowType, nullableString(run.SourceModelIDsJSON), nullableString(run.FusionModelID), run.GroundingEnabled, nullableString(run.CouncilConfigJSON))
+`, run.ID, run.UserID, run.ConversationID, run.UserMessageID, run.AssistantMessageID, run.ModelID, nullableString(run.ReasoningEffort), run.Status, run.SearchBudget, run.SearchesUsed, run.SourcesRead, nullableString(run.LastError), run.WorkflowType, nullableString(run.SourceModelIDsJSON), nullableString(run.FusionModelID), run.GroundingEnabled, nullableString(run.FusionConfigJSON))
 	return err
 }
 
-func (h Handler) claimAgentRun(ctx context.Context, runID string) (*agentRunRecord, error) {
+func (h Handler) claimFusionRun(ctx context.Context, runID string) (*fusionRunRecord, error) {
 	tx, err := h.db.BeginTx(ctx, nil)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 
-	run := agentRunRecord{}
+	run := fusionRunRecord{}
 	err = tx.QueryRowContext(ctx, `
-SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, ''), workflow_type, COALESCE(source_model_ids_json, ''), COALESCE(fusion_model_id, ''), grounding_enabled, COALESCE(council_config_json, '')
-FROM agent_runs
+SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, ''), workflow_type, COALESCE(source_model_ids_json, ''), COALESCE(fusion_model_id, ''), grounding_enabled, COALESCE(fusion_config_json, '')
+FROM fusion_runs
 WHERE id = ?
 LIMIT 1;
-`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError, &run.WorkflowType, &run.SourceModelIDsJSON, &run.FusionModelID, &run.GroundingEnabled, &run.CouncilConfigJSON)
+`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError, &run.WorkflowType, &run.SourceModelIDsJSON, &run.FusionModelID, &run.GroundingEnabled, &run.FusionConfigJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -659,7 +659,7 @@ LIMIT 1;
 		return nil, nil
 	}
 	result, err := tx.ExecContext(ctx, `
-UPDATE agent_runs
+UPDATE fusion_runs
 SET status = 'running', started_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 WHERE id = ? AND status = 'queued';
 `, runID)
@@ -680,50 +680,50 @@ WHERE id = ? AND status = 'queued';
 	return &run, nil
 }
 
-func (h Handler) failAgentRun(ctx context.Context, runID, message string) error {
-	run, err := h.loadAgentRun(ctx, runID)
+func (h Handler) failFusionRun(ctx context.Context, runID, message string) error {
+	run, err := h.loadFusionRun(ctx, runID)
 	if err == nil && run != nil {
 		traceCollector, traceErr := h.loadMessageTrace(ctx, run.UserID, run.AssistantMessageID)
 		if traceErr != nil {
 			traceCollector = newThinkingTraceCollector()
 		}
 		traceCollector.MarkStopped(message)
-		if run.WorkflowType == "council_fusion" {
-			_ = h.updateCouncilAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, nil, "", []string{message}, runID, thinkingTraceStatusStopped)
-			_ = h.persistCouncilPublicStatus(ctx, runID, AgentRunStatusResponse{
+		if run.WorkflowType == "multi_model" {
+			_ = h.updateMultiModelFusionAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, nil, "", []string{message}, runID, thinkingTraceStatusStopped)
+			_ = h.persistFusionRunPublicStatus(ctx, runID, FusionRunStatusResponse{
 				ID:       runID,
 				Status:   "failed",
 				Warnings: []string{message},
 			})
 		} else {
-			_ = h.updateAgentAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
+			_ = h.updateFusionAssistantMessage(ctx, run.UserID, run.AssistantMessageID, message, traceCollector, nil, nil, nil, thinkingTraceStatusStopped)
 		}
 	}
 	_, err = h.db.ExecContext(ctx, `
-UPDATE agent_runs
+UPDATE fusion_runs
 SET status = 'failed', last_error = ?, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 `, message, runID)
 	return err
 }
 
-func (h Handler) finishAgentRun(ctx context.Context, runID, status, lastError string, searchesUsed, sourcesRead int) error {
+func (h Handler) finishFusionRun(ctx context.Context, runID, status, lastError string, searchesUsed, sourcesRead int) error {
 	_, err := h.db.ExecContext(ctx, `
-UPDATE agent_runs
+UPDATE fusion_runs
 SET status = ?, last_error = ?, searches_used = ?, sources_read = ?, finished_at = CURRENT_TIMESTAMP, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 `, status, nullableString(lastError), searchesUsed, sourcesRead, runID)
 	return err
 }
 
-func (h Handler) loadAgentRun(ctx context.Context, runID string) (*agentRunRecord, error) {
-	run := agentRunRecord{}
+func (h Handler) loadFusionRun(ctx context.Context, runID string) (*fusionRunRecord, error) {
+	run := fusionRunRecord{}
 	err := h.db.QueryRowContext(ctx, `
-SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, ''), workflow_type, COALESCE(source_model_ids_json, ''), COALESCE(fusion_model_id, ''), grounding_enabled, COALESCE(council_config_json, '')
-FROM agent_runs
+SELECT id, user_id, conversation_id, user_message_id, assistant_message_id, model_id, COALESCE(reasoning_effort, ''), status, search_budget, searches_used, sources_read, COALESCE(last_error, ''), workflow_type, COALESCE(source_model_ids_json, ''), COALESCE(fusion_model_id, ''), grounding_enabled, COALESCE(fusion_config_json, '')
+FROM fusion_runs
 WHERE id = ?
 LIMIT 1;
-`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError, &run.WorkflowType, &run.SourceModelIDsJSON, &run.FusionModelID, &run.GroundingEnabled, &run.CouncilConfigJSON)
+`, runID).Scan(&run.ID, &run.UserID, &run.ConversationID, &run.UserMessageID, &run.AssistantMessageID, &run.ModelID, &run.ReasoningEffort, &run.Status, &run.SearchBudget, &run.SearchesUsed, &run.SourcesRead, &run.LastError, &run.WorkflowType, &run.SourceModelIDsJSON, &run.FusionModelID, &run.GroundingEnabled, &run.FusionConfigJSON)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, nil
 	}
@@ -751,7 +751,7 @@ LIMIT 1;
 	return collector, nil
 }
 
-func (h Handler) updateAgentAssistantMessage(ctx context.Context, userID, messageID, content string, traceCollector *thinkingTraceCollector, citations []citationResponse, usage *messageUsage, summaries []agentSummary, desiredStatus string) error {
+func (h Handler) updateFusionAssistantMessage(ctx context.Context, userID, messageID, content string, traceCollector *thinkingTraceCollector, citations []citationResponse, usage *messageUsage, summaries []fusionSummary, desiredStatus string) error {
 	trace := traceCollector.Snapshot()
 	if trace != nil && desiredStatus != "" {
 		trace.Status = desiredStatus
@@ -760,7 +760,7 @@ func (h Handler) updateAgentAssistantMessage(ctx context.Context, userID, messag
 	if err != nil {
 		return err
 	}
-	summariesJSON, err := encodeAgentSummariesJSON(summaries)
+	summariesJSON, err := encodeFusionSummariesJSON(summaries)
 	if err != nil {
 		return err
 	}
@@ -773,7 +773,7 @@ func (h Handler) updateAgentAssistantMessage(ctx context.Context, userID, messag
 
 	if _, err := tx.ExecContext(ctx, `
 UPDATE messages
-SET content = ?, thinking_trace_json = ?, agent_summaries_json = ?,
+SET content = ?, thinking_trace_json = ?, fusion_summaries_json = ?,
     prompt_tokens = COALESCE(?, prompt_tokens),
     completion_tokens = COALESCE(?, completion_tokens),
     total_tokens = COALESCE(?, total_tokens),
@@ -783,7 +783,7 @@ SET content = ?, thinking_trace_json = ?, agent_summaries_json = ?,
     tokens_per_second = COALESCE(?, tokens_per_second),
     usage_model_id = COALESCE(?, usage_model_id),
     usage_provider_name = COALESCE(?, usage_provider_name),
-    response_mode = 'agent'
+    response_mode = 'fusion'
 WHERE id = ? AND user_id = ?;
 `, content, traceJSON, summariesJSON,
 		nullableUsageInt(usage, func(u *messageUsage) *int { return &u.PromptTokens }),
@@ -848,7 +848,7 @@ func nullableUsageString(usage *messageUsage, selector func(*messageUsage) strin
 	return value
 }
 
-func (h Handler) availableAgentSearchBudget(ctx context.Context) (int, error) {
+func (h Handler) availableFusionSearchBudget(ctx context.Context) (int, error) {
 	used, err := h.currentBraveMonthlyUsage(ctx)
 	if err != nil {
 		return 0, err
@@ -857,8 +857,8 @@ func (h Handler) availableAgentSearchBudget(ctx context.Context) (int, error) {
 	if available < 0 {
 		available = 0
 	}
-	if available > h.cfg.AgentHardMaxSearchQueries {
-		available = h.cfg.AgentHardMaxSearchQueries
+	if available > h.cfg.FusionHardMaxSearchQueries {
+		available = h.cfg.FusionHardMaxSearchQueries
 	}
 	return available, nil
 }
@@ -890,7 +890,7 @@ type distributedBraveSearcher struct {
 
 func (s *distributedBraveSearcher) Search(ctx context.Context, query string, count int) ([]brave.SearchResult, error) {
 	if s.searchesUsed >= s.runBudget {
-		return nil, errors.New("agent search budget exhausted")
+		return nil, errors.New("fusion search budget exhausted")
 	}
 	if err := s.handler.acquireDistributedBraveLease(ctx, braveProviderName, braveFreeTierSpacing); err != nil {
 		return nil, err
@@ -901,16 +901,16 @@ func (s *distributedBraveSearcher) Search(ctx context.Context, query string, cou
 	s.searchesUsed++
 	results, err := s.handler.grounding.Search(ctx, query, count)
 	if err != nil {
-		_ = s.handler.recordAgentRunSearches(ctx, s.runID, s.searchesUsed)
+		_ = s.handler.recordFusionRunSearches(ctx, s.runID, s.searchesUsed)
 		return nil, err
 	}
-	_ = s.handler.recordAgentRunSearches(ctx, s.runID, s.searchesUsed)
+	_ = s.handler.recordFusionRunSearches(ctx, s.runID, s.searchesUsed)
 	return results, nil
 }
 
-func (h Handler) recordAgentRunSearches(ctx context.Context, runID string, searchesUsed int) error {
+func (h Handler) recordFusionRunSearches(ctx context.Context, runID string, searchesUsed int) error {
 	_, err := h.db.ExecContext(ctx, `
-UPDATE agent_runs
+UPDATE fusion_runs
 SET searches_used = ?, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 `, searchesUsed, runID)
@@ -1034,7 +1034,7 @@ WHERE provider = ?;
 	}
 }
 
-func (h Handler) updateCouncilAssistantMessage(
+func (h Handler) updateMultiModelFusionAssistantMessage(
 	ctx context.Context,
 	userID string,
 	messageID string,
@@ -1042,11 +1042,11 @@ func (h Handler) updateCouncilAssistantMessage(
 	traceCollector *thinkingTraceCollector,
 	citations []citationResponse,
 	usage *usageResponse,
-	agentSources []CouncilSourceResult,
-	agentAnalysis *CouncilAnalysis,
+	fusionSources []FusionSourceResult,
+	fusionAnalysis *FusionAnalysis,
 	resultModelID string,
 	warnings []string,
-	agentRunID string,
+	fusionRunID string,
 	desiredStatus string,
 ) error {
 	trace := traceCollector.Snapshot()
@@ -1059,14 +1059,14 @@ func (h Handler) updateCouncilAssistantMessage(
 	}
 
 	var sourcesJSON any
-	if len(agentSources) > 0 {
-		sourcesBytes, _ := json.Marshal(agentSources)
+	if len(fusionSources) > 0 {
+		sourcesBytes, _ := json.Marshal(fusionSources)
 		sourcesJSON = string(sourcesBytes)
 	}
 
 	var analysisJSON any
-	if agentAnalysis != nil {
-		analysisBytes, _ := json.Marshal(agentAnalysis)
+	if fusionAnalysis != nil {
+		analysisBytes, _ := json.Marshal(fusionAnalysis)
 		analysisJSON = string(analysisBytes)
 	}
 
@@ -1086,10 +1086,10 @@ func (h Handler) updateCouncilAssistantMessage(
 UPDATE messages
 SET content = COALESCE(NULLIF(?, ''), content),
     thinking_trace_json = ?,
-    agent_sources_json = COALESCE(?, agent_sources_json),
-    agent_analysis_json = COALESCE(?, agent_analysis_json),
-    agent_result_model_id = COALESCE(?, agent_result_model_id),
-    agent_result_usage_json = COALESCE(?, agent_result_usage_json),
+    fusion_sources_json = COALESCE(?, fusion_sources_json),
+    fusion_analysis_json = COALESCE(?, fusion_analysis_json),
+    fusion_result_model_id = COALESCE(?, fusion_result_model_id),
+    fusion_result_usage_json = COALESCE(?, fusion_result_usage_json),
     prompt_tokens = COALESCE(?, prompt_tokens),
     completion_tokens = COALESCE(?, completion_tokens),
     total_tokens = COALESCE(?, total_tokens),
@@ -1099,8 +1099,8 @@ SET content = COALESCE(NULLIF(?, ''), content),
     tokens_per_second = COALESCE(?, tokens_per_second),
     usage_model_id = COALESCE(?, usage_model_id),
     usage_provider_name = COALESCE(?, usage_provider_name),
-    agent_run_id = COALESCE(?, agent_run_id),
-    response_mode = 'agent'
+    fusion_run_id = COALESCE(?, fusion_run_id),
+    response_mode = 'fusion'
 WHERE id = ? AND user_id = ?;
 `, content, traceJSON, sourcesJSON, analysisJSON, nullableString(resultModelID), resultUsageJSON,
 		nullableUsageResponseInt(usage, func(u *usageResponse) *int { return &u.PromptTokens }),
@@ -1112,7 +1112,7 @@ WHERE id = ? AND user_id = ?;
 		nullableUsageResponseFloat(usage, func(u *usageResponse) *float64 { return u.TokensPerSecond }),
 		nullableUsageResponseString(usage, func(u *usageResponse) string { return u.ModelID }),
 		nullableUsageResponseString(usage, func(u *usageResponse) string { return u.ProviderName }),
-		nullableString(agentRunID), messageID, userID); err != nil {
+		nullableString(fusionRunID), messageID, userID); err != nil {
 		return err
 	}
 
@@ -1169,7 +1169,7 @@ func nullableUsageResponseString(usage *usageResponse, selector func(*usageRespo
 	return value
 }
 
-func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input councilQueuedStreamInput) {
+func (h Handler) streamMultiModelFusionQueuedResponse(ctx context.Context, w http.ResponseWriter, flusher http.Flusher, input multiModelFusionQueuedStreamInput) {
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("Cache-Control", "no-cache")
 	w.Header().Set("Connection", "keep-alive")
@@ -1180,11 +1180,11 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 		"type":           "metadata",
 		"grounding":      input.Grounding,
 		"deepResearch":   false,
-		"responseMode":   "agent",
+		"responseMode":   "fusion",
 		"modelId":        input.FusionModel.ModelID,
 		"conversationId": input.ConversationID,
 		"userMessageId":  input.UserMessageID,
-		"agentRunId":     runID,
+		"fusionRunId":     runID,
 	}
 	if input.FusionModel.ReasoningEffort != "" {
 		metadataEvent["reasoningEffort"] = input.FusionModel.ReasoningEffort
@@ -1194,7 +1194,7 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 	traceCollector := newThinkingTraceCollector()
 	initialProgress := summarizedProgress(research.Progress{
 		Phase:   research.PhasePlanning,
-		Message: "Queueing council workflow",
+		Message: "Queueing fusion workflow",
 	}, research.ProgressSummaryInput{
 		Phase: research.PhasePlanning,
 	})
@@ -1212,14 +1212,14 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 		input.FusionModel.ModelID,
 		input.Grounding,
 		false,
-		"agent",
+		"fusion",
 		nil,
 		traceCollector.Snapshot(),
 		nil,
 		nil,
 	)
 	if err != nil {
-		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to create council placeholder"})
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to create fusion placeholder"})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
 		return
@@ -1228,19 +1228,19 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 	searchBudget := 0
 	if input.Grounding {
 		var budgetErr error
-		searchBudget, budgetErr = h.availableAgentSearchBudget(ctx)
+		searchBudget, budgetErr = h.availableFusionSearchBudget(ctx)
 		if budgetErr != nil {
 			_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to reserve Brave search budget"})
 			_ = writeSSEEvent(w, map[string]any{"type": "done"})
 			flusher.Flush()
-			_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusStopped)
+			_ = h.updateMultiModelFusionAssistantMessage(ctx, input.UserID, assistantMessageID, "Fusion mode is temporarily unavailable while Brave quota is being checked.", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusStopped)
 			return
 		}
 	}
 
 	minRequiredBudget := len(input.SourceModels) * 1
 	if input.Grounding && searchBudget < minRequiredBudget {
-		if err := h.insertAgentRun(ctx, agentRunRecord{
+		if err := h.insertFusionRun(ctx, fusionRunRecord{
 			ID:                 runID,
 			UserID:             input.UserID,
 			ConversationID:     input.ConversationID,
@@ -1250,23 +1250,23 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 			ReasoningEffort:    input.FusionModel.ReasoningEffort,
 			Status:             "failed",
 			SearchBudget:       searchBudget,
-			LastError:          "Not enough Brave monthly budget remains for council mode.",
-			WorkflowType:       "council_fusion",
+			LastError:          "Not enough Brave monthly budget remains for fusion mode.",
+			WorkflowType:       "multi_model",
 		}); err != nil {
-			log.Printf("council run persist failed: %v", err)
+			log.Printf("fusion run persist failed: %v", err)
 		}
 		_ = writeSSEEvent(w, map[string]any{
 			"type":    "warning",
-			"scope":   "agent",
-			"message": "Council mode needs search budget, but the remaining monthly Brave budget is too low right now.",
+			"scope":   "fusion",
+			"message": "Fusion mode needs search budget, but the remaining monthly Brave budget is too low right now.",
 		})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
-		_ = h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "Council mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusStopped)
+		_ = h.updateMultiModelFusionAssistantMessage(ctx, input.UserID, assistantMessageID, "Fusion mode could not start because the remaining Brave free-tier budget is below the minimum search reserve.", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusStopped)
 		return
 	}
 
-	configJSON, _ := json.Marshal(CouncilRunConfig{
+	configJSON, _ := json.Marshal(FusionRunConfig{
 		SourceModels: input.SourceModels,
 		FusionModel:  input.FusionModel,
 		Grounding:    input.Grounding,
@@ -1278,7 +1278,7 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 	}
 	sourceModelIDsJSON, _ := json.Marshal(sourceModelIDs)
 
-	if err := h.insertAgentRun(ctx, agentRunRecord{
+	if err := h.insertFusionRun(ctx, fusionRunRecord{
 		ID:                 runID,
 		UserID:             input.UserID,
 		ConversationID:     input.ConversationID,
@@ -1288,13 +1288,13 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 		ReasoningEffort:    input.FusionModel.ReasoningEffort,
 		Status:             "queued",
 		SearchBudget:       searchBudget,
-		WorkflowType:       "council_fusion",
+		WorkflowType:       "multi_model",
 		SourceModelIDsJSON: string(sourceModelIDsJSON),
 		FusionModelID:      input.FusionModel.ModelID,
 		GroundingEnabled:   input.Grounding,
-		CouncilConfigJSON:  string(configJSON),
+		FusionConfigJSON:  string(configJSON),
 	}); err != nil {
-		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to queue council run"})
+		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to queue fusion run"})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})
 		flusher.Flush()
 		return
@@ -1302,7 +1302,7 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 
 	queuedProgress := summarizedProgress(research.Progress{
 		Phase:   research.PhasePlanning,
-		Message: "Queued council workflow",
+		Message: "Queued fusion workflow",
 	}, research.ProgressSummaryInput{
 		Phase: research.PhasePlanning,
 	})
@@ -1311,16 +1311,16 @@ func (h Handler) streamCouncilQueuedResponse(ctx context.Context, w http.Respons
 	_ = writeSSEEvent(w, map[string]any{"type": "done"})
 	flusher.Flush()
 
-	if err := h.updateCouncilAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusRunning); err != nil {
-		log.Printf("council placeholder update failed: run_id=%s err=%v", runID, err)
+	if err := h.updateMultiModelFusionAssistantMessage(ctx, input.UserID, assistantMessageID, "", traceCollector, nil, nil, nil, nil, "", nil, runID, thinkingTraceStatusRunning); err != nil {
+		log.Printf("fusion placeholder update failed: run_id=%s err=%v", runID, err)
 	}
-	if err := h.enqueueAgentRun(context.Background(), runID); err != nil {
-		log.Printf("council enqueue failed: run_id=%s err=%v", runID, err)
-		_ = h.failAgentRun(context.Background(), runID, "failed to enqueue council run")
+	if err := h.enqueueFusionRun(context.Background(), runID); err != nil {
+		log.Printf("fusion enqueue failed: run_id=%s err=%v", runID, err)
+		_ = h.failFusionRun(context.Background(), runID, "failed to enqueue fusion run")
 	}
 }
 
-func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
+func (h Handler) GetFusionRun(w http.ResponseWriter, r *http.Request) {
 	runID := strings.TrimSpace(chi.URLParam(r, "id"))
 	if runID == "" {
 		writeError(w, http.StatusBadRequest, "invalid_request", "run id is required")
@@ -1335,7 +1335,7 @@ func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	row := h.db.QueryRowContext(r.Context(), `
 		SELECT id, status, source_results_json, fusion_analysis_json, fusion_result_json, public_status_json, completed_sources, degraded_sources, failed_sources
-		FROM agent_runs 
+		FROM fusion_runs 
 		WHERE id = ? AND user_id = ?
 	`, runID, user.ID)
 
@@ -1353,14 +1353,14 @@ func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 
 	if err := row.Scan(&id, &status, &sourceResultsJSON, &analysisJSON, &resultJSON, &publicStatusJSON, &completedSources, &degradedSources, &failedSources); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			writeError(w, http.StatusNotFound, "not_found", "agent run not found")
+			writeError(w, http.StatusNotFound, "not_found", "fusion run not found")
 			return
 		}
-		writeError(w, http.StatusInternalServerError, "db_error", "failed to query agent run")
+		writeError(w, http.StatusInternalServerError, "db_error", "failed to query fusion run")
 		return
 	}
 
-	var resp AgentRunStatusResponse
+	var resp FusionRunStatusResponse
 	if publicStatusJSON.Valid && publicStatusJSON.String != "" {
 		_ = json.Unmarshal([]byte(publicStatusJSON.String), &resp)
 	}
@@ -1382,10 +1382,10 @@ func (h Handler) GetAgentRun(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, resp)
 }
 
-func (h Handler) persistCouncilPublicStatus(ctx context.Context, runID string, status AgentRunStatusResponse) error {
+func (h Handler) persistFusionRunPublicStatus(ctx context.Context, runID string, status FusionRunStatusResponse) error {
 	var existingRaw sql.NullString
-	if err := h.db.QueryRowContext(ctx, `SELECT public_status_json FROM agent_runs WHERE id = ?`, runID).Scan(&existingRaw); err == nil && existingRaw.Valid && existingRaw.String != "" {
-		var existing AgentRunStatusResponse
+	if err := h.db.QueryRowContext(ctx, `SELECT public_status_json FROM fusion_runs WHERE id = ?`, runID).Scan(&existingRaw); err == nil && existingRaw.Valid && existingRaw.String != "" {
+		var existing FusionRunStatusResponse
 		if json.Unmarshal([]byte(existingRaw.String), &existing) == nil {
 			if len(status.SourceResults) == 0 {
 				status.SourceResults = existing.SourceResults
@@ -1416,7 +1416,7 @@ func (h Handler) persistCouncilPublicStatus(ctx context.Context, runID string, s
 		return err
 	}
 	_, err = h.db.ExecContext(ctx, `
-UPDATE agent_runs
+UPDATE fusion_runs
 SET public_status_json = ?, updated_at = CURRENT_TIMESTAMP
 WHERE id = ?;
 `, string(payload), runID)

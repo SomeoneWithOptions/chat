@@ -7,7 +7,7 @@ type ModeProfile string
 const (
 	ModeChat         ModeProfile = "chat"
 	ModeDeepResearch ModeProfile = "deep_research"
-	ModeAgent        ModeProfile = "agent"
+	ModeFusion       ModeProfile = "fusion"
 )
 
 const (
@@ -35,7 +35,7 @@ const (
 
 func DefaultProfile(mode ModeProfile) OrchestratorConfig {
 	switch mode {
-	case ModeAgent:
+	case ModeFusion:
 		return OrchestratorConfig{
 			MinSearchQueries:   defaultAgentMinSearchQueries,
 			MaxLoops:           defaultAgentMaxLoops,

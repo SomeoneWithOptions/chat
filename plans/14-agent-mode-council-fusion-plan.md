@@ -1,8 +1,8 @@
-# 14 - Agent Mode Council Fusion Plan
+# 14 - Fusion Mode Fusion Fusion Plan
 
 ## Goal
 
-Replace the current single-model async agent mode with a council-style multi-model workflow where:
+Replace the current single-model async fusion mode with a fusion-style multi-model workflow where:
 
 1. the user selects up to 5 source models,
 2. each selected source model independently answers the same prompt,
@@ -25,17 +25,17 @@ This should feel similar to OpenRouter Labs model fusion, but implemented on top
 
 These settings and behaviors are the recommended defaults for the first implementation.
 
-### Council composition
+### Fusion composition
 
 - Minimum source models: `1`
 - Maximum source models: `5`
 - Fusion model: exactly `1`
 - Fusion model may also be one of the selected source models
-- Council mode remains an async workflow backed by the existing agent run system
+- Fusion mode remains an async workflow backed by the existing fusion run system
 
 ### Grounding behavior
 
-- Grounding can be turned on or off for a council run
+- Grounding can be turned on or off for a fusion run
 - If grounding is on, every source model gets its own research pass and produces its own citations
 - Every grounded source model should target at least `15 readable web sources` from a single Brave search pass
 - "Readable web sources" means successfully fetched and extracted pages, not just Brave snippets
@@ -43,19 +43,19 @@ These settings and behaviors are the recommended defaults for the first implemen
 
 ### Brave search strategy
 
-- Brave search requests should be globally serialized across the entire council run
+- Brave search requests should be globally serialized across the entire fusion run
 - Minimum spacing between Brave requests: `1100ms`
 - Each Brave request should ask for `15` search results
 - A grounded source model should do exactly one Brave request, read those returned sources once, then produce one grounded answer before the runner advances to the next selected model
 
-### Recommended council grounding budgets
+### Recommended fusion grounding budgets
 
-- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL=15`
-- `COUNCIL_SEARCH_RESULTS_PER_QUERY=15`
-- `COUNCIL_MAX_BRAVE_SEARCHES_IN_FLIGHT=1`
-- `COUNCIL_MAX_PAGE_READS_IN_FLIGHT=6`
-- `COUNCIL_TIMEOUT_SECONDS=1200`
-- `COUNCIL_REQUIRE_AT_LEAST_ONE_SUCCESSFUL_SOURCE_MODEL=true`
+- `FUSION_TARGET_READABLE_SOURCES_PER_MODEL=15`
+- `FUSION_SEARCH_RESULTS_PER_QUERY=15`
+- `FUSION_MAX_BRAVE_SEARCHES_IN_FLIGHT=1`
+- `FUSION_MAX_PAGE_READS_IN_FLIGHT=6`
+- `FUSION_TIMEOUT_SECONDS=1200`
+- `FUSION_REQUIRE_AT_LEAST_ONE_SUCCESSFUL_SOURCE_MODEL=true`
 
 ### Failure and degradation behavior
 
@@ -68,31 +68,31 @@ These settings and behaviors are the recommended defaults for the first implemen
 ### Live UX behavior
 
 - Keep async worker execution
-- Add live in-session updates for council runs so the user can watch `Sources -> Analysis -> Result` update without refreshing the conversation
-- Use polling for council run status as the recommended first implementation, rather than trying to keep a single browser stream attached to the background worker for the full run lifetime
+- Add live in-session updates for fusion runs so the user can watch `Sources -> Analysis -> Result` update without refreshing the conversation
+- Use polling for fusion run status as the recommended first implementation, rather than trying to keep a single browser stream attached to the background worker for the full run lifetime
 
 ---
 
 ## Important Baseline Notes About the Current Code
 
-Current agent mode is async, but it is still fundamentally single-model.
+Current fusion mode is async, but it is still fundamentally single-model.
 
 Today:
 
 - request enters `POST /v1/chat/messages`
-- if `mode=agent`, backend queues an async run
+- if `mode=fusion`, backend queues an async run
 - the run performs grounded research
 - the same selected model runs a role-based debate
 - the same selected model synthesizes the final answer
 
 Important current grounding details:
 
-- Brave search requests for deep research and agent paths are already spaced at about `1100ms`
+- Brave search requests for deep research and fusion paths are already spaced at about `1100ms`
 - this spacing is enforced around Brave search requests, not page reads
 - the current Brave client already supports requesting multiple results in one request with the `count` parameter
-- current agent mode does not guarantee 15 readable web sources per model because it is not a per-model council workflow and the orchestrator currently optimizes for bounded evidence, not a hard per-model readable-source target
+- current fusion mode does not guarantee 15 readable web sources per model because it is not a per-model fusion workflow and the orchestrator currently optimizes for bounded evidence, not a hard per-model readable-source target
 
-That means the new council mode can and should reuse the existing Brave pacing pattern, but it needs a council-specific single-pass orchestration layer instead of the legacy iterative research loop.
+That means the new fusion mode can and should reuse the existing Brave pacing pattern, but it needs a fusion-specific single-pass orchestration layer instead of the legacy iterative research loop.
 
 ---
 
@@ -101,7 +101,7 @@ That means the new council mode can and should reuse the existing Brave pacing p
 Current key files:
 
 - backend request entry: `backend/internal/httpapi/handler.go`
-- async execution: `backend/internal/httpapi/agent_mode.go`
+- async execution: `backend/internal/httpapi/fusion_mode.go`
 - research orchestration: `backend/internal/httpapi/research_orchestration.go`
 - research loop: `backend/internal/research/orchestrator.go`
 - Brave client: `backend/internal/brave/client.go`
@@ -114,7 +114,7 @@ Current key files:
 
 Important behaviors to preserve:
 
-- async queued agent runs
+- async queued fusion runs
 - assistant placeholder messages
 - conversation persistence
 - message citations
@@ -123,10 +123,10 @@ Important behaviors to preserve:
 
 Important current limitations to remove:
 
-- `agent_runs` is centered around one `model_id`
-- frontend state assumes one agent model
-- `agent_summaries_json` stores role summaries, not per-model outputs
-- the current async worker writes results later, but the browser does not have a dedicated public council run status channel
+- `fusion_runs` is centered around one `model_id`
+- frontend state assumes one fusion model
+- `fusion_summaries_json` stores role summaries, not per-model outputs
+- the current async worker writes results later, but the browser does not have a dedicated public fusion run status channel
 
 ---
 
@@ -134,22 +134,22 @@ Important current limitations to remove:
 
 ## In Scope
 
-- New council configuration for agent mode
+- New fusion configuration for fusion mode
 - Up to 5 source models
 - One fusion model
 - Individual source model answers visible to the user
 - Structured fusion analysis
 - Final fused result from the same fusion model
-- Grounded and ungrounded council runs
-- Persistence of council state into conversation history
-- Live council progress updates in the chat UI
-- Backward-compatible rendering of old agent messages
-- Tests for council success, degradation, and failure paths
+- Grounded and ungrounded fusion runs
+- Persistence of fusion state into conversation history
+- Live fusion progress updates in the chat UI
+- Backward-compatible rendering of old fusion messages
+- Tests for fusion success, degradation, and failure paths
 
 ## Out of Scope
 
 - Exposing raw chain-of-thought
-- Arbitrary tool-use agent swarms beyond the existing research and completion flow
+- Arbitrary tool-use fusion swarms beyond the existing research and completion flow
 - Changing normal chat or deep research semantics beyond required shared code reuse
 - Deploying frontend or backend as part of this planning work
 
@@ -163,7 +163,7 @@ To avoid confusion, this plan uses the following terms consistently:
 - `fusion model`: the model that performs structured comparison and then writes the final answer
 - `readable web source`: a successfully fetched and extracted web page or document used for grounding
 - `source card`: the UI card for one source model in Step 1/3
-- `council run`: the full async workflow for one council-mode assistant response
+- `fusion run`: the full async workflow for one fusion-mode assistant response
 
 ---
 
@@ -216,7 +216,7 @@ Recommended rendering behavior:
 - content is bullet-based and concise
 - source-model badges should be shown where useful
 - `Key Differences` should support grouped topics with per-model positions
-- `Blind Spots` should focus on what the overall council still missed relative to the user prompt
+- `Blind Spots` should focus on what the overall fusion still missed relative to the user prompt
 
 ## Step 3/3 - Result
 
@@ -245,13 +245,13 @@ Recommended behavior:
 
 ```text
 User prompt
-  -> create council run
+  -> create fusion run
   -> create assistant placeholder message
   -> launch N source-model jobs
   -> collect source responses and citations
   -> run fusion analysis on fusion model
   -> run final fused answer on same fusion model
-  -> persist full council payload to assistant message
+  -> persist full fusion payload to assistant message
   -> keep UI updated through run-status polling
 ```
 
@@ -262,16 +262,16 @@ User prompt
 - validate source model count and uniqueness
 - validate fusion model exists
 - resolve reasoning effort defaults for each selected model
-- persist council configuration
+- persist fusion configuration
 - create assistant placeholder message
-- create council run record
-- return message metadata and public council run id to the frontend
+- create fusion run record
+- return message metadata and public fusion run id to the frontend
 
 ### Phase B - Source generation
 
 - launch one source-model execution task per selected source model
 - each source-model task can run inference in parallel
-- grounded source-model tasks must request Brave search access through a global council run coordinator
+- grounded source-model tasks must request Brave search access through a global fusion run coordinator
 - persist each source result incrementally as it completes
 
 ### Phase C - Fusion analysis
@@ -297,15 +297,15 @@ User prompt
 
 ## 1) Extend `POST /v1/chat/messages`
 
-The current request shape only supports one agent model. Extend it when `mode=agent`.
+The current request shape only supports one fusion model. Extend it when `mode=fusion`.
 
-### Recommended request body for council mode
+### Recommended request body for fusion mode
 
 ```json
 {
   "conversationId": "string",
   "message": "string",
-  "mode": "agent",
+  "mode": "fusion",
   "grounding": true,
   "sourceModels": [
     { "modelId": "provider/model-a", "reasoningEffort": "high" },
@@ -331,23 +331,23 @@ The current request shape only supports one agent model. Extend it when `mode=ag
 
 For the first implementation, support both:
 
-- old single-model agent requests
-- new council-mode agent requests
+- old single-model fusion requests
+- new fusion-mode fusion requests
 
 Recommended compatibility behavior:
 
-- if old single-model agent shape is received, route it through the legacy agent path
-- if `sourceModels` and `fusionModel` are present, route through the new council path
+- if old single-model fusion shape is received, route it through the legacy fusion path
+- if `sourceModels` and `fusionModel` are present, route through the new fusion path
 
 ## 2) Add a public run status endpoint
 
 Recommended new endpoint:
 
-- `GET /v1/agent-runs/{id}`
+- `GET /v1/fusion-runs/{id}`
 
 This endpoint should return:
 
-- top-level council run status
+- top-level fusion run status
 - current step (`sources`, `analysis`, `result`)
 - per-source model status and payload
 - analysis payload if available
@@ -358,7 +358,7 @@ This endpoint should return:
 Recommended frontend behavior:
 
 - the initial `POST /v1/chat/messages` still creates the assistant placeholder
-- after receiving metadata, the client polls `GET /v1/agent-runs/{id}` every `1-2s` while the run is active
+- after receiving metadata, the client polls `GET /v1/fusion-runs/{id}` every `1-2s` while the run is active
 - polling stops when the run reaches a terminal state
 
 This is the recommended first implementation because it is simpler and more reliable than trying to preserve one browser-to-worker stream for the full async run.
@@ -367,26 +367,26 @@ This is the recommended first implementation because it is simpler and more reli
 
 Update `backend/openapi/openapi.yaml` to document:
 
-- council-mode request body
-- council run status endpoint
-- council-specific response payload types
-- backward compatibility rules for legacy agent mode
+- fusion-mode request body
+- fusion run status endpoint
+- fusion-specific response payload types
+- backward compatibility rules for legacy fusion mode
 
 ---
 
 ## Data Model Changes
 
-## 1) Extend `agent_runs`
+## 1) Extend `fusion_runs`
 
-The current `agent_runs` table is too single-model for council fusion.
+The current `fusion_runs` table is too single-model for fusion fusion.
 
 Add fields for:
 
-- `workflow_type` or `mode_variant` with value `council_fusion`
+- `workflow_type` or `mode_variant` with value `multi_model`
 - `source_model_ids_json`
 - `fusion_model_id`
 - `grounding_enabled`
-- `council_config_json`
+- `fusion_config_json`
 - `source_results_json`
 - `fusion_analysis_json`
 - `fusion_result_json`
@@ -397,46 +397,46 @@ Add fields for:
 
 Recommended first implementation approach:
 
-- keep one row per council run
-- store council state in structured JSON columns
+- keep one row per fusion run
+- store fusion state in structured JSON columns
 - avoid a fully normalized run-step schema until product or analytics needs justify it
 
 ## 2) Extend `messages`
 
-The assistant message must persist the council payload required for conversation replay.
+The assistant message must persist the fusion payload required for conversation replay.
 
 Add fields or structured JSON payloads for:
 
-- `agent_sources_json`
-- `agent_analysis_json`
-- `agent_result_model_id`
-- `agent_result_usage_json`
-- `agent_run_id`
+- `fusion_sources_json`
+- `fusion_analysis_json`
+- `fusion_result_model_id`
+- `fusion_result_usage_json`
+- `fusion_run_id`
 
 Recommended behavior:
 
 - keep the final fused answer in `messages.content`
-- keep the council UI data in structured JSON fields
-- allow the conversation reload path to reconstruct the entire council UI from persisted message data alone
+- keep the fusion UI data in structured JSON fields
+- allow the conversation reload path to reconstruct the entire fusion UI from persisted message data alone
 
 ## 3) Legacy payload handling
 
-Current `agent_summaries_json` should be treated as legacy data.
+Current `fusion_summaries_json` should be treated as legacy data.
 
 Recommended behavior:
 
-- preserve support for old agent messages
-- do not overwrite or reinterpret old role-summary payloads as council data
-- render council UI only when the new council payload exists
+- preserve support for old fusion messages
+- do not overwrite or reinterpret old role-summary payloads as fusion data
+- render fusion UI only when the new fusion payload exists
 
 ## 4) Preferences changes
 
-Current model preferences only store one last-used agent model.
+Current model preferences only store one last-used fusion model.
 
 Add preference fields for:
 
-- `last_used_agent_source_model_ids_json`
-- `last_used_agent_fusion_model_id`
+- `last_used_fusion_source_model_ids_json`
+- `last_used_fusion_model_id`
 
 Reasoning presets should continue using the existing per-user, per-model, per-mode approach.
 
@@ -444,23 +444,23 @@ Reasoning presets should continue using the existing per-user, per-model, per-mo
 
 ## Backend Type Design
 
-Introduce explicit council types rather than overloading the current role-debate types.
+Introduce explicit fusion types rather than overloading the current role-debate types.
 
 ### Recommended types
 
 ```go
-type CouncilSourceSpec struct {
+type FusionSourceSpec struct {
     ModelID         string `json:"modelId"`
     ReasoningEffort string `json:"reasoningEffort,omitempty"`
 }
 
-type CouncilRunConfig struct {
-    SourceModels []CouncilSourceSpec `json:"sourceModels"`
-    FusionModel  CouncilSourceSpec   `json:"fusionModel"`
+type FusionRunConfig struct {
+    SourceModels []FusionSourceSpec `json:"sourceModels"`
+    FusionModel  FusionSourceSpec   `json:"fusionModel"`
     Grounding    bool                `json:"grounding"`
 }
 
-type CouncilSourceResult struct {
+type FusionSourceResult struct {
     ModelID          string             `json:"modelId"`
     Status           string             `json:"status"`
     Response         string             `json:"response,omitempty"`
@@ -474,30 +474,30 @@ type CouncilSourceResult struct {
     Error            string             `json:"error,omitempty"`
 }
 
-type CouncilAnalysisItem struct {
+type FusionAnalysisItem struct {
     Point        string   `json:"point"`
     SourceModels []string `json:"sourceModels,omitempty"`
 }
 
-type CouncilDifferencePosition struct {
+type FusionDifferencePosition struct {
     SourceModel string `json:"sourceModel"`
     Summary     string `json:"summary"`
 }
 
-type CouncilDifferenceGroup struct {
+type FusionDifferenceGroup struct {
     Topic     string                      `json:"topic"`
-    Positions []CouncilDifferencePosition `json:"positions"`
+    Positions []FusionDifferencePosition `json:"positions"`
 }
 
-type CouncilAnalysis struct {
-    Agreement       []CouncilAnalysisItem    `json:"agreement"`
-    KeyDifferences  []CouncilDifferenceGroup `json:"keyDifferences"`
-    PartialCoverage []CouncilAnalysisItem    `json:"partialCoverage"`
-    UniqueInsights  []CouncilAnalysisItem    `json:"uniqueInsights"`
-    BlindSpots      []CouncilAnalysisItem    `json:"blindSpots"`
+type FusionAnalysis struct {
+    Agreement       []FusionAnalysisItem    `json:"agreement"`
+    KeyDifferences  []FusionDifferenceGroup `json:"keyDifferences"`
+    PartialCoverage []FusionAnalysisItem    `json:"partialCoverage"`
+    UniqueInsights  []FusionAnalysisItem    `json:"uniqueInsights"`
+    BlindSpots      []FusionAnalysisItem    `json:"blindSpots"`
 }
 
-type CouncilFinalResult struct {
+type FusionFinalResult struct {
     ModelID          string        `json:"modelId"`
     Response         string        `json:"response"`
     ReasoningContent string        `json:"reasoningContent,omitempty"`
@@ -507,8 +507,8 @@ type CouncilFinalResult struct {
 
 Recommended behavior:
 
-- treat the current `agentSummary` as legacy-only for old agent mode
-- all new council runs should use the new council result types
+- treat the current `fusionSummary` as legacy-only for old fusion mode
+- all new fusion runs should use the new fusion result types
 
 ---
 
@@ -520,7 +520,7 @@ This is the highest-risk and most important architectural area.
 
 Brave rate limits apply to Brave search requests, not page reads.
 
-That means the council grounding pipeline must be split into two independent sub-systems:
+That means the fusion grounding pipeline must be split into two independent sub-systems:
 
 1. `Search stage`
    - uses Brave
@@ -579,7 +579,7 @@ Build a run-level grounding coordinator responsible for:
 - tracking per-source readable web source counts
 - exposing status metrics for the UI and logs
 
-This should live as council-specific orchestration code rather than being hidden inside a single-model research loop.
+This should live as fusion-specific orchestration code rather than being hidden inside a single-model research loop.
 
 ---
 
@@ -699,32 +699,32 @@ The fusion model used for Step 2/3 and Step 3/3 must be the same model for a giv
 Update `backend/internal/httpapi/handler.go`:
 
 - extend the chat request type to accept `sourceModels` and `fusionModel`
-- validate council-mode input
-- preserve backward compatibility for legacy agent requests
-- persist council-specific model selection preferences
-- include the new council run id in the initial metadata written to the placeholder message
+- validate fusion-mode input
+- preserve backward compatibility for legacy fusion requests
+- persist fusion-specific model selection preferences
+- include the new fusion run id in the initial metadata written to the placeholder message
 
 Detailed steps:
 
-1. add new request structs for council source model selection
+1. add new request structs for fusion source model selection
 2. add validation helpers for count, uniqueness, and model existence
 3. resolve reasoning efforts per selected model
-4. branch council requests to a new council queue path
-5. keep legacy agent path available until council rollout is complete
+4. branch fusion requests to a new fusion queue path
+5. keep legacy fusion path available until fusion rollout is complete
 
-## 2) Council run execution layer
+## 2) Fusion run execution layer
 
-Refactor `backend/internal/httpapi/agent_mode.go`:
+Refactor `backend/internal/httpapi/fusion_mode.go`:
 
 - keep the async queue pattern
-- add a dedicated execution path for council runs
+- add a dedicated execution path for fusion runs
 - stop treating one `model_id` as the entire run definition
 
 Detailed steps:
 
-1. add council run config and result structs
-2. create a council run placeholder message path
-3. persist council config to `agent_runs`
+1. add fusion run config and result structs
+2. create a fusion run placeholder message path
+3. persist fusion config to `fusion_runs`
 4. implement source-model fan-out execution
 5. add incremental persistence after each source-model completion
 6. add fusion analysis stage
@@ -733,7 +733,7 @@ Detailed steps:
 
 ## 3) Grounding coordinator
 
-Add council-specific coordination code, likely in `backend/internal/httpapi/agent_mode.go` or extracted helper files.
+Add fusion-specific coordination code, likely in `backend/internal/httpapi/fusion_mode.go` or extracted helper files.
 
 Detailed steps:
 
@@ -747,7 +747,7 @@ Detailed steps:
 
 ## 4) Research reuse strategy
 
-Do not try to force the existing single-model orchestrator to own the whole council run.
+Do not try to force the existing single-model orchestrator to own the whole fusion run.
 
 Recommended approach:
 
@@ -756,17 +756,17 @@ Recommended approach:
   - reader
   - extraction
   - evidence ranking
-- introduce a council-specific orchestration layer above them
+- introduce a fusion-specific orchestration layer above them
 - avoid bending the existing single-result orchestrator into a multi-model controller if that creates excessive complexity
 
 ## 5) Public run status endpoint
 
-Add `GET /v1/agent-runs/{id}` in `backend/internal/httpapi/router.go` and `backend/internal/httpapi/handler.go`.
+Add `GET /v1/fusion-runs/{id}` in `backend/internal/httpapi/router.go` and `backend/internal/httpapi/handler.go`.
 
 Detailed steps:
 
 1. validate user ownership of the run
-2. return council config, step state, source results, analysis, result, warnings, and timestamps
+2. return fusion config, step state, source results, analysis, result, warnings, and timestamps
 3. keep the payload stable enough for repeated polling
 4. do not expose sensitive internal-only details
 
@@ -774,7 +774,7 @@ Detailed steps:
 
 Add JSON encode/decode helpers for:
 
-- council config
+- fusion config
 - source results
 - analysis
 - final result
@@ -794,11 +794,11 @@ Update `frontend/src/lib/api.ts`.
 
 Detailed steps:
 
-1. add council request types
-2. add council payload types for source results, analysis, and final result
-3. add agent run status response types
-4. add client method for `GET /v1/agent-runs/{id}`
-5. keep existing legacy agent message types compatible during rollout
+1. add fusion request types
+2. add fusion payload types for source results, analysis, and final result
+3. add fusion run status response types
+4. add client method for `GET /v1/fusion-runs/{id}`
+5. keep existing legacy fusion message types compatible during rollout
 
 ## 2) App state changes
 
@@ -808,11 +808,11 @@ Detailed steps:
 
 1. add state for selected source models
 2. add state for selected fusion model
-3. add state for active council run ids per placeholder assistant message
-4. start polling when a council run is queued
+3. add state for active fusion run ids per placeholder assistant message
+4. start polling when a fusion run is queued
 5. merge polled status into the correct assistant message
 6. stop polling when the run completes or fails
-7. restore council data on conversation reload
+7. restore fusion data on conversation reload
 
 ## 3) Composer UX
 
@@ -820,7 +820,7 @@ Update `frontend/src/components/Composer.tsx` and likely `frontend/src/component
 
 Detailed steps:
 
-1. expose a council configuration tray, modal, or drawer when agent mode is active
+1. expose a fusion configuration tray, modal, or drawer when fusion mode is active
 2. allow selecting up to 5 source models
 3. allow selecting one fusion model
 4. clearly label the two roles: `Sources` and `Fuse with`
@@ -834,12 +834,12 @@ Update `frontend/src/components/ChatMessage.tsx`.
 
 Detailed steps:
 
-1. detect new council payloads
+1. detect new fusion payloads
 2. render Step 1/3 source model cards
 3. render Step 2/3 analysis sections
 4. render Step 3/3 fused final result
 5. preserve citations, usage, and optional reasoning expansions
-6. preserve old agent summary rendering for old messages until migration is complete
+6. preserve old fusion summary rendering for old messages until migration is complete
 
 ## 5) Styling
 
@@ -897,27 +897,27 @@ The same fusion model should receive:
 
 ## Configuration Plan
 
-Add council-specific config in `backend/internal/config/config.go` and document it in `backend/.env.example` and `backend/README.md`.
+Add fusion-specific config in `backend/internal/config/config.go` and document it in `backend/.env.example` and `backend/README.md`.
 
 ### Recommended env vars
 
-- `COUNCIL_MODE_ENABLED=true`
-- `COUNCIL_MAX_SOURCE_MODELS=5`
-- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL=15`
-- `COUNCIL_SEARCH_RESULTS_PER_QUERY=15`
-- `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL=3`
-- `COUNCIL_MAX_BRAVE_SEARCHES_IN_FLIGHT=1`
-- `COUNCIL_MAX_PAGE_READS_IN_FLIGHT=6`
-- `COUNCIL_TIMEOUT_SECONDS=1200`
-- `COUNCIL_REQUIRE_AT_LEAST_ONE_SUCCESSFUL_SOURCE_MODEL=true`
+- `FUSION_MODE_ENABLED=true`
+- `FUSION_MAX_SOURCE_MODELS=5`
+- `FUSION_TARGET_READABLE_SOURCES_PER_MODEL=15`
+- `FUSION_SEARCH_RESULTS_PER_QUERY=15`
+- `FUSION_MAX_SEARCH_QUERIES_PER_MODEL=3`
+- `FUSION_MAX_BRAVE_SEARCHES_IN_FLIGHT=1`
+- `FUSION_MAX_PAGE_READS_IN_FLIGHT=6`
+- `FUSION_TIMEOUT_SECONDS=1200`
+- `FUSION_REQUIRE_AT_LEAST_ONE_SUCCESSFUL_SOURCE_MODEL=true`
 
 Recommended validation rules:
 
-- `COUNCIL_MAX_SOURCE_MODELS` must be between `1` and `5`
-- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL` must be at least `15`
-- `COUNCIL_SEARCH_RESULTS_PER_QUERY` should default to `15`
-- `COUNCIL_MAX_BRAVE_SEARCHES_IN_FLIGHT` should default to `1`
-- `COUNCIL_MAX_PAGE_READS_IN_FLIGHT` should be positive and modest
+- `FUSION_MAX_SOURCE_MODELS` must be between `1` and `5`
+- `FUSION_TARGET_READABLE_SOURCES_PER_MODEL` must be at least `15`
+- `FUSION_SEARCH_RESULTS_PER_QUERY` should default to `15`
+- `FUSION_MAX_BRAVE_SEARCHES_IN_FLIGHT` should default to `1`
+- `FUSION_MAX_PAGE_READS_IN_FLIGHT` should be positive and modest
 
 ---
 
@@ -925,7 +925,7 @@ Recommended validation rules:
 
 ## Phase 1 - Schema and contracts
 
-1. add new migration for council run schema extensions
+1. add new migration for fusion run schema extensions
 2. update `db/schema.sql`
 3. extend `backend/openapi/openapi.yaml`
 4. extend frontend and backend request/response types
@@ -933,19 +933,19 @@ Recommended validation rules:
 
 Exit criteria:
 
-- council request shape is documented and parseable
-- council payloads can be persisted and loaded
+- fusion request shape is documented and parseable
+- fusion payloads can be persisted and loaded
 
 ## Phase 2 - Queueing and run status plumbing
 
-1. create council placeholder message path
-2. create council run record with config
-3. add public `GET /v1/agent-runs/{id}` endpoint
+1. create fusion placeholder message path
+2. create fusion run record with config
+3. add public `GET /v1/fusion-runs/{id}` endpoint
 4. add frontend polling support
 
 Exit criteria:
 
-- user can queue a council run and see live run state updates
+- user can queue a fusion run and see live run state updates
 
 ## Phase 3 - Source model execution
 
@@ -960,7 +960,7 @@ Exit criteria:
 
 ## Phase 4 - Grounding coordinator and source target enforcement
 
-1. add council run Brave coordinator
+1. add fusion run Brave coordinator
 2. set Brave `count=15`
 3. enforce global ~1100ms Brave request spacing
 4. track readable web sources per source model
@@ -996,14 +996,14 @@ Exit criteria:
 
 ## Phase 7 - Compatibility, polish, and cleanup
 
-1. preserve rendering for old agent messages
+1. preserve rendering for old fusion messages
 2. refine mobile layout and loading states
-3. document council mode in plan and backend docs
+3. document fusion mode in plan and backend docs
 4. tune wording and degraded-state messaging
 
 Exit criteria:
 
-- old messages still render safely and the new council flow feels complete
+- old messages still render safely and the new fusion flow feels complete
 
 ---
 
@@ -1016,7 +1016,7 @@ Add tests for:
 - source model count validation
 - duplicate source model rejection
 - missing fusion model rejection
-- council config persistence
+- fusion config persistence
 - per-source result persistence
 - degraded behavior when fewer than 15 readable web sources are obtained
 - fusion proceeds when at least one source model succeeds
@@ -1029,7 +1029,7 @@ Add tests for:
 Recommended test files:
 
 - `backend/internal/httpapi/handler_conversations_test.go`
-- new tests alongside `backend/internal/httpapi/agent_mode.go`
+- new tests alongside `backend/internal/httpapi/fusion_mode.go`
 - config tests in `backend/internal/config/config_test.go`
 
 ## Frontend tests
@@ -1043,14 +1043,14 @@ Add tests for:
 - rendering all five analysis categories
 - rendering the final fused result
 - showing degraded source-model results clearly
-- preserving council UI after conversation reload
-- compatibility with old agent messages
+- preserving fusion UI after conversation reload
+- compatibility with old fusion messages
 
 Recommended test files:
 
 - `frontend/src/App.test.tsx`
 - `frontend/src/components/ChatMessage.test.tsx`
-- new tests for composer council interactions
+- new tests for composer fusion interactions
 
 ---
 
@@ -1058,7 +1058,7 @@ Recommended test files:
 
 Add structured logs and metrics for:
 
-- council run start, completion, and failure
+- fusion run start, completion, and failure
 - number of source models selected
 - grounded vs ungrounded runs
 - per-source search query count
@@ -1083,13 +1083,13 @@ Do not log:
 
 ### Phase 1 rollout
 
-- ship schema and API changes behind `COUNCIL_MODE_ENABLED`
-- keep legacy agent mode fully available
+- ship schema and API changes behind `FUSION_MODE_ENABLED`
+- keep legacy fusion mode fully available
 
 ### Phase 2 rollout
 
 - enable queueing and public run status for internal/dev use
-- validate council message persistence and replay
+- validate fusion message persistence and replay
 
 ### Phase 3 rollout
 
@@ -1098,7 +1098,7 @@ Do not log:
 
 ### Phase 4 rollout
 
-- enable grounded council runs with Brave pacing and 15-source targeting
+- enable grounded fusion runs with Brave pacing and 15-source targeting
 - watch query usage carefully
 
 ### Phase 5 rollout
@@ -1125,8 +1125,8 @@ This feature is complete when:
 - grounded source models target 15 readable web sources each
 - Brave search requests are globally serialized at about one request every 1100ms
 - a source model that misses 15 readable sources is marked `degraded`, not silently treated as complete
-- the final conversation history replay restores all council sections
-- old agent messages still render safely
+- the final conversation history replay restores all fusion sections
+- old fusion messages still render safely
 
 ---
 
@@ -1135,7 +1135,7 @@ This feature is complete when:
 ### Backend
 
 - `backend/internal/httpapi/handler.go`
-- `backend/internal/httpapi/agent_mode.go`
+- `backend/internal/httpapi/fusion_mode.go`
 - `backend/internal/httpapi/router.go`
 - `backend/internal/httpapi/research_orchestration.go`
 - `backend/internal/research/orchestrator.go`
@@ -1165,8 +1165,8 @@ This feature is complete when:
 
 ## Recommended Implementation Order Summary
 
-1. add council schema and API contracts
-2. add council run queueing and public status polling
+1. add fusion schema and API contracts
+2. add fusion run queueing and public status polling
 3. add source-model fan-out execution
 4. add globally serialized Brave grounding coordinator
 5. enforce 15 readable web sources target per grounded source model

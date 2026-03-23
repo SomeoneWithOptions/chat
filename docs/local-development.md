@@ -37,11 +37,11 @@ Set at minimum:
 - `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
 - `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
-- `AGENT_MODE_ENABLED`, `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional legacy async agent mode budgets)
-- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL`, `COUNCIL_SEARCH_RESULTS_PER_QUERY`, `COUNCIL_TIMEOUT_SECONDS` (optional council-mode budgets; grounded council runs now do one Brave search pass per source model)
-- `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL` (legacy council setting retained for compatibility)
+- `FUSION_MODE_ENABLED`, `FUSION_MIN_SEARCH_QUERIES`, `FUSION_SOFT_MAX_SEARCH_QUERIES`, `FUSION_HARD_MAX_SEARCH_QUERIES`, `FUSION_MAX_SOURCES_READ`, `FUSION_TIMEOUT_SECONDS` (optional single-model fusion mode budgets)
+- `FUSION_TARGET_READABLE_SOURCES_PER_MODEL`, `FUSION_SEARCH_RESULTS_PER_QUERY`, `FUSION_MAX_SEARCH_QUERIES_PER_MODEL`, `FUSION_SOURCE_TIMEOUT_SECONDS` (optional multi-model fusion budgets; grounded fusion runs now do one Brave search pass per source model)
+- `FUSION_MAX_SEARCH_QUERIES_PER_MODEL` (legacy fusion setting retained for compatibility)
 - `BRAVE_MONTHLY_QUERY_LIMIT`, `BRAVE_MONTHLY_QUERY_RESERVE` (optional Brave free-tier quota controls)
-- `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings if agent runs are executed via a separate internal URL)
+- `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings if fusion runs are executed via a separate internal URL)
 - `DEFAULT_CHAT_REASONING_EFFORT` (optional, default `medium`)
 - `DEFAULT_DEEP_RESEARCH_REASONING_EFFORT` (optional, default `high`)
 - `SESSION_TTL_HOURS` (optional, default `720` for 30-day reauthentication)
@@ -100,10 +100,10 @@ Expected response:
 - Timeout and cancellation are enforced server-side via `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - When Brave search partially fails, the request continues with available evidence and warning events.
 
-## Agent Mode Behavior (Local)
+## Fusion Mode Behavior (Local)
 
-- Agent mode enqueues async background work instead of holding the request open.
-- Council mode runs sequential source-model passes, then persists `Sources`, `Analysis`, and `Result` state so reloads and polling can reconstruct the full message.
-- Council mode may run grounded or ungrounded. Legacy single-model agent runs remain grounded.
+- Fusion mode enqueues async background work instead of holding the request open.
+- Fusion mode runs sequential source-model passes, then persists `Sources`, `Analysis`, and `Result` state so reloads and polling can reconstruct the full message.
+- Fusion mode may run grounded or ungrounded. Legacy single-model fusion runs remain grounded.
 - The initial SSE response only creates the placeholder assistant message and queue progress; the frontend then polls the queued run and conversation state until the assistant message settles.
-- Grounded agent runs enforce Brave monthly reserve checks before starting and pace Brave searches through a shared DB-backed lease so multiple instances still respect the free-tier rate limit.
+- Grounded fusion runs enforce Brave monthly reserve checks before starting and pace Brave searches through a shared DB-backed lease so multiple instances still respect the free-tier rate limit.

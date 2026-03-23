@@ -47,12 +47,12 @@ cp backend/.env.example backend/.env
 - `DEEP_RESEARCH_MAX_LOOPS`, `DEEP_RESEARCH_MAX_SOURCES_READ`, `DEEP_RESEARCH_MAX_SEARCH_QUERIES` (optional deep budgets)
 - `RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS`, `RESEARCH_SOURCE_MAX_BYTES` (optional source-read safety limits; defaults: `12` seconds and `1500000` bytes)
 - `RESEARCH_MAX_CITATIONS_CHAT`, `RESEARCH_MAX_CITATIONS_DEEP` (optional citation caps)
-- `AGENT_MODE_ENABLED` (optional; default `true`)
-- `AGENT_MIN_SEARCH_QUERIES`, `AGENT_SOFT_MAX_SEARCH_QUERIES`, `AGENT_HARD_MAX_SEARCH_QUERIES`, `AGENT_MAX_SOURCES_READ`, `AGENT_TIMEOUT_SECONDS` (optional legacy async agent budgets)
-- `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL`, `COUNCIL_SEARCH_RESULTS_PER_QUERY`, `COUNCIL_TIMEOUT_SECONDS` (optional council-mode budgets; grounded council runs now do one Brave search pass per source model)
-- `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL` (legacy council setting retained for compatibility)
+- `FUSION_MODE_ENABLED` (optional; default `true`)
+- `FUSION_MIN_SEARCH_QUERIES`, `FUSION_SOFT_MAX_SEARCH_QUERIES`, `FUSION_HARD_MAX_SEARCH_QUERIES`, `FUSION_MAX_SOURCES_READ`, `FUSION_TIMEOUT_SECONDS` (optional single-model fusion budgets)
+- `FUSION_TARGET_READABLE_SOURCES_PER_MODEL`, `FUSION_SEARCH_RESULTS_PER_QUERY`, `FUSION_MAX_SEARCH_QUERIES_PER_MODEL`, `FUSION_SOURCE_TIMEOUT_SECONDS` (optional multi-model fusion budgets; grounded fusion runs do one Brave search pass per source model)
+- `FUSION_MAX_SEARCH_QUERIES_PER_MODEL` (legacy fusion setting retained for compatibility)
 - `BRAVE_MONTHLY_QUERY_LIMIT`, `BRAVE_MONTHLY_QUERY_RESERVE` (optional Brave free-tier quota guardrails)
-- `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings for remote/background agent execution)
+- `INTERNAL_WORKER_BASE_URL`, `INTERNAL_WORKER_BEARER_TOKEN` (optional worker trigger settings for remote/background fusion execution)
 
 Auth sequencing:
 
@@ -81,13 +81,13 @@ For temporary anonymous testing, set:
 - `GET /v1/models` returns model capability metadata (`supportsReasoning`) and user reasoning presets.
 - `POST /v1/models/sync` performs an on-demand OpenRouter sync into the local `models` cache and returns the synced row count.
   - Requires `Authorization: Bearer <MODEL_SYNC_BEARER_TOKEN>`.
-- `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat`, `deep_research`, or `agent`.
+- `PUT /v1/models/reasoning-presets` updates per-model reasoning effort presets for `chat`, `deep_research`, or `fusion`.
 - Grounding is enabled by default per message; Brave search failures are surfaced as non-fatal warnings in the SSE stream.
 - Chat and deep research both support iterative agentic web research loops behind independent feature flags.
-- Agent mode creates a placeholder assistant message immediately, then completes in the background and is surfaced to the UI through message polling.
-- Council-mode agent runs execute sequential source-model passes, then persist `Sources`, `Analysis`, and `Result` state for reload and polling.
-- Council mode may run grounded or ungrounded. Legacy single-model agent mode remains grounded.
-- Grounded council mode performs one Brave search pass per source model, then one source-model answer call before moving to the next model.
-- Council fusion still uses two fusion-model calls: one for analysis and one for the final fused result.
+- Fusion mode creates a placeholder assistant message immediately, then completes in the background and is surfaced to the UI through message polling.
+- Fusion-mode fusion runs execute sequential source-model passes, then persist `Sources`, `Analysis`, and `Result` state for reload and polling.
+- Fusion mode may run grounded or ungrounded. Legacy single-model fusion mode remains grounded.
+- Grounded fusion mode performs one Brave search pass per source model, then one source-model answer call before moving to the next model.
+- Fusion fusion still uses two fusion-model calls: one for analysis and one for the final fused result.
 - Deep research uses larger loop/query/read budgets than normal chat and still respects `DEEP_RESEARCH_TIMEOUT_SECONDS`.
 - Attachments are stored in GCS (`GCS_UPLOAD_BUCKET`) and linked to chat messages through `fileIds`.

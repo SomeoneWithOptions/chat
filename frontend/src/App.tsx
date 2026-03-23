@@ -22,7 +22,7 @@ import {
   updateModelFavorite,
   updateModelPreference,
   updateModelReasoningPreset,
-  getAgentRunStatus,
+  getFusionRunStatus,
   type Conversation,
   type Model,
   type ModelPreferences,
@@ -204,7 +204,7 @@ const reasoningEffortOptions: Array<{ value: ReasoningEffort; label: string }> =
 const defaultReasoningEffortByMode: Record<ReasoningMode, ReasoningEffort> = {
   chat: "medium",
   deep_research: "high",
-  agent: "high",
+  fusion: "high",
 };
 
 function resolveReasoningEffort(
@@ -243,12 +243,12 @@ function toMessageData(
     groundingEnabled: message.groundingEnabled,
     deepResearchEnabled: message.deepResearchEnabled,
     responseMode: message.responseMode,
-    agentSummaries: message.agentSummaries,
-    agentSources: message.agentSources,
-    agentAnalysis: message.agentAnalysis,
-    agentResultModelId: message.agentResultModelId,
-    agentResultUsage: message.agentResultUsage,
-    agentRunId: message.agentRunId,
+    fusionSummaries: message.fusionSummaries,
+    fusionSources: message.fusionSources,
+    fusionAnalysis: message.fusionAnalysis,
+    fusionResultModelId: message.fusionResultModelId,
+    fusionResultUsage: message.fusionResultUsage,
+    fusionRunId: message.fusionRunId,
     citations: message.citations,
   };
 }
@@ -284,15 +284,15 @@ function updateThinkingTraceStatus(
   };
 }
 
-function updateCouncilTraceFromRunStatus(
+function updateFusionTraceFromRunStatus(
   existing: ThinkingTrace | null | undefined,
-  runStatus: import("./lib/api").AgentRunStatus["status"],
+  runStatus: import("./lib/api").FusionRunStatus["status"],
 ): ThinkingTrace | null | undefined {
   if (runStatus === "completed") {
     return {
       ...(existing ?? {}),
       status: "done",
-      summary: "Council result ready",
+      summary: "Fusion result ready",
       entries: existing?.entries ?? [],
     };
   }
@@ -300,14 +300,14 @@ function updateCouncilTraceFromRunStatus(
     return {
       ...(existing ?? {}),
       status: "stopped",
-      summary: "Council run stopped",
+      summary: "Fusion run stopped",
       entries: existing?.entries ?? [],
     };
   }
   if (existing) return existing;
   return {
     status: "running",
-    summary: "Coordinating the council workflow",
+    summary: "Coordinating the fusion workflow",
     entries: [],
   };
 }
@@ -330,7 +330,7 @@ export default function App() {
   const [modelPreferences, setModelPreferences] = useState<ModelPreferences>({
     lastUsedModelId: "openrouter/free",
     lastUsedDeepResearchModelId: "openrouter/free",
-    lastUsedAgentModelId: "openrouter/free",
+    lastUsedFusionModeModelId: "openrouter/free",
   });
   const [reasoningPresets, setReasoningPresets] = useState<ReasoningPreset[]>(
     [],
@@ -351,7 +351,7 @@ export default function App() {
   const [messages, setMessages] = useState<MessageData[]>([]);
   const [grounding, setGrounding] = useState(true);
   const [deepResearch, setDeepResearch] = useState(false);
-  const [agentMode, setAgentMode] = useState(false);
+  const [fusionMode, setFusionMode] = useState(false);
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamWarning, setStreamWarning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -390,10 +390,10 @@ export default function App() {
   const previousMessagesRef = useRef<MessageData[]>(messages);
   const streamAbortControllerRef = useRef<AbortController | null>(null);
   const isStreamingRef = useRef(isStreaming);
-  const hasRunningAgentMessage = messages.some(
+  const hasRunningFusionMessage = messages.some(
     (message) =>
       message.role === "assistant" &&
-      message.responseMode === "agent" &&
+      message.responseMode === "fusion" &&
       message.thinkingTrace?.status === "running",
   );
 
@@ -514,7 +514,7 @@ export default function App() {
       setModelPreferences({
         lastUsedModelId: "openrouter/free",
         lastUsedDeepResearchModelId: "openrouter/free",
-        lastUsedAgentModelId: "openrouter/free",
+        lastUsedFusionModeModelId: "openrouter/free",
       });
       setReasoningPresets([]);
       setShowAllModels(false);
@@ -526,7 +526,7 @@ export default function App() {
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
       setEditingDraft("");
-      setAgentMode(false);
+      setFusionMode(false);
       setDeepResearch(false);
       setPendingAttachments([]);
       setUploadingAttachments(false);
@@ -552,9 +552,9 @@ export default function App() {
               : catalog.models[0].id,
           );
 
-          if (catalog.preferences.lastUsedAgentSourceModelIds?.length) {
+          if (catalog.preferences.lastUsedFusionSourceModelIds?.length) {
             const validSourceModels =
-              catalog.preferences.lastUsedAgentSourceModelIds.filter((id) =>
+              catalog.preferences.lastUsedFusionSourceModelIds.filter((id) =>
                 catalog.models.some((m) => m.id === id),
               );
             setSelectedSourceModels(validSourceModels);
@@ -562,11 +562,11 @@ export default function App() {
             setSelectedSourceModels([]);
           }
 
-          if (catalog.preferences.lastUsedAgentFusionModelId) {
+          if (catalog.preferences.lastUsedFusionModelId) {
             const validFusionModel = catalog.models.some(
-              (m) => m.id === catalog.preferences.lastUsedAgentFusionModelId,
+              (m) => m.id === catalog.preferences.lastUsedFusionModelId,
             )
-              ? catalog.preferences.lastUsedAgentFusionModelId
+              ? catalog.preferences.lastUsedFusionModelId
               : null;
             setSelectedFusionModel(validFusionModel);
           } else {
@@ -690,7 +690,7 @@ export default function App() {
       !user ||
       !conversationAPISupported ||
       !activeConversationId ||
-      !hasRunningAgentMessage
+      !hasRunningFusionMessage
     )
       return;
 
@@ -716,7 +716,7 @@ export default function App() {
   }, [
     activeConversationId,
     conversationAPISupported,
-    hasRunningAgentMessage,
+    hasRunningFusionMessage,
     user,
   ]);
 
@@ -762,50 +762,50 @@ export default function App() {
     shouldAutoScrollRef.current = true;
   }, [activeConversationId]);
 
-  const runningCouncilMessagesRef = useRef(
+  const runningFusionMessagesRef = useRef(
     messages.filter(
       (m) =>
-        m.responseMode === "agent" &&
-        m.agentRunId &&
+        m.responseMode === "fusion" &&
+        m.fusionRunId &&
         m.thinkingTrace?.status === "running",
     ),
   );
   useEffect(() => {
-    runningCouncilMessagesRef.current = messages.filter(
+    runningFusionMessagesRef.current = messages.filter(
       (m) =>
-        m.responseMode === "agent" &&
-        m.agentRunId &&
+        m.responseMode === "fusion" &&
+        m.fusionRunId &&
         m.thinkingTrace?.status === "running",
     );
   }, [messages]);
 
   useEffect(() => {
     const intervalId = setInterval(() => {
-      const running = runningCouncilMessagesRef.current;
+      const running = runningFusionMessagesRef.current;
       if (running.length === 0) return;
 
       void Promise.all(
         running.map(async (msg) => {
-          if (!msg.agentRunId) return;
+          if (!msg.fusionRunId) return;
           try {
-            const status = await getAgentRunStatus(msg.agentRunId);
+            const status = await getFusionRunStatus(msg.fusionRunId);
             setMessages((prev) => {
               const idx = prev.findIndex((m) => m.id === msg.id);
               if (idx === -1) return prev;
               const newMsgs = [...prev];
               newMsgs[idx] = {
                 ...newMsgs[idx],
-                agentSources: status.sourceResults ?? newMsgs[idx].agentSources,
-                agentAnalysis: status.analysis ?? newMsgs[idx].agentAnalysis,
-                agentResultModelId:
-                  status.result?.modelId ?? newMsgs[idx].agentResultModelId,
-                agentResultUsage:
-                  status.result?.usage ?? newMsgs[idx].agentResultUsage,
+                fusionSources: status.sourceResults ?? newMsgs[idx].fusionSources,
+                fusionAnalysis: status.analysis ?? newMsgs[idx].fusionAnalysis,
+                fusionResultModelId:
+                  status.result?.modelId ?? newMsgs[idx].fusionResultModelId,
+                fusionResultUsage:
+                  status.result?.usage ?? newMsgs[idx].fusionResultUsage,
                 content: status.result?.response ?? newMsgs[idx].content,
                 reasoningContent:
                   status.result?.reasoningContent ??
                   newMsgs[idx].reasoningContent,
-                thinkingTrace: updateCouncilTraceFromRunStatus(
+                thinkingTrace: updateFusionTraceFromRunStatus(
                   newMsgs[idx].thinkingTrace,
                   status.status,
                 ),
@@ -877,8 +877,8 @@ export default function App() {
     [models, selectedModel],
   );
 
-  const activeMode: ReasoningMode = agentMode
-    ? "agent"
+  const activeMode: ReasoningMode = fusionMode
+    ? "fusion"
     : deepResearch
       ? "deep_research"
       : "chat";
@@ -927,7 +927,7 @@ export default function App() {
       setModelPreferences({
         lastUsedModelId: "openrouter/free",
         lastUsedDeepResearchModelId: "openrouter/free",
-        lastUsedAgentModelId: "openrouter/free",
+        lastUsedFusionModeModelId: "openrouter/free",
       });
       setReasoningPresets([]);
       setShowAllModels(false);
@@ -937,7 +937,7 @@ export default function App() {
       setActiveAssistantMessageId(null);
       setEditingMessageId(null);
       setEditingDraft("");
-      setAgentMode(false);
+      setFusionMode(false);
       setDeepResearch(false);
       setConversations([]);
       setActiveConversationId(null);
@@ -969,7 +969,7 @@ export default function App() {
   }
 
   function handleDeepResearchChange(next: boolean) {
-    setAgentMode(false);
+    setFusionMode(false);
     setDeepResearch(next);
     setError(null);
     const preferredModelID = next
@@ -988,12 +988,12 @@ export default function App() {
       );
   }
 
-  function handleAgentModeChange(next: boolean) {
-    setAgentMode(next);
+  function handleFusionModeChange(next: boolean) {
+    setFusionMode(next);
     if (next) setDeepResearch(false);
     setError(null);
     const preferredModelID = next
-      ? modelPreferences.lastUsedAgentModelId
+      ? modelPreferences.lastUsedFusionModeModelId
       : modelPreferences.lastUsedModelId;
     const resolvedModelID =
       preferredModelID && models.some((m) => m.id === preferredModelID)
@@ -1003,7 +1003,7 @@ export default function App() {
       setSelectedModel(resolvedModelID);
     if (next) setGrounding(true);
     if (resolvedModelID)
-      void persistModelSelection(next ? "agent" : "chat", resolvedModelID);
+      void persistModelSelection(next ? "fusion" : "chat", resolvedModelID);
   }
 
   async function handleReasoningEffortChange(next: ReasoningEffort) {
@@ -1201,7 +1201,7 @@ export default function App() {
 
     let sourceModels;
     let fusionModel;
-    if (activeMode === "agent" && selectedSourceModels.length > 0) {
+    if (activeMode === "fusion" && selectedSourceModels.length > 0) {
       sourceModels = selectedSourceModels.map((id) => ({
         modelId: id,
         reasoningEffort: currentModelSupportsReasoning
@@ -1247,7 +1247,7 @@ export default function App() {
                     responseMode:
                       eventData.responseMode ??
                       (eventData.deepResearch ? "deep_research" : activeMode),
-                    agentRunId: eventData.agentRunId,
+                    fusionRunId: eventData.fusionRunId,
                   };
                 }
                 if (
@@ -1352,10 +1352,10 @@ export default function App() {
                   ? {
                       ...m,
                       thinkingTrace:
-                        m.responseMode === "agent"
+                        m.responseMode === "fusion"
                           ? (m.thinkingTrace ?? {
                               status: "running",
-                              summary: "Coordinating the agent workflow",
+                              summary: "Coordinating the fusion workflow",
                               entries: [],
                             })
                           : updateThinkingTraceStatus(
@@ -1369,11 +1369,11 @@ export default function App() {
             );
             return;
           }
-          if (eventData.type === "agent_summaries") {
+          if (eventData.type === "fusion_summaries") {
             setMessages((existing) =>
               existing.map((m) =>
                 m.id === options.assistantMessageID
-                  ? { ...m, agentSummaries: eventData.agentSummaries }
+                  ? { ...m, fusionSummaries: eventData.fusionSummaries }
                   : m,
               ),
             );
@@ -1481,7 +1481,7 @@ export default function App() {
       modelId: selectedModel,
       usage: null,
       responseMode: activeMode,
-      agentSummaries: [],
+      fusionSummaries: [],
       citations: [],
     };
     const assistantMessage: MessageData = {
@@ -1493,7 +1493,7 @@ export default function App() {
       modelId: selectedModel,
       usage: null,
       responseMode: activeMode,
-      agentSummaries: [],
+      fusionSummaries: [],
       citations: [],
     };
 
@@ -1554,7 +1554,7 @@ export default function App() {
       modelId: selectedModel,
       usage: null,
       responseMode: activeMode,
-      agentSummaries: [],
+      fusionSummaries: [],
       citations: [],
     };
     const assistantMessage: MessageData = {
@@ -1566,7 +1566,7 @@ export default function App() {
       modelId: selectedModel,
       usage: null,
       responseMode: activeMode,
-      agentSummaries: [],
+      fusionSummaries: [],
       citations: [],
     };
 
@@ -1790,14 +1790,14 @@ export default function App() {
           }
           grounding={grounding}
           deepResearch={deepResearch}
-          agentMode={agentMode}
-          groundingLocked={agentMode}
+          fusionMode={fusionMode}
+          groundingLocked={fusionMode}
           onToggleGrounding={() => {
-            if (agentMode) return;
+            if (fusionMode) return;
             setGrounding((enabled) => !enabled);
           }}
           onToggleDeepResearch={() => handleDeepResearchChange(!deepResearch)}
-          onToggleAgentMode={() => handleAgentModeChange(!agentMode)}
+          onToggleFusionMode={() => handleFusionModeChange(!fusionMode)}
           isStreaming={isStreaming}
           uploadingAttachments={uploadingAttachments}
           pendingAttachments={pendingAttachments}

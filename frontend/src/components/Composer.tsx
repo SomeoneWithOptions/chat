@@ -14,11 +14,11 @@ type ComposerProps = {
   onReasoningEffortChange: (effort: ReasoningEffort) => void;
   grounding: boolean;
   deepResearch: boolean;
-  agentMode: boolean;
+  fusionMode: boolean;
   groundingLocked?: boolean;
   onToggleGrounding: () => void;
   onToggleDeepResearch: () => void;
-  onToggleAgentMode: () => void;
+  onToggleFusionMode: () => void;
   isStreaming: boolean;
   uploadingAttachments: boolean;
   pendingAttachments: UploadedFile[];
@@ -56,11 +56,11 @@ export default function Composer({
   onReasoningEffortChange,
   grounding,
   deepResearch,
-  agentMode,
+  fusionMode,
   groundingLocked = false,
   onToggleGrounding,
   onToggleDeepResearch,
-  onToggleAgentMode,
+  onToggleFusionMode,
   isStreaming,
   uploadingAttachments,
   pendingAttachments,
@@ -146,15 +146,15 @@ export default function Composer({
           )}
         </div>
 
-        {agentMode && (
-          <div className="composer-council-tray">
-            <div className="council-section">
-              <span className="council-label">Sources ({selectedSourceModels.length}/5)</span>
-              <div className="council-models">
+        {fusionMode && (
+          <div className="composer-fusion-tray">
+            <div className="fusion-section">
+              <span className="fusion-label">Sources ({selectedSourceModels.length}/5)</span>
+              <div className="fusion-models">
                 {selectedSourceModels.map((id) => {
                   const m = models.find((x) => x.id === id);
                   return (
-                    <span key={id} className="council-chip">
+                    <span key={id} className="fusion-chip">
                       {m?.name || id}
                       <button
                         type="button"
@@ -184,8 +184,8 @@ export default function Composer({
               </div>
             </div>
             {selectedSourceModels.length > 0 && (
-              <div className="council-section">
-                <span className="council-label">Fuse with</span>
+              <div className="fusion-section">
+                <span className="fusion-label">Fuse with</span>
                 <ModelDropdown
                   models={models}
                   value={selectedFusionModel ?? null}
@@ -280,10 +280,10 @@ export default function Composer({
               </button>
               <button
                 type="button"
-                className={`composer-mode-button ${agentMode ? 'active' : 'inactive'}`}
-                onClick={onToggleAgentMode}
-                aria-pressed={agentMode}
-                title="Agent"
+                className={`composer-mode-button ${fusionMode ? 'active' : 'inactive'}`}
+                onClick={onToggleFusionMode}
+                aria-pressed={fusionMode}
+                title="Fusion"
               >
                 <svg className="mode-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M4 12h6" />
@@ -296,7 +296,7 @@ export default function Composer({
                   <circle cx="12" cy="4" r="1.5" />
                   <circle cx="12" cy="20" r="1.5" />
                 </svg>
-                <span className="mode-text">Agent</span>
+                <span className="mode-text">Fusion</span>
               </button>
               <button
                 type="button"

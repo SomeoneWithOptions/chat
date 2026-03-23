@@ -10,95 +10,95 @@ import (
 )
 
 const (
-	defaultPort                = "8080"
-	defaultSessionCookieName   = "chat_session"
-	defaultSessionTTLHours     = 720
-	defaultDefaultModel        = "openrouter/free"
-	defaultChatReasoningEffort = "medium"
-	defaultDeepReasoningEffort = "high"
-	defaultOpenRouterBaseURL   = "https://openrouter.ai/api/v1"
-	defaultBraveBaseURL        = "https://api.search.brave.com/res/v1"
-	defaultFrontendOrigin      = "https://chat.sanetomore.com"
-	defaultUploadDir           = "/tmp/chat-uploads"
-	defaultGCSUploadPrefix     = "chat-uploads"
-	defaultResearchTimeoutSecs = 150
-	defaultChatResearchTimeout = 20
-	defaultSourceFetchTimeout  = 12
-	defaultSourceMaxBytes      = 1_500_000
-	defaultChatMaxLoops        = 2
-	defaultChatMaxSourcesRead  = 4
-	defaultChatMaxSearchQ      = 4
-	defaultDeepMaxLoops        = 6
-	defaultDeepMaxSourcesRead  = 16
-	defaultDeepMaxSearchQ      = 18
-	defaultChatMaxCitations    = 8
-	defaultDeepMaxCitations    = 12
-	defaultAgentMinSearchQ     = 20
-	defaultAgentSoftMaxSearchQ = 60
-	defaultAgentHardMaxSearchQ = 200
-	defaultAgentMaxSourcesRead = 80
-	defaultAgentTimeoutSecs    = 1200
-	defaultCouncilTargetReads  = 15
-	defaultCouncilResultsPerQ  = 15
-	defaultCouncilMaxSearchQ   = 4
-	defaultCouncilTimeoutSecs  = 1200
-	defaultBraveMonthlyLimit   = 2000
-	defaultBraveMonthlyReserve = 200
+	defaultPort                   = "8080"
+	defaultSessionCookieName      = "chat_session"
+	defaultSessionTTLHours        = 720
+	defaultDefaultModel           = "openrouter/free"
+	defaultChatReasoningEffort    = "medium"
+	defaultDeepReasoningEffort    = "high"
+	defaultOpenRouterBaseURL      = "https://openrouter.ai/api/v1"
+	defaultBraveBaseURL           = "https://api.search.brave.com/res/v1"
+	defaultFrontendOrigin         = "https://chat.sanetomore.com"
+	defaultUploadDir              = "/tmp/chat-uploads"
+	defaultGCSUploadPrefix        = "chat-uploads"
+	defaultResearchTimeoutSecs    = 150
+	defaultChatResearchTimeout    = 20
+	defaultSourceFetchTimeout     = 12
+	defaultSourceMaxBytes         = 1_500_000
+	defaultChatMaxLoops           = 2
+	defaultChatMaxSourcesRead     = 4
+	defaultChatMaxSearchQ         = 4
+	defaultDeepMaxLoops           = 6
+	defaultDeepMaxSourcesRead     = 16
+	defaultDeepMaxSearchQ         = 18
+	defaultChatMaxCitations       = 8
+	defaultDeepMaxCitations       = 12
+	defaultFusionMinSearchQ       = 20
+	defaultFusionSoftMaxSearchQ   = 60
+	defaultFusionHardMaxSearchQ   = 200
+	defaultFusionMaxSourcesRead   = 80
+	defaultFusionTimeoutSecs      = 1200
+	defaultFusionTargetReads      = 15
+	defaultFusionResultsPerQ      = 15
+	defaultFusionMaxSearchQPerSrc = 4
+	defaultFusionSourceTimeoutSec = 1200
+	defaultBraveMonthlyLimit      = 2000
+	defaultBraveMonthlyReserve    = 200
 )
 
 type Config struct {
-	Port                                 string
-	Environment                          string
-	FrontendOrigin                       string
-	AllowedOrigins                       []string
-	AuthRequired                         bool
-	ModelSyncBearerToken                 string
-	CookieSecure                         bool
-	SessionCookieName                    string
-	SessionTTL                           time.Duration
-	AllowedGoogleEmails                  map[string]struct{}
-	GoogleClientID                       string
-	InsecureSkipGoogleVerify             bool
-	TursoDatabaseURL                     string
-	TursoAuthToken                       string
-	OpenRouterAPIKey                     string
-	OpenRouterBaseURL                    string
-	OpenRouterDefaultModel               string
-	DefaultChatReasoningEffort           string
-	DefaultDeepReasoningEffort           string
-	BraveAPIKey                          string
-	BraveBaseURL                         string
-	LocalUploadDir                       string
-	GCSUploadBucket                      string
-	GCSUploadPrefix                      string
-	DeepResearchTimeoutSeconds           int
-	AgenticResearchChatEnabled           bool
-	AgenticResearchDeepEnabled           bool
-	AgentModeEnabled                     bool
-	ChatResearchMaxLoops                 int
-	ChatResearchMaxSourcesRead           int
-	ChatResearchMaxSearchQ               int
-	ChatResearchTimeoutSeconds           int
-	DeepResearchMaxLoops                 int
-	DeepResearchMaxSourcesRead           int
-	DeepResearchMaxSearchQ               int
-	ResearchSourceTimeoutSecs            int
-	ResearchSourceMaxBytes               int
-	ResearchMaxCitationsChat             int
-	ResearchMaxCitationsDeep             int
-	AgentMinSearchQueries                int
-	AgentSoftMaxSearchQueries            int
-	AgentHardMaxSearchQueries            int
-	AgentMaxSourcesRead                  int
-	AgentTimeoutSeconds                  int
-	CouncilTargetReadableSourcesPerModel int
-	CouncilSearchResultsPerQuery         int
-	CouncilMaxSearchQueriesPerModel      int
-	CouncilTimeoutSeconds                int
-	BraveMonthlyQueryLimit               int
-	BraveMonthlyQueryReserve             int
-	InternalWorkerBaseURL                string
-	InternalWorkerBearerToken            string
+	Port                                string
+	Environment                         string
+	FrontendOrigin                      string
+	AllowedOrigins                      []string
+	AuthRequired                        bool
+	ModelSyncBearerToken                string
+	CookieSecure                        bool
+	SessionCookieName                   string
+	SessionTTL                          time.Duration
+	AllowedGoogleEmails                 map[string]struct{}
+	GoogleClientID                      string
+	InsecureSkipGoogleVerify            bool
+	TursoDatabaseURL                    string
+	TursoAuthToken                      string
+	OpenRouterAPIKey                    string
+	OpenRouterBaseURL                   string
+	OpenRouterDefaultModel              string
+	DefaultChatReasoningEffort          string
+	DefaultDeepReasoningEffort          string
+	BraveAPIKey                         string
+	BraveBaseURL                        string
+	LocalUploadDir                      string
+	GCSUploadBucket                     string
+	GCSUploadPrefix                     string
+	DeepResearchTimeoutSeconds          int
+	AgenticResearchChatEnabled          bool
+	AgenticResearchDeepEnabled          bool
+	FusionModeEnabled                   bool
+	ChatResearchMaxLoops                int
+	ChatResearchMaxSourcesRead          int
+	ChatResearchMaxSearchQ              int
+	ChatResearchTimeoutSeconds          int
+	DeepResearchMaxLoops                int
+	DeepResearchMaxSourcesRead          int
+	DeepResearchMaxSearchQ              int
+	ResearchSourceTimeoutSecs           int
+	ResearchSourceMaxBytes              int
+	ResearchMaxCitationsChat            int
+	ResearchMaxCitationsDeep            int
+	FusionMinSearchQueries              int
+	FusionSoftMaxSearchQueries          int
+	FusionHardMaxSearchQueries          int
+	FusionMaxSourcesRead                int
+	FusionTimeoutSeconds                int
+	FusionTargetReadableSourcesPerModel int
+	FusionSearchResultsPerQuery         int
+	FusionMaxSearchQueriesPerModel      int
+	FusionSourceTimeoutSeconds          int
+	BraveMonthlyQueryLimit              int
+	BraveMonthlyQueryReserve            int
+	InternalWorkerBaseURL               string
+	InternalWorkerBearerToken           string
 }
 
 func (c Config) ListenAddress() string {
@@ -107,55 +107,55 @@ func (c Config) ListenAddress() string {
 
 func Load() (Config, error) {
 	cfg := Config{
-		Port:                                 envOrDefault("PORT", defaultPort),
-		Environment:                          envOrDefault("APP_ENV", "development"),
-		FrontendOrigin:                       envOrDefault("FRONTEND_ORIGIN", defaultFrontendOrigin),
-		AuthRequired:                         boolOrDefault("AUTH_REQUIRED", true),
-		ModelSyncBearerToken:                 strings.TrimSpace(os.Getenv("MODEL_SYNC_BEARER_TOKEN")),
-		CookieSecure:                         boolOrDefault("COOKIE_SECURE", false),
-		SessionCookieName:                    envOrDefault("SESSION_COOKIE_NAME", defaultSessionCookieName),
-		GoogleClientID:                       strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
-		InsecureSkipGoogleVerify:             boolOrDefault("AUTH_INSECURE_SKIP_GOOGLE_VERIFY", false),
-		TursoDatabaseURL:                     strings.TrimSpace(os.Getenv("TURSO_DATABASE_URL")),
-		TursoAuthToken:                       strings.TrimSpace(os.Getenv("TURSO_AUTH_TOKEN")),
-		OpenRouterAPIKey:                     strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
-		OpenRouterBaseURL:                    envOrDefault("OPENROUTER_API_BASE_URL", defaultOpenRouterBaseURL),
-		OpenRouterDefaultModel:               envOrDefault("OPENROUTER_FREE_TIER_DEFAULT_MODEL", defaultDefaultModel),
-		DefaultChatReasoningEffort:           strings.ToLower(envOrDefault("DEFAULT_CHAT_REASONING_EFFORT", defaultChatReasoningEffort)),
-		DefaultDeepReasoningEffort:           strings.ToLower(envOrDefault("DEFAULT_DEEP_RESEARCH_REASONING_EFFORT", defaultDeepReasoningEffort)),
-		BraveAPIKey:                          strings.TrimSpace(os.Getenv("BRAVE_API_KEY")),
-		BraveBaseURL:                         envOrDefault("BRAVE_API_BASE_URL", defaultBraveBaseURL),
-		LocalUploadDir:                       envOrDefault("LOCAL_UPLOAD_DIR", defaultUploadDir),
-		GCSUploadBucket:                      strings.TrimSpace(os.Getenv("GCS_UPLOAD_BUCKET")),
-		GCSUploadPrefix:                      envOrDefault("GCS_UPLOAD_PREFIX", defaultGCSUploadPrefix),
-		DeepResearchTimeoutSeconds:           intOrDefault("DEEP_RESEARCH_TIMEOUT_SECONDS", defaultResearchTimeoutSecs),
-		AgenticResearchChatEnabled:           boolOrDefault("AGENTIC_RESEARCH_CHAT_ENABLED", true),
-		AgenticResearchDeepEnabled:           boolOrDefault("AGENTIC_RESEARCH_DEEP_ENABLED", true),
-		AgentModeEnabled:                     boolOrDefault("AGENT_MODE_ENABLED", true),
-		ChatResearchMaxLoops:                 intOrDefault("CHAT_RESEARCH_MAX_LOOPS", defaultChatMaxLoops),
-		ChatResearchMaxSourcesRead:           intOrDefault("CHAT_RESEARCH_MAX_SOURCES_READ", defaultChatMaxSourcesRead),
-		ChatResearchMaxSearchQ:               intOrDefault("CHAT_RESEARCH_MAX_SEARCH_QUERIES", defaultChatMaxSearchQ),
-		ChatResearchTimeoutSeconds:           intOrDefault("CHAT_RESEARCH_TIMEOUT_SECONDS", defaultChatResearchTimeout),
-		DeepResearchMaxLoops:                 intOrDefault("DEEP_RESEARCH_MAX_LOOPS", defaultDeepMaxLoops),
-		DeepResearchMaxSourcesRead:           intOrDefault("DEEP_RESEARCH_MAX_SOURCES_READ", defaultDeepMaxSourcesRead),
-		DeepResearchMaxSearchQ:               intOrDefault("DEEP_RESEARCH_MAX_SEARCH_QUERIES", defaultDeepMaxSearchQ),
-		ResearchSourceTimeoutSecs:            intOrDefault("RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS", defaultSourceFetchTimeout),
-		ResearchSourceMaxBytes:               intOrDefault("RESEARCH_SOURCE_MAX_BYTES", defaultSourceMaxBytes),
-		ResearchMaxCitationsChat:             intOrDefault("RESEARCH_MAX_CITATIONS_CHAT", defaultChatMaxCitations),
-		ResearchMaxCitationsDeep:             intOrDefault("RESEARCH_MAX_CITATIONS_DEEP", defaultDeepMaxCitations),
-		AgentMinSearchQueries:                intOrDefault("AGENT_MIN_SEARCH_QUERIES", defaultAgentMinSearchQ),
-		AgentSoftMaxSearchQueries:            intOrDefault("AGENT_SOFT_MAX_SEARCH_QUERIES", defaultAgentSoftMaxSearchQ),
-		AgentHardMaxSearchQueries:            intOrDefault("AGENT_HARD_MAX_SEARCH_QUERIES", defaultAgentHardMaxSearchQ),
-		AgentMaxSourcesRead:                  intOrDefault("AGENT_MAX_SOURCES_READ", defaultAgentMaxSourcesRead),
-		AgentTimeoutSeconds:                  intOrDefault("AGENT_TIMEOUT_SECONDS", defaultAgentTimeoutSecs),
-		CouncilTargetReadableSourcesPerModel: intOrDefault("COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL", defaultCouncilTargetReads),
-		CouncilSearchResultsPerQuery:         intOrDefault("COUNCIL_SEARCH_RESULTS_PER_QUERY", defaultCouncilResultsPerQ),
-		CouncilMaxSearchQueriesPerModel:      intOrDefault("COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL", defaultCouncilMaxSearchQ),
-		CouncilTimeoutSeconds:                intOrDefault("COUNCIL_TIMEOUT_SECONDS", defaultCouncilTimeoutSecs),
-		BraveMonthlyQueryLimit:               intOrDefault("BRAVE_MONTHLY_QUERY_LIMIT", defaultBraveMonthlyLimit),
-		BraveMonthlyQueryReserve:             intOrDefault("BRAVE_MONTHLY_QUERY_RESERVE", defaultBraveMonthlyReserve),
-		InternalWorkerBaseURL:                strings.TrimSpace(os.Getenv("INTERNAL_WORKER_BASE_URL")),
-		InternalWorkerBearerToken:            strings.TrimSpace(os.Getenv("INTERNAL_WORKER_BEARER_TOKEN")),
+		Port:                                envOrDefault("PORT", defaultPort),
+		Environment:                         envOrDefault("APP_ENV", "development"),
+		FrontendOrigin:                      envOrDefault("FRONTEND_ORIGIN", defaultFrontendOrigin),
+		AuthRequired:                        boolOrDefault("AUTH_REQUIRED", true),
+		ModelSyncBearerToken:                strings.TrimSpace(os.Getenv("MODEL_SYNC_BEARER_TOKEN")),
+		CookieSecure:                        boolOrDefault("COOKIE_SECURE", false),
+		SessionCookieName:                   envOrDefault("SESSION_COOKIE_NAME", defaultSessionCookieName),
+		GoogleClientID:                      strings.TrimSpace(os.Getenv("GOOGLE_CLIENT_ID")),
+		InsecureSkipGoogleVerify:            boolOrDefault("AUTH_INSECURE_SKIP_GOOGLE_VERIFY", false),
+		TursoDatabaseURL:                    strings.TrimSpace(os.Getenv("TURSO_DATABASE_URL")),
+		TursoAuthToken:                      strings.TrimSpace(os.Getenv("TURSO_AUTH_TOKEN")),
+		OpenRouterAPIKey:                    strings.TrimSpace(os.Getenv("OPENROUTER_API_KEY")),
+		OpenRouterBaseURL:                   envOrDefault("OPENROUTER_API_BASE_URL", defaultOpenRouterBaseURL),
+		OpenRouterDefaultModel:              envOrDefault("OPENROUTER_FREE_TIER_DEFAULT_MODEL", defaultDefaultModel),
+		DefaultChatReasoningEffort:          strings.ToLower(envOrDefault("DEFAULT_CHAT_REASONING_EFFORT", defaultChatReasoningEffort)),
+		DefaultDeepReasoningEffort:          strings.ToLower(envOrDefault("DEFAULT_DEEP_RESEARCH_REASONING_EFFORT", defaultDeepReasoningEffort)),
+		BraveAPIKey:                         strings.TrimSpace(os.Getenv("BRAVE_API_KEY")),
+		BraveBaseURL:                        envOrDefault("BRAVE_API_BASE_URL", defaultBraveBaseURL),
+		LocalUploadDir:                      envOrDefault("LOCAL_UPLOAD_DIR", defaultUploadDir),
+		GCSUploadBucket:                     strings.TrimSpace(os.Getenv("GCS_UPLOAD_BUCKET")),
+		GCSUploadPrefix:                     envOrDefault("GCS_UPLOAD_PREFIX", defaultGCSUploadPrefix),
+		DeepResearchTimeoutSeconds:          intOrDefault("DEEP_RESEARCH_TIMEOUT_SECONDS", defaultResearchTimeoutSecs),
+		AgenticResearchChatEnabled:          boolOrDefault("AGENTIC_RESEARCH_CHAT_ENABLED", true),
+		AgenticResearchDeepEnabled:          boolOrDefault("AGENTIC_RESEARCH_DEEP_ENABLED", true),
+		FusionModeEnabled:                   boolOrDefault("FUSION_MODE_ENABLED", true),
+		ChatResearchMaxLoops:                intOrDefault("CHAT_RESEARCH_MAX_LOOPS", defaultChatMaxLoops),
+		ChatResearchMaxSourcesRead:          intOrDefault("CHAT_RESEARCH_MAX_SOURCES_READ", defaultChatMaxSourcesRead),
+		ChatResearchMaxSearchQ:              intOrDefault("CHAT_RESEARCH_MAX_SEARCH_QUERIES", defaultChatMaxSearchQ),
+		ChatResearchTimeoutSeconds:          intOrDefault("CHAT_RESEARCH_TIMEOUT_SECONDS", defaultChatResearchTimeout),
+		DeepResearchMaxLoops:                intOrDefault("DEEP_RESEARCH_MAX_LOOPS", defaultDeepMaxLoops),
+		DeepResearchMaxSourcesRead:          intOrDefault("DEEP_RESEARCH_MAX_SOURCES_READ", defaultDeepMaxSourcesRead),
+		DeepResearchMaxSearchQ:              intOrDefault("DEEP_RESEARCH_MAX_SEARCH_QUERIES", defaultDeepMaxSearchQ),
+		ResearchSourceTimeoutSecs:           intOrDefault("RESEARCH_SOURCE_FETCH_TIMEOUT_SECONDS", defaultSourceFetchTimeout),
+		ResearchSourceMaxBytes:              intOrDefault("RESEARCH_SOURCE_MAX_BYTES", defaultSourceMaxBytes),
+		ResearchMaxCitationsChat:            intOrDefault("RESEARCH_MAX_CITATIONS_CHAT", defaultChatMaxCitations),
+		ResearchMaxCitationsDeep:            intOrDefault("RESEARCH_MAX_CITATIONS_DEEP", defaultDeepMaxCitations),
+		FusionMinSearchQueries:              intOrDefault("FUSION_MIN_SEARCH_QUERIES", defaultFusionMinSearchQ),
+		FusionSoftMaxSearchQueries:          intOrDefault("FUSION_SOFT_MAX_SEARCH_QUERIES", defaultFusionSoftMaxSearchQ),
+		FusionHardMaxSearchQueries:          intOrDefault("FUSION_HARD_MAX_SEARCH_QUERIES", defaultFusionHardMaxSearchQ),
+		FusionMaxSourcesRead:                intOrDefault("FUSION_MAX_SOURCES_READ", defaultFusionMaxSourcesRead),
+		FusionTimeoutSeconds:                intOrDefault("FUSION_TIMEOUT_SECONDS", defaultFusionTimeoutSecs),
+		FusionTargetReadableSourcesPerModel: intOrDefault("FUSION_TARGET_READABLE_SOURCES_PER_MODEL", defaultFusionTargetReads),
+		FusionSearchResultsPerQuery:         intOrDefault("FUSION_SEARCH_RESULTS_PER_QUERY", defaultFusionResultsPerQ),
+		FusionMaxSearchQueriesPerModel:      intOrDefault("FUSION_MAX_SEARCH_QUERIES_PER_MODEL", defaultFusionMaxSearchQPerSrc),
+		FusionSourceTimeoutSeconds:          intOrDefault("FUSION_SOURCE_TIMEOUT_SECONDS", defaultFusionSourceTimeoutSec),
+		BraveMonthlyQueryLimit:              intOrDefault("BRAVE_MONTHLY_QUERY_LIMIT", defaultBraveMonthlyLimit),
+		BraveMonthlyQueryReserve:            intOrDefault("BRAVE_MONTHLY_QUERY_RESERVE", defaultBraveMonthlyReserve),
+		InternalWorkerBaseURL:               strings.TrimSpace(os.Getenv("INTERNAL_WORKER_BASE_URL")),
+		InternalWorkerBearerToken:           strings.TrimSpace(os.Getenv("INTERNAL_WORKER_BEARER_TOKEN")),
 	}
 
 	if cfg.Environment == "production" {
@@ -205,22 +205,22 @@ func Load() (Config, error) {
 	cfg.ResearchSourceMaxBytes = ensurePositiveInt(cfg.ResearchSourceMaxBytes, defaultSourceMaxBytes)
 	cfg.ResearchMaxCitationsChat = ensurePositiveInt(cfg.ResearchMaxCitationsChat, defaultChatMaxCitations)
 	cfg.ResearchMaxCitationsDeep = ensurePositiveInt(cfg.ResearchMaxCitationsDeep, defaultDeepMaxCitations)
-	cfg.AgentMinSearchQueries = ensurePositiveInt(cfg.AgentMinSearchQueries, defaultAgentMinSearchQ)
-	cfg.AgentSoftMaxSearchQueries = ensurePositiveInt(cfg.AgentSoftMaxSearchQueries, defaultAgentSoftMaxSearchQ)
-	cfg.AgentHardMaxSearchQueries = ensurePositiveInt(cfg.AgentHardMaxSearchQueries, defaultAgentHardMaxSearchQ)
-	cfg.AgentMaxSourcesRead = ensurePositiveInt(cfg.AgentMaxSourcesRead, defaultAgentMaxSourcesRead)
-	cfg.AgentTimeoutSeconds = ensurePositiveInt(cfg.AgentTimeoutSeconds, defaultAgentTimeoutSecs)
-	cfg.CouncilTargetReadableSourcesPerModel = ensurePositiveInt(cfg.CouncilTargetReadableSourcesPerModel, defaultCouncilTargetReads)
-	cfg.CouncilSearchResultsPerQuery = ensurePositiveInt(cfg.CouncilSearchResultsPerQuery, defaultCouncilResultsPerQ)
-	cfg.CouncilMaxSearchQueriesPerModel = ensurePositiveInt(cfg.CouncilMaxSearchQueriesPerModel, defaultCouncilMaxSearchQ)
-	cfg.CouncilTimeoutSeconds = ensurePositiveInt(cfg.CouncilTimeoutSeconds, defaultCouncilTimeoutSecs)
+	cfg.FusionMinSearchQueries = ensurePositiveInt(cfg.FusionMinSearchQueries, defaultFusionMinSearchQ)
+	cfg.FusionSoftMaxSearchQueries = ensurePositiveInt(cfg.FusionSoftMaxSearchQueries, defaultFusionSoftMaxSearchQ)
+	cfg.FusionHardMaxSearchQueries = ensurePositiveInt(cfg.FusionHardMaxSearchQueries, defaultFusionHardMaxSearchQ)
+	cfg.FusionMaxSourcesRead = ensurePositiveInt(cfg.FusionMaxSourcesRead, defaultFusionMaxSourcesRead)
+	cfg.FusionTimeoutSeconds = ensurePositiveInt(cfg.FusionTimeoutSeconds, defaultFusionTimeoutSecs)
+	cfg.FusionTargetReadableSourcesPerModel = ensurePositiveInt(cfg.FusionTargetReadableSourcesPerModel, defaultFusionTargetReads)
+	cfg.FusionSearchResultsPerQuery = ensurePositiveInt(cfg.FusionSearchResultsPerQuery, defaultFusionResultsPerQ)
+	cfg.FusionMaxSearchQueriesPerModel = ensurePositiveInt(cfg.FusionMaxSearchQueriesPerModel, defaultFusionMaxSearchQPerSrc)
+	cfg.FusionSourceTimeoutSeconds = ensurePositiveInt(cfg.FusionSourceTimeoutSeconds, defaultFusionSourceTimeoutSec)
 	cfg.BraveMonthlyQueryLimit = ensurePositiveInt(cfg.BraveMonthlyQueryLimit, defaultBraveMonthlyLimit)
 	cfg.BraveMonthlyQueryReserve = ensurePositiveInt(cfg.BraveMonthlyQueryReserve, defaultBraveMonthlyReserve)
-	if cfg.AgentSoftMaxSearchQueries < cfg.AgentMinSearchQueries {
-		cfg.AgentSoftMaxSearchQueries = cfg.AgentMinSearchQueries
+	if cfg.FusionSoftMaxSearchQueries < cfg.FusionMinSearchQueries {
+		cfg.FusionSoftMaxSearchQueries = cfg.FusionMinSearchQueries
 	}
-	if cfg.AgentHardMaxSearchQueries < cfg.AgentSoftMaxSearchQueries {
-		cfg.AgentHardMaxSearchQueries = cfg.AgentSoftMaxSearchQueries
+	if cfg.FusionHardMaxSearchQueries < cfg.FusionSoftMaxSearchQueries {
+		cfg.FusionHardMaxSearchQueries = cfg.FusionSoftMaxSearchQueries
 	}
 	if cfg.BraveMonthlyQueryReserve >= cfg.BraveMonthlyQueryLimit {
 		cfg.BraveMonthlyQueryReserve = defaultBraveMonthlyReserve

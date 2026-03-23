@@ -43,14 +43,14 @@ CREATE TABLE IF NOT EXISTS user_model_preferences (
   user_id TEXT PRIMARY KEY,
   last_used_model_id TEXT,
   last_used_deep_research_model_id TEXT,
-  last_used_agent_model_id TEXT,
-  last_used_agent_source_model_ids_json TEXT,
-  last_used_agent_fusion_model_id TEXT,
+  last_used_fusion_mode_model_id TEXT,
+  last_used_fusion_source_model_ids_json TEXT,
+  last_used_fusion_model_id TEXT,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
   FOREIGN KEY (last_used_model_id) REFERENCES models(id) ON DELETE SET NULL,
   FOREIGN KEY (last_used_deep_research_model_id) REFERENCES models(id) ON DELETE SET NULL,
-  FOREIGN KEY (last_used_agent_model_id) REFERENCES models(id) ON DELETE SET NULL
+  FOREIGN KEY (last_used_fusion_mode_model_id) REFERENCES models(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS user_model_favorites (
@@ -65,7 +65,7 @@ CREATE TABLE IF NOT EXISTS user_model_favorites (
 CREATE TABLE IF NOT EXISTS user_model_reasoning_presets (
   user_id TEXT NOT NULL,
   model_id TEXT NOT NULL,
-  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research', 'agent')),
+  mode TEXT NOT NULL CHECK (mode IN ('chat', 'deep_research', 'fusion')),
   effort TEXT NOT NULL CHECK (effort IN ('low', 'medium', 'high')),
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (user_id, model_id, mode),
@@ -104,13 +104,13 @@ CREATE TABLE IF NOT EXISTS messages (
   usage_provider_name TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
   deep_research_enabled INTEGER NOT NULL DEFAULT 0,
-  response_mode TEXT NOT NULL DEFAULT 'chat' CHECK (response_mode IN ('chat', 'deep_research', 'agent')),
-  agent_summaries_json TEXT,
-  agent_sources_json TEXT,
-  agent_analysis_json TEXT,
-  agent_result_model_id TEXT,
-  agent_result_usage_json TEXT,
-  agent_run_id TEXT,
+  response_mode TEXT NOT NULL DEFAULT 'chat' CHECK (response_mode IN ('chat', 'deep_research', 'fusion')),
+  fusion_summaries_json TEXT,
+  fusion_sources_json TEXT,
+  fusion_analysis_json TEXT,
+  fusion_result_model_id TEXT,
+  fusion_result_usage_json TEXT,
+  fusion_run_id TEXT,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (conversation_id) REFERENCES conversations(id) ON DELETE CASCADE,
   FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
@@ -158,7 +158,7 @@ CREATE TABLE IF NOT EXISTS message_files (
 
 CREATE INDEX IF NOT EXISTS idx_message_files_file_id ON message_files(file_id);
 
-CREATE TABLE IF NOT EXISTS agent_runs (
+CREATE TABLE IF NOT EXISTS fusion_runs (
   id TEXT PRIMARY KEY,
   user_id TEXT NOT NULL,
   conversation_id TEXT NOT NULL,
@@ -170,7 +170,7 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   source_model_ids_json TEXT,
   fusion_model_id TEXT,
   grounding_enabled INTEGER NOT NULL DEFAULT 1,
-  council_config_json TEXT,
+  fusion_config_json TEXT,
   source_results_json TEXT,
   fusion_analysis_json TEXT,
   fusion_result_json TEXT,
@@ -193,8 +193,8 @@ CREATE TABLE IF NOT EXISTS agent_runs (
   FOREIGN KEY (assistant_message_id) REFERENCES messages(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_agent_runs_status_created ON agent_runs(status, created_at);
-CREATE INDEX IF NOT EXISTS idx_agent_runs_user_created ON agent_runs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_fusion_runs_status_created ON fusion_runs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_fusion_runs_user_created ON fusion_runs(user_id, created_at DESC);
 
 CREATE TABLE IF NOT EXISTS brave_monthly_usage (
   provider TEXT NOT NULL,

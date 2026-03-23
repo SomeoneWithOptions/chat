@@ -14,12 +14,12 @@ import (
 func (h Handler) buildResearchConfig(profile research.ModeProfile) research.OrchestratorConfig {
 	overrides := research.OrchestratorConfig{}
 	switch profile {
-	case research.ModeAgent:
-		overrides.MinSearchQueries = h.cfg.AgentMinSearchQueries
-		overrides.MaxSourcesRead = h.cfg.AgentMaxSourcesRead
-		overrides.MaxSearchQueries = h.cfg.AgentHardMaxSearchQueries
+	case research.ModeFusion:
+		overrides.MinSearchQueries = h.cfg.FusionMinSearchQueries
+		overrides.MaxSourcesRead = h.cfg.FusionMaxSourcesRead
+		overrides.MaxSearchQueries = h.cfg.FusionHardMaxSearchQueries
 		overrides.MaxCitations = h.cfg.ResearchMaxCitationsDeep
-		overrides.Timeout = time.Duration(h.cfg.AgentTimeoutSeconds) * time.Second
+		overrides.Timeout = time.Duration(h.cfg.FusionTimeoutSeconds) * time.Second
 		overrides.MinSearchInterval = braveFreeTierSpacing
 		overrides.SearchResultsPerQ = 10
 	case research.ModeDeepResearch:

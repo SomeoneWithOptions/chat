@@ -16,7 +16,7 @@ export type Model = {
   curated: boolean;
 };
 
-export type ReasoningMode = "chat" | "deep_research" | "agent";
+export type ReasoningMode = "chat" | "deep_research" | "fusion";
 export type ReasoningEffort = "low" | "medium" | "high";
 
 export type ReasoningPreset = {
@@ -28,12 +28,12 @@ export type ReasoningPreset = {
 export type ModelPreferences = {
   lastUsedModelId: string;
   lastUsedDeepResearchModelId: string;
-  lastUsedAgentModelId: string;
-  lastUsedAgentSourceModelIds?: string[];
-  lastUsedAgentFusionModelId?: string;
+  lastUsedFusionModeModelId: string;
+  lastUsedFusionSourceModelIds?: string[];
+  lastUsedFusionModelId?: string;
 };
 
-export type AgentSummary = {
+export type FusionSummary = {
   role: string;
   summary: string;
   objections?: string[];
@@ -56,12 +56,12 @@ export type Conversation = {
   updatedAt: string;
 };
 
-export type CouncilSourceSpec = {
+export type FusionSourceSpec = {
   modelId: string;
   reasoningEffort?: ReasoningEffort;
 };
 
-export type CouncilSourceResult = {
+export type FusionSourceResult = {
   modelId: string;
   status: "queued" | "running" | "complete" | "degraded" | "failed";
   response?: string;
@@ -75,42 +75,42 @@ export type CouncilSourceResult = {
   error?: string;
 };
 
-export type CouncilAnalysisItem = {
+export type FusionAnalysisItem = {
   point: string;
   sourceModels?: string[];
 };
 
-export type CouncilDifferencePosition = {
+export type FusionDifferencePosition = {
   sourceModel: string;
   summary: string;
 };
 
-export type CouncilDifferenceGroup = {
+export type FusionDifferenceGroup = {
   topic: string;
-  positions: CouncilDifferencePosition[];
+  positions: FusionDifferencePosition[];
 };
 
-export type CouncilAnalysis = {
-  agreement?: CouncilAnalysisItem[];
-  keyDifferences?: CouncilDifferenceGroup[];
-  partialCoverage?: CouncilAnalysisItem[];
-  uniqueInsights?: CouncilAnalysisItem[];
-  blindSpots?: CouncilAnalysisItem[];
+export type FusionAnalysis = {
+  agreement?: FusionAnalysisItem[];
+  keyDifferences?: FusionDifferenceGroup[];
+  partialCoverage?: FusionAnalysisItem[];
+  uniqueInsights?: FusionAnalysisItem[];
+  blindSpots?: FusionAnalysisItem[];
 };
 
-export type CouncilFinalResult = {
+export type FusionFinalResult = {
   modelId: string;
   response: string;
   reasoningContent?: string;
   usage?: Usage;
 };
 
-export type AgentRunStatus = {
+export type FusionRunStatus = {
   id: string;
   status: "queued" | "running" | "completed" | "failed";
-  sourceResults?: CouncilSourceResult[];
-  analysis?: CouncilAnalysis;
-  result?: CouncilFinalResult;
+  sourceResults?: FusionSourceResult[];
+  analysis?: FusionAnalysis;
+  result?: FusionFinalResult;
   warnings?: string[];
   completedSources?: number;
   degradedSources?: number;
@@ -129,12 +129,12 @@ export type ConversationMessage = {
   groundingEnabled: boolean;
   deepResearchEnabled: boolean;
   responseMode?: ReasoningMode;
-  agentSummaries?: AgentSummary[];
-  agentSources?: CouncilSourceResult[];
-  agentAnalysis?: CouncilAnalysis;
-  agentResultModelId?: string;
-  agentResultUsage?: Usage;
-  agentRunId?: string;
+  fusionSummaries?: FusionSummary[];
+  fusionSources?: FusionSourceResult[];
+  fusionAnalysis?: FusionAnalysis;
+  fusionResultModelId?: string;
+  fusionResultUsage?: Usage;
+  fusionRunId?: string;
   citations: Citation[];
   createdAt: string;
 };
@@ -176,8 +176,8 @@ export type ChatRequest = {
   grounding: boolean;
   deepResearch: boolean;
   fileIds?: string[];
-  sourceModels?: CouncilSourceSpec[];
-  fusionModel?: CouncilSourceSpec;
+  sourceModels?: FusionSourceSpec[];
+  fusionModel?: FusionSourceSpec;
 };
 
 export type ResearchPhase =
@@ -220,7 +220,7 @@ export type StreamEvent =
       reasoningEffort?: ReasoningEffort;
       conversationId?: string;
       userMessageId?: string;
-      agentRunId?: string;
+      fusionRunId?: string;
     }
   | {
       type: "progress";
@@ -242,7 +242,7 @@ export type StreamEvent =
   | { type: "token"; delta: string }
   | { type: "reasoning"; delta: string }
   | { type: "usage"; usage: Usage }
-  | { type: "agent_summaries"; agentSummaries: AgentSummary[] }
+  | { type: "fusion_summaries"; fusionSummaries: FusionSummary[] }
   | { type: "error"; message: string }
   | { type: "done" };
 
@@ -546,11 +546,11 @@ export async function streamMessage(
   }
 }
 
-export async function getAgentRunStatus(
+export async function getFusionRunStatus(
   runId: string,
-): Promise<AgentRunStatus> {
-  const response = await requestJSON<AgentRunStatus>(
-    `/v1/agent-runs/${runId}`,
+): Promise<FusionRunStatus> {
+  const response = await requestJSON<FusionRunStatus>(
+    `/v1/fusion-runs/${runId}`,
     {
       method: "GET",
     },

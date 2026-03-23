@@ -18,8 +18,8 @@ Recommended execution order:
 12. `plans/11-agentic-web-research-execution-checklist.md`
 13. `plans/12-research-process-ux-visibility-plan.md`
 14. `plans/13-prompt-enhance-plan.md`
-15. `plans/14-agent-mode-council-fusion-plan.md`
-16. `plans/15-council-mode-stabilization-plan.md`
+15. `plans/14-fusion-mode-fusion-fusion-plan.md`
+16. `plans/15-fusion-mode-stabilization-plan.md`
 
 Core stack assumptions used in these plans:
 
