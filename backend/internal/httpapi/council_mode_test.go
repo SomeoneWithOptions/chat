@@ -19,7 +19,10 @@ import (
 )
 
 func TestExecuteAgentRunDispatchesCouncilWorkflowAndPersistsPublicStatus(t *testing.T) {
-	handler, db := newTestHandler(t, councilTestStreamer{})
+	requests := make([]openrouter.StreamRequest, 0, 4)
+	handler, db := newTestHandler(t, councilTestStreamer{onRequest: func(req openrouter.StreamRequest) {
+		requests = append(requests, req)
+	}})
 	t.Cleanup(func() { _ = db.Close() })
 
 	handler.cfg.CouncilTargetReadableSourcesPerModel = 15
@@ -134,10 +137,21 @@ WHERE id = ?
 		if source.Status != "complete" {
 			t.Fatalf("expected source %d complete, got %q", i, source.Status)
 		}
+		if source.SearchQueries != 1 {
+			t.Fatalf("expected source %d to use one Brave query, got %d", i, source.SearchQueries)
+		}
 		if source.ReadableSources < 15 {
 			t.Fatalf("expected source %d to reach 15 readable sources, got %d", i, source.ReadableSources)
 		}
 	}
+
+	if len(requests) != 4 {
+		t.Fatalf("expected 4 OpenRouter calls (2 sources + analysis + result), got %d", len(requests))
+	}
+	if requests[0].Model != "source-a" || requests[1].Model != "source-b" || requests[2].Model != "fusion-model" || requests[3].Model != "fusion-model" {
+		t.Fatalf("unexpected request model order: %+v", []string{requests[0].Model, requests[1].Model, requests[2].Model, requests[3].Model})
+	}
+	assertNoCouncilPlannerOrDebateRequests(t, requests)
 
 	var publicStatus AgentRunStatusResponse
 	if err := json.Unmarshal([]byte(publicStatusJSON), &publicStatus); err != nil {
@@ -182,6 +196,132 @@ WHERE id = ?
 	if assistant.AgentResultUsage == nil {
 		t.Fatalf("expected persisted result usage")
 	}
+}
+
+func TestExecuteAgentRunMarksGroundedSourceDegradedBelowReadableTarget(t *testing.T) {
+	requests := make([]openrouter.StreamRequest, 0, 3)
+	handler, db := newTestHandler(t, councilTestStreamer{onRequest: func(req openrouter.StreamRequest) {
+		requests = append(requests, req)
+	}})
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler.cfg.CouncilTargetReadableSourcesPerModel = 15
+	handler.cfg.CouncilSearchResultsPerQuery = 15
+	handler.cfg.BraveMonthlyQueryLimit = 200
+	handler.cfg.BraveMonthlyQueryReserve = 0
+	handler.grounding = stubGrounder{results: councilSearchResults(15)}
+	handler.researchReader = stubResearchReader{responses: councilReadResults(7)}
+
+	user := session.User{ID: "user-1"}
+	seedUser(t, db, user.ID, "user1@example.com")
+	seedModel(t, db, "source-a")
+	seedModel(t, db, "fusion-model")
+
+	conversation, err := handler.insertConversation(context.Background(), user.ID, "Council degraded")
+	if err != nil {
+		t.Fatalf("insert conversation: %v", err)
+	}
+	if err := handler.insertMessage(context.Background(), user.ID, conversation.ID, "user", "What changed recently?", "", true, false, "agent"); err != nil {
+		t.Fatalf("insert user message: %v", err)
+	}
+
+	var userMessageID string
+	if err := db.QueryRow(`SELECT id FROM messages WHERE conversation_id = ? AND role = 'user' LIMIT 1`, conversation.ID).Scan(&userMessageID); err != nil {
+		t.Fatalf("load user message id: %v", err)
+	}
+	assistantMessageID, err := handler.insertMessageWithCitations(
+		context.Background(),
+		user.ID,
+		conversation.ID,
+		"assistant",
+		"",
+		"",
+		"fusion-model",
+		true,
+		false,
+		"agent",
+		nil,
+		newThinkingTraceCollector().Snapshot(),
+		nil,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("insert assistant message: %v", err)
+	}
+
+	configJSON, _ := json.Marshal(CouncilRunConfig{
+		SourceModels: []CouncilSourceSpec{{ModelID: "source-a"}},
+		FusionModel:  CouncilSourceSpec{ModelID: "fusion-model"},
+		Grounding:    true,
+	})
+
+	runID := uuid.NewString()
+	if err := handler.insertAgentRun(context.Background(), agentRunRecord{
+		ID:                 runID,
+		UserID:             user.ID,
+		ConversationID:     conversation.ID,
+		UserMessageID:      userMessageID,
+		AssistantMessageID: assistantMessageID,
+		ModelID:            "source-a",
+		Status:             "queued",
+		SearchBudget:       1,
+		WorkflowType:       "council_fusion",
+		FusionModelID:      "fusion-model",
+		GroundingEnabled:   true,
+		CouncilConfigJSON:  string(configJSON),
+	}); err != nil {
+		t.Fatalf("insert agent run: %v", err)
+	}
+
+	if err := handler.executeAgentRun(context.Background(), runID); err != nil {
+		t.Fatalf("execute agent run: %v", err)
+	}
+
+	var sourceResultsJSON, finalResultJSON, publicStatusJSON string
+	if err := db.QueryRow(`
+SELECT COALESCE(source_results_json, ''), COALESCE(fusion_result_json, ''), COALESCE(public_status_json, '')
+FROM agent_runs
+WHERE id = ?
+`, runID).Scan(&sourceResultsJSON, &finalResultJSON, &publicStatusJSON); err != nil {
+		t.Fatalf("load council payloads: %v", err)
+	}
+
+	var sources []CouncilSourceResult
+	if err := json.Unmarshal([]byte(sourceResultsJSON), &sources); err != nil {
+		t.Fatalf("unmarshal source results: %v", err)
+	}
+	if len(sources) != 1 {
+		t.Fatalf("expected 1 source result, got %d", len(sources))
+	}
+	if sources[0].Status != "degraded" {
+		t.Fatalf("expected degraded source status, got %q", sources[0].Status)
+	}
+	if sources[0].SearchQueries != 1 {
+		t.Fatalf("expected one Brave query, got %d", sources[0].SearchQueries)
+	}
+	if sources[0].ReadableSources != 7 {
+		t.Fatalf("expected 7 readable sources, got %d", sources[0].ReadableSources)
+	}
+	if len(sources[0].Warnings) == 0 {
+		t.Fatalf("expected degraded source warning, got none")
+	}
+
+	var finalResult CouncilFinalResult
+	if err := json.Unmarshal([]byte(finalResultJSON), &finalResult); err != nil {
+		t.Fatalf("unmarshal final result: %v", err)
+	}
+	if !strings.Contains(finalResult.Response, "Warning: evidence quality was below target") {
+		t.Fatalf("expected degraded evidence warning in final result, got %q", finalResult.Response)
+	}
+
+	var publicStatus AgentRunStatusResponse
+	if err := json.Unmarshal([]byte(publicStatusJSON), &publicStatus); err != nil {
+		t.Fatalf("unmarshal public status: %v", err)
+	}
+	if publicStatus.DegradedSources != 1 || publicStatus.CompletedSources != 0 || publicStatus.FailedSources != 0 {
+		t.Fatalf("unexpected source counters: %+v", publicStatus)
+	}
+	assertNoCouncilPlannerOrDebateRequests(t, requests)
 }
 
 func TestChatMessagesCouncilRespectsUngroundedRequest(t *testing.T) {
@@ -328,9 +468,14 @@ VALUES (?, ?, ?, 'assistant', 'Final council answer', 'fusion-model', 1, 0, 'age
 	}
 }
 
-type councilTestStreamer struct{}
+type councilTestStreamer struct {
+	onRequest func(openrouter.StreamRequest)
+}
 
-func (councilTestStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, _ func(string) error, onUsage func(openrouter.Usage) error) error {
+func (s councilTestStreamer) StreamChatCompletion(_ context.Context, req openrouter.StreamRequest, onStart func() error, onDelta func(string) error, _ func(string) error, onUsage func(openrouter.Usage) error) error {
+	if s.onRequest != nil {
+		s.onRequest(req)
+	}
 	if onStart != nil {
 		if err := onStart(); err != nil {
 			return err
@@ -339,21 +484,6 @@ func (councilTestStreamer) StreamChatCompletion(_ context.Context, req openroute
 	prompt := req.Messages[len(req.Messages)-1].Content
 	response := "Answer"
 	switch {
-	case len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "You are a research planner."):
-		response = `{"nextAction":"search_more","queries":["official council source"],"coverageGaps":["Need more readable sources"],"targetSourceTypes":["official docs"],"confidence":0.21,"reason":"Need more evidence."}`
-	case len(req.Messages) > 0 && req.Messages[0].Content == "You are a structured JSON generator.":
-		roleName := "Agent"
-		switch {
-		case strings.Contains(prompt, "You are Scout."):
-			roleName = "Scout"
-		case strings.Contains(prompt, "You are Skeptic."):
-			roleName = "Skeptic"
-		case strings.Contains(prompt, "You are Verifier."):
-			roleName = "Verifier"
-		case strings.Contains(prompt, "You are User Advocate."):
-			roleName = "User Advocate"
-		}
-		response = fmt.Sprintf(`{"role":%q,"summary":%q,"objections":["Check caveats"],"confidence":0.72,"evidenceIds":[1]}`, roleName, roleName+" summary")
 	case len(req.Messages) > 0 && strings.Contains(req.Messages[0].Content, "You are an analytical AI."):
 		response = `{"agreement":[{"point":"Shared point","sourceModels":["source-a","source-b"]}],"keyDifferences":[],"partialCoverage":[],"uniqueInsights":[],"blindSpots":[]}`
 	case strings.Contains(prompt, "Write the best possible final answer for the user by fusing"):
@@ -377,6 +507,22 @@ func (councilTestStreamer) StreamChatCompletion(_ context.Context, req openroute
 
 func (councilTestStreamer) GetGeneration(context.Context, string) (openrouter.Generation, error) {
 	return openrouter.Generation{}, fmt.Errorf("not implemented")
+}
+
+func assertNoCouncilPlannerOrDebateRequests(t *testing.T, requests []openrouter.StreamRequest) {
+	t.Helper()
+	for _, req := range requests {
+		if len(req.Messages) == 0 {
+			continue
+		}
+		system := strings.TrimSpace(req.Messages[0].Content)
+		if strings.Contains(system, "You are a research planner.") {
+			t.Fatalf("unexpected planner request during council source pass: %+v", req)
+		}
+		if system == "You are a structured JSON generator." {
+			t.Fatalf("unexpected role-debate request during council source pass: %+v", req)
+		}
+	}
 }
 
 func councilSearchResults(count int) []brave.SearchResult {

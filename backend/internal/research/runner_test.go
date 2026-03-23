@@ -3,6 +3,8 @@ package research
 import (
 	"context"
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +21,41 @@ func TestBuildPassQueriesRespectsBounds(t *testing.T) {
 	if len(queries) != 5 {
 		t.Fatalf("expected exact pass count of 5, got %d", len(queries))
 	}
+}
+
+func TestBuildSingleQueryUsesDeterministicHeuristics(t *testing.T) {
+	currentYear := strconv.Itoa(time.Now().UTC().Year())
+
+	t.Run("time sensitive", func(t *testing.T) {
+		query := BuildSingleQuery("What is the latest Go release?", true)
+		if !strings.Contains(query, "latest") || !strings.Contains(query, "official") || !strings.Contains(query, currentYear) {
+			t.Fatalf("expected recency-aware query, got %q", query)
+		}
+	})
+
+	t.Run("comparison", func(t *testing.T) {
+		query := BuildSingleQuery("Postgres vs MySQL for analytics", false)
+		if !strings.Contains(query, "comparison") || !strings.Contains(query, "pros") || !strings.Contains(query, "cons") {
+			t.Fatalf("expected comparison-oriented query, got %q", query)
+		}
+	})
+
+	t.Run("how to", func(t *testing.T) {
+		query := BuildSingleQuery("How to deploy a Bun app to Cloud Run", false)
+		if !strings.Contains(query, "best practices") || !strings.Contains(query, "official") {
+			t.Fatalf("expected how-to query, got %q", query)
+		}
+	})
+
+	t.Run("long prompt is capped", func(t *testing.T) {
+		query := BuildSingleQuery(strings.Repeat("very detailed prompt ", 40), false)
+		if len(strings.Fields(query)) > singleQueryMaxWords {
+			t.Fatalf("expected at most %d words, got %d (%q)", singleQueryMaxWords, len(strings.Fields(query)), query)
+		}
+		if !strings.Contains(query, "official") {
+			t.Fatalf("expected capped query to preserve suffixes, got %q", query)
+		}
+	})
 }
 
 func TestRunnerDedupesAndRanksCitations(t *testing.T) {

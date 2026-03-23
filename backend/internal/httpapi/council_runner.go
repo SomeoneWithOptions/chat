@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -214,8 +213,15 @@ func (h Handler) runCouncilSourceModel(
 	history []openrouter.Message,
 	searchCoordinator *councilGroundingCoordinator,
 ) (*CouncilSourceResult, error) {
+	sourceCtx := ctx
+	cancel := func() {}
+	if h.cfg.CouncilTimeoutSeconds > 0 {
+		sourceCtx, cancel = context.WithTimeout(ctx, time.Duration(h.cfg.CouncilTimeoutSeconds)*time.Second)
+	}
+	defer cancel()
+
 	if !grounding {
-		answer, reasoningContent, usage, err := h.runAgentSynthesis(ctx, spec.ModelID, spec.ReasoningEffort, prompt, history, nil, nil)
+		answer, reasoningContent, usage, err := h.runAgentSynthesis(sourceCtx, spec.ModelID, spec.ReasoningEffort, prompt, history, nil, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -227,47 +233,30 @@ func (h Handler) runCouncilSourceModel(
 		}, nil
 	}
 
-	cfg := h.buildResearchConfig(research.ModeAgent)
-	cfg.MinSearchQueries = h.cfg.CouncilMaxSearchQueriesPerModel
-	cfg.MaxSearchQueries = h.cfg.CouncilMaxSearchQueriesPerModel
-	cfg.MaxSourcesRead = h.cfg.CouncilTargetReadableSourcesPerModel
-	cfg.SearchResultsPerQ = h.cfg.CouncilSearchResultsPerQuery
-	cfg.Timeout = time.Duration(h.cfg.CouncilTimeoutSeconds) * time.Second
-
-	plannerResponder := newOpenRouterPlannerResponder(h.openrouter, spec.ModelID, plannerReasoningEffort(spec.ReasoningEffort))
-	planner := research.NewJSONPlanner(plannerResponder)
-	orchestrator := research.NewOrchestrator(searchCoordinator, planner, h.researchReader, cfg)
-
-	result, err := orchestrator.Run(ctx, prompt, timeSensitive, func(progress research.Progress) {})
-	if err != nil && !errors.Is(err, context.Canceled) && !errors.Is(err, context.DeadlineExceeded) {
-		log.Printf("council source model research failed: %v", err)
+	groundingResult, err := h.runCouncilSinglePassGrounding(sourceCtx, prompt, timeSensitive, searchCoordinator)
+	if err != nil {
+		return nil, err
 	}
 
 	status := "complete"
-	if result.SourcesRead < h.cfg.CouncilTargetReadableSourcesPerModel {
+	if groundingResult.ReadableSources < h.cfg.CouncilTargetReadableSourcesPerModel {
 		status = "degraded"
 	}
 
-	citations := convertResearchCitations(result.Citations, h.cfg.ResearchMaxCitationsDeep)
-	roles, roleErr := h.runAgentRoleDebate(ctx, spec.ModelID, spec.ReasoningEffort, prompt, citations, nil)
-	if roleErr != nil {
-		return nil, errors.New("agent debate failed")
-	}
-
-	answer, reasoningContent, usage, synthErr := h.runAgentSynthesis(ctx, spec.ModelID, spec.ReasoningEffort, prompt, history, citations, roles)
+	answer, reasoningContent, usage, synthErr := h.runAgentSynthesis(sourceCtx, spec.ModelID, spec.ReasoningEffort, prompt, history, groundingResult.Citations, nil)
 	if synthErr != nil {
-		return nil, errors.New("agent synthesis failed")
+		return nil, fmt.Errorf("source synthesis failed: %w", synthErr)
 	}
 
 	return &CouncilSourceResult{
 		Status:           status,
 		Response:         answer,
 		ReasoningContent: reasoningContent,
-		Citations:        citations,
+		Citations:        groundingResult.Citations,
 		Usage:            convertOpenRouterUsageToResponse(usage),
-		SearchQueries:    result.SearchQueries,
-		ReadableSources:  result.SourcesRead,
-		Warnings:         result.Warnings,
+		SearchQueries:    groundingResult.SearchQueries,
+		ReadableSources:  groundingResult.ReadableSources,
+		Warnings:         groundingResult.Warnings,
 	}, nil
 }
 

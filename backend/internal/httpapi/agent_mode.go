@@ -516,7 +516,11 @@ func (h Handler) runRolePrompt(ctx context.Context, modelID, reasoningEffort, qu
 
 func (h Handler) runAgentSynthesis(ctx context.Context, modelID, reasoningEffort, question string, history []openrouter.Message, citations []citationResponse, roles []agentRoleResult) (string, string, *openrouter.Usage, error) {
 	var prompt strings.Builder
-	prompt.WriteString("Write the best possible answer for the user using the cited evidence and the role summaries.\n")
+	prompt.WriteString("Write the best possible answer for the user using the cited evidence")
+	if len(roles) > 0 {
+		prompt.WriteString(" and the role summaries")
+	}
+	prompt.WriteString(".\n")
 	prompt.WriteString("Rules:\n")
 	prompt.WriteString("- Use citations like [1], [2].\n")
 	prompt.WriteString("- Be explicit about uncertainty.\n")
@@ -525,17 +529,19 @@ func (h Handler) runAgentSynthesis(ctx context.Context, modelID, reasoningEffort
 	prompt.WriteString(question)
 	prompt.WriteString("\n\nEvidence:\n")
 	prompt.WriteString(buildDeepResearchEvidencePrompt(citations, isTimeSensitivePrompt(question)))
-	prompt.WriteString("\nRole summaries:\n")
-	for _, role := range roles {
-		prompt.WriteString("- ")
-		prompt.WriteString(role.Role)
-		prompt.WriteString(": ")
-		prompt.WriteString(role.Summary)
-		if len(role.Objections) > 0 {
-			prompt.WriteString(" Objections: ")
-			prompt.WriteString(strings.Join(role.Objections, "; "))
+	if len(roles) > 0 {
+		prompt.WriteString("\nRole summaries:\n")
+		for _, role := range roles {
+			prompt.WriteString("- ")
+			prompt.WriteString(role.Role)
+			prompt.WriteString(": ")
+			prompt.WriteString(role.Summary)
+			if len(role.Objections) > 0 {
+				prompt.WriteString(" Objections: ")
+				prompt.WriteString(strings.Join(role.Objections, "; "))
+			}
+			prompt.WriteString("\n")
 		}
-		prompt.WriteString("\n")
 	}
 
 	messages := []openrouter.Message{

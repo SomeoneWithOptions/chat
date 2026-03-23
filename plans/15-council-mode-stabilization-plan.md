@@ -6,7 +6,7 @@ Ship a council mode that is actually correct in production:
 
 1. council runs execute the council workflow, not the legacy single-agent workflow
 2. source models can run sequentially
-3. grounded source models aim for at least `15` readable sources each
+3. grounded source models aim for at least `15` readable sources each from a single Brave search pass
 4. the user sees simple, minimal progress information
 5. reloads and polling preserve council state correctly
 6. the feature is covered by backend and frontend tests
@@ -53,12 +53,9 @@ Parallelism can be reconsidered only after this path is stable and tested.
 ### Search strategy
 
 - Brave requests stay globally serialized per council run.
-- Start with `count=15` per query.
-- Continue issuing follow-up queries for the current source model until one of these happens:
-  - `15` readable sources are reached
-  - the per-model query cap is reached
-  - the run times out
-  - search budget is exhausted
+- Each grounded source model gets exactly one Brave search pass with `count=15`.
+- The returned results are read once, then the source model produces exactly one grounded response before the runner moves to the next selected model.
+- If fewer than `15` readable sources are recovered from that single pass, the source model should complete as `degraded` rather than retrying with follow-up Brave searches.
 
 ### User-facing output
 
@@ -114,23 +111,21 @@ Acceptance criteria:
 - progress is stable and replayable
 - no concurrent writes are needed for council state
 
-### Phase 3 - Enforce the 15-readable-source grounding contract
+### Phase 3 - Enforce the 15-readable-source single-pass grounding contract
 
 Backend changes:
 
 - introduce council-specific config values for:
   - target readable sources per model
   - search results per query
-  - max search queries per model
   - timeout
-- make the source-model loop continue research until `15` readable sources or a clear stop condition
+- make each grounded source-model pass perform one Brave search, one read pass, and one model response
 - mark source runs as `degraded` when they answer below target
 
 Recommended defaults:
 
 - `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL=15`
 - `COUNCIL_SEARCH_RESULTS_PER_QUERY=15`
-- `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL=4`
 - `COUNCIL_TIMEOUT_SECONDS=1200`
 
 Acceptance criteria:

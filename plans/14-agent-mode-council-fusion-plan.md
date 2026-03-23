@@ -37,25 +37,21 @@ These settings and behaviors are the recommended defaults for the first implemen
 
 - Grounding can be turned on or off for a council run
 - If grounding is on, every source model gets its own research pass and produces its own citations
-- Every grounded source model should target at least `15 readable web sources`
+- Every grounded source model should target at least `15 readable web sources` from a single Brave search pass
 - "Readable web sources" means successfully fetched and extracted pages, not just Brave snippets
-- If a source model cannot reach 15 readable sources within budget, it should complete as `degraded`, not fail automatically
+- If a source model cannot reach 15 readable sources from that single pass, it should complete as `degraded`, not fail automatically
 
 ### Brave search strategy
 
 - Brave search requests should be globally serialized across the entire council run
 - Minimum spacing between Brave requests: `1100ms`
 - Each Brave request should ask for `15` search results
-- A grounded source model should continue issuing follow-up Brave requests until it either:
-  - reaches 15 readable web sources,
-  - hits its per-model query cap,
-  - or the run times out
+- A grounded source model should do exactly one Brave request, read those returned sources once, then produce one grounded answer before the runner advances to the next selected model
 
 ### Recommended council grounding budgets
 
 - `COUNCIL_TARGET_READABLE_SOURCES_PER_MODEL=15`
 - `COUNCIL_SEARCH_RESULTS_PER_QUERY=15`
-- `COUNCIL_MAX_SEARCH_QUERIES_PER_MODEL=3`
 - `COUNCIL_MAX_BRAVE_SEARCHES_IN_FLIGHT=1`
 - `COUNCIL_MAX_PAGE_READS_IN_FLIGHT=6`
 - `COUNCIL_TIMEOUT_SECONDS=1200`
@@ -96,7 +92,7 @@ Important current grounding details:
 - the current Brave client already supports requesting multiple results in one request with the `count` parameter
 - current agent mode does not guarantee 15 readable web sources per model because it is not a per-model council workflow and the orchestrator currently optimizes for bounded evidence, not a hard per-model readable-source target
 
-That means the new council mode can and should reuse the existing Brave pacing pattern, but it needs a new orchestration layer to guarantee the council-specific source collection behavior.
+That means the new council mode can and should reuse the existing Brave pacing pattern, but it needs a council-specific single-pass orchestration layer instead of the legacy iterative research loop.
 
 ---
 
