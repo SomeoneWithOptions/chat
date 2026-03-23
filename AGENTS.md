@@ -6,7 +6,7 @@
 - Database: Turso (LibSQL/SQLite).
 - Database name: `chat-prod` (production). We use the production database for local development.
 - Local DB operations: Use `turso` CLI (already authenticated on this machine).
-- GCP operations: Use the local `gcloud` CLI (already authenticated) to look up information, create resources, and manage deployments on GCP infrastructure.
+- GCP operations: Use the local `gcloud` CLI on the project chat-486915 (already authenticated) to look up information, create resources, and manage deployments on GCP infrastructure.
 - Frontend domain: `https://chat.sanetomore.com`.
 - Backend domain: `https://api.chat.sanetomore.com`.
 
