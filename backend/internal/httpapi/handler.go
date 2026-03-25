@@ -143,6 +143,10 @@ type listModelsResponse struct {
 	ReasoningPresets []reasoningPresetResponse `json:"reasoningPresets"`
 }
 
+type rowScanner interface {
+	Scan(dest ...any) error
+}
+
 type syncModelsResponse struct {
 	Synced int `json:"synced"`
 }
@@ -1261,10 +1265,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 				ConversationID: conversationID,
 				SourceModels:   req.SourceModels,
 				FusionModel:    *req.FusionModel,
-				Message:        req.Message,
-				Prompt:         userPrompt,
 				Grounding:      grounding,
-				History:        historyMessages,
 			})
 			return
 		}
@@ -1275,10 +1276,7 @@ func (h Handler) ChatMessages(w http.ResponseWriter, r *http.Request) {
 			ConversationID:  conversationID,
 			ModelID:         modelID,
 			ReasoningEffort: reasoningEffort,
-			Message:         req.Message,
-			Prompt:          userPrompt,
 			Grounding:       true,
-			History:         historyMessages,
 		})
 		return
 	}
@@ -2051,32 +2049,14 @@ func (h Handler) persistModelSelection(ctx context.Context, userID, mode, modelI
 		return modelPreferencesResponse{}, err
 	}
 
-	var lastUsedModelID sql.NullString
-	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedFusionModeModelID sql.NullString
-	var lastUsedFusionSourceModelIDsJSON sql.NullString
-	var lastUsedFusionModelID sql.NullString
-	err = tx.QueryRowContext(ctx, `
+	preferences, err := scanModelPreferencesRow(tx.QueryRowContext(ctx, `
 SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id, last_used_fusion_source_model_ids_json, last_used_fusion_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID, &lastUsedFusionSourceModelIDsJSON, &lastUsedFusionModelID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+`, userID))
+	if err != nil {
 		return modelPreferencesResponse{}, err
-	}
-
-	var lastUsedFusionSourceModelIDs []string
-	if lastUsedFusionSourceModelIDsJSON.Valid && lastUsedFusionSourceModelIDsJSON.String != "" {
-		_ = json.Unmarshal([]byte(lastUsedFusionSourceModelIDsJSON.String), &lastUsedFusionSourceModelIDs)
-	}
-
-	preferences := modelPreferencesResponse{
-		LastUsedModelID:              strings.TrimSpace(lastUsedModelID.String),
-		LastUsedDeepResearchModelID:  strings.TrimSpace(lastUsedDeepResearchModelID.String),
-		LastUsedFusionModeModelID:    strings.TrimSpace(lastUsedFusionModeModelID.String),
-		LastUsedFusionSourceModelIDs: lastUsedFusionSourceModelIDs,
-		LastUsedFusionModelID:        strings.TrimSpace(lastUsedFusionModelID.String),
 	}
 
 	switch mode {
@@ -2138,32 +2118,14 @@ func (h Handler) persistFusionModelSelection(ctx context.Context, userID string,
 		return modelPreferencesResponse{}, err
 	}
 
-	var lastUsedModelID sql.NullString
-	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedFusionModeModelID sql.NullString
-	var lastUsedFusionSourceModelIDsJSON sql.NullString
-	var lastUsedFusionModelID sql.NullString
-	err = tx.QueryRowContext(ctx, `
+	preferences, err := scanModelPreferencesRow(tx.QueryRowContext(ctx, `
 SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id, last_used_fusion_source_model_ids_json, last_used_fusion_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID, &lastUsedFusionSourceModelIDsJSON, &lastUsedFusionModelID)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+`, userID))
+	if err != nil {
 		return modelPreferencesResponse{}, err
-	}
-
-	var lastUsedFusionSourceModelIDs []string
-	if lastUsedFusionSourceModelIDsJSON.Valid && lastUsedFusionSourceModelIDsJSON.String != "" {
-		_ = json.Unmarshal([]byte(lastUsedFusionSourceModelIDsJSON.String), &lastUsedFusionSourceModelIDs)
-	}
-
-	preferences := modelPreferencesResponse{
-		LastUsedModelID:              strings.TrimSpace(lastUsedModelID.String),
-		LastUsedDeepResearchModelID:  strings.TrimSpace(lastUsedDeepResearchModelID.String),
-		LastUsedFusionModeModelID:    strings.TrimSpace(lastUsedFusionModeModelID.String),
-		LastUsedFusionSourceModelIDs: lastUsedFusionSourceModelIDs,
-		LastUsedFusionModelID:        strings.TrimSpace(lastUsedFusionModelID.String),
 	}
 
 	preferences.LastUsedFusionSourceModelIDs = sourceModelIDs
@@ -2279,15 +2241,21 @@ ORDER BY f.created_at DESC, f.model_id ASC;
 }
 
 func (h Handler) readUserModelPreferences(ctx context.Context, userID string) (modelPreferencesResponse, error) {
-	var lastUsedModelID sql.NullString
-	var lastUsedDeepResearchModelID sql.NullString
-	var lastUsedFusionModeModelID sql.NullString
-	err := h.db.QueryRowContext(ctx, `
-SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id
+	return scanModelPreferencesRow(h.db.QueryRowContext(ctx, `
+SELECT last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id, last_used_fusion_source_model_ids_json, last_used_fusion_model_id
 FROM user_model_preferences
 WHERE user_id = ?
 LIMIT 1;
-`, userID).Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID)
+`, userID))
+}
+
+func scanModelPreferencesRow(row rowScanner) (modelPreferencesResponse, error) {
+	var lastUsedModelID sql.NullString
+	var lastUsedDeepResearchModelID sql.NullString
+	var lastUsedFusionModeModelID sql.NullString
+	var lastUsedFusionSourceModelIDsJSON sql.NullString
+	var lastUsedFusionModelID sql.NullString
+	err := row.Scan(&lastUsedModelID, &lastUsedDeepResearchModelID, &lastUsedFusionModeModelID, &lastUsedFusionSourceModelIDsJSON, &lastUsedFusionModelID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return modelPreferencesResponse{}, nil
 	}
@@ -2295,10 +2263,17 @@ LIMIT 1;
 		return modelPreferencesResponse{}, err
 	}
 
+	var lastUsedFusionSourceModelIDs []string
+	if lastUsedFusionSourceModelIDsJSON.Valid && lastUsedFusionSourceModelIDsJSON.String != "" {
+		_ = json.Unmarshal([]byte(lastUsedFusionSourceModelIDsJSON.String), &lastUsedFusionSourceModelIDs)
+	}
+
 	return modelPreferencesResponse{
-		LastUsedModelID:             strings.TrimSpace(lastUsedModelID.String),
-		LastUsedDeepResearchModelID: strings.TrimSpace(lastUsedDeepResearchModelID.String),
-		LastUsedFusionModeModelID:   strings.TrimSpace(lastUsedFusionModeModelID.String),
+		LastUsedModelID:              strings.TrimSpace(lastUsedModelID.String),
+		LastUsedDeepResearchModelID:  strings.TrimSpace(lastUsedDeepResearchModelID.String),
+		LastUsedFusionModeModelID:    strings.TrimSpace(lastUsedFusionModeModelID.String),
+		LastUsedFusionSourceModelIDs: lastUsedFusionSourceModelIDs,
+		LastUsedFusionModelID:        strings.TrimSpace(lastUsedFusionModelID.String),
 	}, nil
 }
 
@@ -2595,6 +2570,7 @@ func normalizeModelPreferences(preferences modelPreferencesResponse, available m
 	if preferences.LastUsedFusionModeModelID == "" {
 		preferences.LastUsedFusionModeModelID = preferences.LastUsedModelID
 	}
+	preferences.LastUsedFusionSourceModelIDs = filterKnownModelIDs(preferences.LastUsedFusionSourceModelIDs, available)
 	if _, ok := available[preferences.LastUsedFusionModelID]; !ok {
 		preferences.LastUsedFusionModelID = preferences.LastUsedFusionModeModelID
 	}

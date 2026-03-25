@@ -29,10 +29,7 @@ type multiModelFusionQueuedStreamInput struct {
 	ConversationID string
 	SourceModels   []FusionSourceSpec
 	FusionModel    FusionSourceSpec
-	Message        string
-	Prompt         string
 	Grounding      bool
-	History        []openrouter.Message
 }
 
 type fusionQueuedStreamInput struct {
@@ -41,10 +38,7 @@ type fusionQueuedStreamInput struct {
 	ConversationID  string
 	ModelID         string
 	ReasoningEffort string
-	Message         string
-	Prompt          string
 	Grounding       bool
-	History         []openrouter.Message
 }
 
 type fusionRunRecord struct {
@@ -64,7 +58,7 @@ type fusionRunRecord struct {
 	SourceModelIDsJSON string
 	FusionModelID      string
 	GroundingEnabled   bool
-	FusionConfigJSON  string
+	FusionConfigJSON   string
 }
 
 type fusionPerspectiveDefinition struct {
@@ -1184,7 +1178,7 @@ func (h Handler) streamMultiModelFusionQueuedResponse(ctx context.Context, w htt
 		"modelId":        input.FusionModel.ModelID,
 		"conversationId": input.ConversationID,
 		"userMessageId":  input.UserMessageID,
-		"fusionRunId":     runID,
+		"fusionRunId":    runID,
 	}
 	if input.FusionModel.ReasoningEffort != "" {
 		metadataEvent["reasoningEffort"] = input.FusionModel.ReasoningEffort
@@ -1292,7 +1286,7 @@ func (h Handler) streamMultiModelFusionQueuedResponse(ctx context.Context, w htt
 		SourceModelIDsJSON: string(sourceModelIDsJSON),
 		FusionModelID:      input.FusionModel.ModelID,
 		GroundingEnabled:   input.Grounding,
-		FusionConfigJSON:  string(configJSON),
+		FusionConfigJSON:   string(configJSON),
 	}); err != nil {
 		_ = writeSSEEvent(w, map[string]any{"type": "error", "message": "failed to queue fusion run"})
 		_ = writeSSEEvent(w, map[string]any{"type": "done"})

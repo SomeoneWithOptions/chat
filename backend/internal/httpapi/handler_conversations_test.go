@@ -391,9 +391,16 @@ VALUES (?, ?);
 	}
 
 	if _, err := db.Exec(`
-INSERT INTO user_model_preferences (user_id, last_used_model_id, last_used_deep_research_model_id, last_used_fusion_mode_model_id)
-VALUES (?, ?, ?, ?);
-`, user.ID, "anthropic/claude-3.5-haiku", "openrouter/free", "openrouter/free"); err != nil {
+INSERT INTO user_model_preferences (
+  user_id,
+  last_used_model_id,
+  last_used_deep_research_model_id,
+  last_used_fusion_mode_model_id,
+  last_used_fusion_source_model_ids_json,
+  last_used_fusion_model_id
+)
+VALUES (?, ?, ?, ?, ?, ?);
+`, user.ID, "anthropic/claude-3.5-haiku", "openrouter/free", "openrouter/free", `["anthropic/claude-3.5-haiku","missing-model"]`, "anthropic/claude-3.5-haiku"); err != nil {
 		t.Fatalf("seed preferences: %v", err)
 	}
 
@@ -446,6 +453,12 @@ VALUES (?, ?, ?, ?);
 	}
 	if payload.Preferences.LastUsedDeepResearchModelID != "openrouter/free" {
 		t.Fatalf("unexpected last used deep research model id: %q", payload.Preferences.LastUsedDeepResearchModelID)
+	}
+	if len(payload.Preferences.LastUsedFusionSourceModelIDs) != 1 || payload.Preferences.LastUsedFusionSourceModelIDs[0] != "anthropic/claude-3.5-haiku" {
+		t.Fatalf("unexpected last used fusion source model ids: %+v", payload.Preferences.LastUsedFusionSourceModelIDs)
+	}
+	if payload.Preferences.LastUsedFusionModelID != "anthropic/claude-3.5-haiku" {
+		t.Fatalf("unexpected last used fusion model id: %q", payload.Preferences.LastUsedFusionModelID)
 	}
 }
 
@@ -3212,12 +3225,12 @@ func newTestHandlerWithFileStore(t *testing.T, streamer chatStreamer, fileStore 
 		ResearchSourceMaxBytes:     1_500_000,
 		ResearchMaxCitationsChat:   8,
 		ResearchMaxCitationsDeep:   12,
-		FusionModeEnabled:           true,
-		FusionMinSearchQueries:      20,
-		FusionSoftMaxSearchQueries:  60,
-		FusionHardMaxSearchQueries:  200,
-		FusionMaxSourcesRead:        80,
-		FusionTimeoutSeconds:        1200,
+		FusionModeEnabled:          true,
+		FusionMinSearchQueries:     20,
+		FusionSoftMaxSearchQueries: 60,
+		FusionHardMaxSearchQueries: 200,
+		FusionMaxSourcesRead:       80,
+		FusionTimeoutSeconds:       1200,
 		BraveMonthlyQueryLimit:     2000,
 		BraveMonthlyQueryReserve:   200,
 	}
