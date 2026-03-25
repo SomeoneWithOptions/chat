@@ -75,7 +75,6 @@ func (o Orchestrator) Run(ctx context.Context, question string, timeSensitive bo
 		warning := "Grounding is unavailable for this response."
 		return OrchestratorResult{
 			Warnings:      []string{warning},
-			Warning:       warning,
 			StopReason:    StopReasonError,
 			SearchQueries: 0,
 		}, nil
@@ -395,9 +394,6 @@ func (o Orchestrator) resultWithStop(
 		Evidence:           ranked,
 		Warnings:           warnings,
 		StopReason:         stop,
-	}
-	if len(warnings) > 0 {
-		result.Warning = warnings[0]
 	}
 	if stop == "" {
 		result.StopReason = StopReasonBudgetExhausted

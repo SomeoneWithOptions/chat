@@ -91,7 +91,7 @@ func researchWarning(result research.OrchestratorResult) string {
 	if len(result.Warnings) > 0 {
 		return strings.TrimSpace(result.Warnings[0])
 	}
-	return strings.TrimSpace(result.Warning)
+	return ""
 }
 
 func convertResearchCitations(citations []research.Citation, max int) []citationResponse {

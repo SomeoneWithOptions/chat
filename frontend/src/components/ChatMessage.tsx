@@ -27,8 +27,8 @@ type MessageData = {
   usage?: Usage | null;
   responseMode?: "chat" | "deep_research" | "fusion";
   fusionSummaries?: FusionSummary[];
-  fusionSources?: import("../lib/api").FusionSourceResult[];
-  fusionAnalysis?: import("../lib/api").FusionAnalysis;
+  fusionSources?: FusionSourceResult[];
+  fusionAnalysis?: FusionAnalysis;
   fusionResultModelId?: string;
   fusionResultUsage?: Usage;
   fusionRunId?: string;

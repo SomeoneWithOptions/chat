@@ -804,14 +804,20 @@ ORDER BY m.created_at ASC, m.rowid ASC;
 			message.FusionSummaries = fusionSummaries
 		}
 		if fusionSourcesJSON.Valid && fusionSourcesJSON.String != "" {
-			_ = json.Unmarshal([]byte(fusionSourcesJSON.String), &message.FusionSources)
+			if err := json.Unmarshal([]byte(fusionSourcesJSON.String), &message.FusionSources); err != nil {
+				log.Printf("failed to decode fusion_sources for message %s: %v", message.ID, err)
+			}
 		}
 		if fusionAnalysisJSON.Valid && fusionAnalysisJSON.String != "" {
-			_ = json.Unmarshal([]byte(fusionAnalysisJSON.String), &message.FusionAnalysis)
+			if err := json.Unmarshal([]byte(fusionAnalysisJSON.String), &message.FusionAnalysis); err != nil {
+				log.Printf("failed to decode fusion_analysis for message %s: %v", message.ID, err)
+			}
 		}
 		message.FusionResultModelID = strings.TrimSpace(fusionResultModelID.String)
 		if fusionResultUsageJSON.Valid && fusionResultUsageJSON.String != "" {
-			_ = json.Unmarshal([]byte(fusionResultUsageJSON.String), &message.FusionResultUsage)
+			if err := json.Unmarshal([]byte(fusionResultUsageJSON.String), &message.FusionResultUsage); err != nil {
+				log.Printf("failed to decode fusion_result_usage for message %s: %v", message.ID, err)
+			}
 		} else if message.ResponseMode == "fusion" && message.FusionResultModelID != "" && message.Usage != nil {
 			usageCopy := *message.Usage
 			message.FusionResultUsage = &usageCopy
@@ -1007,11 +1013,11 @@ type FusionDifferenceGroup struct {
 }
 
 type FusionAnalysis struct {
-	Agreement       []FusionAnalysisItem    `json:"agreement"`
-	KeyDifferences  []FusionDifferenceGroup `json:"keyDifferences"`
-	PartialCoverage []FusionAnalysisItem    `json:"partialCoverage"`
-	UniqueInsights  []FusionAnalysisItem    `json:"uniqueInsights"`
-	BlindSpots      []FusionAnalysisItem    `json:"blindSpots"`
+	Agreement       []FusionAnalysisItem    `json:"agreement,omitempty"`
+	KeyDifferences  []FusionDifferenceGroup `json:"keyDifferences,omitempty"`
+	PartialCoverage []FusionAnalysisItem    `json:"partialCoverage,omitempty"`
+	UniqueInsights  []FusionAnalysisItem    `json:"uniqueInsights,omitempty"`
+	BlindSpots      []FusionAnalysisItem    `json:"blindSpots,omitempty"`
 }
 
 type FusionFinalResult struct {

@@ -103,6 +103,5 @@ type OrchestratorResult struct {
 	Citations          []Citation
 	Evidence           []Evidence
 	Warnings           []string
-	Warning            string
 	StopReason         StopReason
 }
