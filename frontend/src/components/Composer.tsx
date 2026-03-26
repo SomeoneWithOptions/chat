@@ -104,32 +104,38 @@ export default function Composer({
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  const canCompactForActiveFusionRun =
-    compactForActiveFusionRun && isMobileViewport;
+  useEffect(() => {
+    if (compactForActiveFusionRun && isMobileViewport) {
+      setIsActiveFusionRunCollapsed(true);
+    }
+  }, [compactForActiveFusionRun, isMobileViewport]);
 
   useEffect(() => {
-    if (canCompactForActiveFusionRun) {
-      setIsActiveFusionRunCollapsed(true);
-      return;
-    }
-
+    if (fusionMode && isMobileViewport) return;
     setIsActiveFusionRunCollapsed(false);
-  }, [canCompactForActiveFusionRun]);
+  }, [fusionMode, isMobileViewport]);
 
   const canSend = prompt.trim().length > 0 && !isStreaming && !uploadingAttachments && !sendDisabled;
-  const showCompactFusionBar =
-    canCompactForActiveFusionRun && isActiveFusionRunCollapsed;
+  const showCompactFusionBar = fusionMode && isMobileViewport && isActiveFusionRunCollapsed;
+  const showMobileFusionBanner =
+    fusionMode &&
+    isMobileViewport &&
+    (showCompactFusionBar || compactForActiveFusionRun);
   const selectedFusionModelName = selectedFusionModel
     ? models.find((model) => model.id === selectedFusionModel)?.name ||
       selectedFusionModel
     : null;
-  const fusionRunTitle = isStreaming ? 'Fusion queued' : 'Fusion in progress';
+  const fusionRunTitle = compactForActiveFusionRun
+    ? (isStreaming ? 'Fusion queued' : 'Fusion in progress')
+    : 'Fusion ready';
   const fusionRunDetail =
-    selectedSourceModels.length > 0
-      ? `${selectedSourceModels.length} source${selectedSourceModels.length === 1 ? '' : 's'}${selectedFusionModelName ? ` with ${selectedFusionModelName}` : ''}`
-      : selectedFusionModelName
-        ? `Using ${selectedFusionModelName}`
-        : 'Status updates are showing in the thread';
+    compactForActiveFusionRun
+      ? selectedSourceModels.length > 0
+        ? `${selectedSourceModels.length} source${selectedSourceModels.length === 1 ? '' : 's'}${selectedFusionModelName ? ` with ${selectedFusionModelName}` : ''}`
+        : selectedFusionModelName
+          ? `Using ${selectedFusionModelName}`
+          : 'Status updates are showing in the thread'
+      : 'Review the run or reopen controls';
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     const isMobile = window.innerWidth < 768;
@@ -166,7 +172,7 @@ export default function Composer({
           className="visually-hidden"
         />
 
-        {canCompactForActiveFusionRun && (
+        {showMobileFusionBanner && (
           <div className="composer-mobile-fusion-banner">
             <div className="composer-mobile-fusion-copy">
               <span className="composer-mobile-fusion-eyebrow">{fusionRunTitle}</span>

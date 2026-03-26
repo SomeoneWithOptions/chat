@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { type FormEvent, useState } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,9 +20,11 @@ function setViewportWidth(width: number) {
 function ComposerHarness({
   onSend,
   compactForActiveFusionRun = false,
+  fusionMode = false,
 }: {
   onSend: (event: FormEvent<HTMLFormElement>) => void;
   compactForActiveFusionRun?: boolean;
+  fusionMode?: boolean;
 }) {
   const [prompt, setPrompt] = useState('');
 
@@ -42,7 +44,7 @@ function ComposerHarness({
       onReasoningEffortChange={() => undefined}
       grounding
       deepResearch={false}
-      fusionMode={false}
+      fusionMode={fusionMode}
       groundingLocked={false}
       onToggleGrounding={() => undefined}
       onToggleDeepResearch={() => undefined}
@@ -129,10 +131,13 @@ describe('Composer keyboard behavior', () => {
       <ComposerHarness
         onSend={onSend}
         compactForActiveFusionRun
+        fusionMode
       />,
     );
 
-    expect(screen.queryByPlaceholderText('Ask anything...')).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Ask anything...')).not.toBeInTheDocument();
+    });
     expect(screen.getByRole('button', { name: 'Show controls' })).toBeInTheDocument();
     expect(screen.getByText('Fusion in progress')).toBeInTheDocument();
 
@@ -140,6 +145,38 @@ describe('Composer keyboard behavior', () => {
 
     expect(screen.getByPlaceholderText('Ask anything...')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Hide controls' })).toBeInTheDocument();
+  });
+
+  it('keeps mobile fusion controls collapsed after the run ends until the user reopens them', async () => {
+    setViewportWidth(375);
+    const onSend = vi.fn();
+
+    const { rerender } = render(
+      <ComposerHarness
+        onSend={onSend}
+        compactForActiveFusionRun
+        fusionMode
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Ask anything...')).not.toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: 'Show controls' })).toBeInTheDocument();
+
+    rerender(
+      <ComposerHarness
+        onSend={onSend}
+        compactForActiveFusionRun={false}
+        fusionMode
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('Ask anything...')).not.toBeInTheDocument();
+    });
+    expect(screen.getByText('Fusion ready')).toBeInTheDocument();
+    expect(screen.getByText('Review the run or reopen controls')).toBeInTheDocument();
   });
 
   it('keeps the full composer visible on desktop even during an active fusion run', () => {

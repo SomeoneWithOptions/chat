@@ -106,5 +106,5 @@ Expected response:
 - Fusion mode runs sequential source-model passes, then persists `Sources`, `Analysis`, and `Result` state so reloads and polling can reconstruct the full message.
 - Fusion mode may run grounded or ungrounded. Legacy single-model fusion runs remain grounded.
 - The initial SSE response only creates the placeholder assistant message and queue progress; the frontend then polls the queued run and conversation state until the assistant message settles.
-- On narrow mobile widths, an active fusion run collapses the composer into a compact status bar by default so queue and source progress have more vertical room; use `Show controls` to reopen the full composer while the run is active.
+- On narrow mobile widths, a fusion run collapses the composer into a compact status bar by default so queue, steps, and final response have more vertical room; the compact state stays in place after completion until the user taps `Show controls`.
 - Grounded fusion runs enforce Brave monthly reserve checks before starting and pace Brave searches through a shared DB-backed lease so multiple instances still respect the free-tier rate limit.
