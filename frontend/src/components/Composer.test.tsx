@@ -17,7 +17,13 @@ function setViewportWidth(width: number) {
   });
 }
 
-function ComposerHarness({ onSend }: { onSend: (event: FormEvent<HTMLFormElement>) => void }) {
+function ComposerHarness({
+  onSend,
+  compactForActiveFusionRun = false,
+}: {
+  onSend: (event: FormEvent<HTMLFormElement>) => void;
+  compactForActiveFusionRun?: boolean;
+}) {
   const [prompt, setPrompt] = useState('');
 
   return (
@@ -50,6 +56,20 @@ function ComposerHarness({ onSend }: { onSend: (event: FormEvent<HTMLFormElement
       streamWarning={null}
       onEnhance={() => undefined}
       enhanceDisabled={false}
+      compactForActiveFusionRun={compactForActiveFusionRun}
+      models={[
+        {
+          id: 'fusion-model',
+          name: 'OpenAI GPT-5.4',
+          provider: 'openai',
+          contextWindow: 128000,
+          promptPriceMicrosUsd: 0,
+          outputPriceMicrosUsd: 0,
+          supportsReasoning: true,
+          curated: true,
+        },
+      ]}
+      selectedFusionModel="fusion-model"
     />
   );
 }
@@ -98,5 +118,43 @@ describe('Composer keyboard behavior', () => {
 
     expect(onSend).not.toHaveBeenCalled();
     expect(textarea).toHaveValue('Mobile prompt\n');
+  });
+
+  it('collapses the composer for active mobile fusion runs and allows reopening controls', async () => {
+    setViewportWidth(375);
+    const onSend = vi.fn();
+    const user = userEvent.setup();
+
+    render(
+      <ComposerHarness
+        onSend={onSend}
+        compactForActiveFusionRun
+      />,
+    );
+
+    expect(screen.queryByPlaceholderText('Ask anything...')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show controls' })).toBeInTheDocument();
+    expect(screen.getByText('Fusion in progress')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Show controls' }));
+
+    expect(screen.getByPlaceholderText('Ask anything...')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Hide controls' })).toBeInTheDocument();
+  });
+
+  it('keeps the full composer visible on desktop even during an active fusion run', () => {
+    setViewportWidth(1024);
+    const onSend = vi.fn();
+
+    render(
+      <ComposerHarness
+        onSend={onSend}
+        compactForActiveFusionRun
+      />,
+    );
+
+    expect(screen.getByPlaceholderText('Ask anything...')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Show controls' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Hide controls' })).not.toBeInTheDocument();
   });
 });

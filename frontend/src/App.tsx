@@ -1815,6 +1815,7 @@ export default function App() {
           onSourceModelsChange={setSelectedSourceModels}
           selectedFusionModel={selectedFusionModel}
           onFusionModelChange={setSelectedFusionModel}
+          compactForActiveFusionRun={fusionMode && (isStreaming || hasRunningFusionMessage)}
         />
 
         {enhanceModalOpen && (

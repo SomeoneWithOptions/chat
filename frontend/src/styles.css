@@ -1889,6 +1889,78 @@ code {
   border: none;
 }
 
+.composer-mobile-fusion-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px 0;
+}
+
+.composer-mobile-fusion-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 2px;
+}
+
+.composer-mobile-fusion-eyebrow {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+
+.composer-mobile-fusion-title {
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.composer-mobile-fusion-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.composer-mobile-fusion-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--text-secondary);
+  font-family: var(--font-body);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--duration-fast) ease;
+}
+
+.composer-mobile-fusion-toggle:hover {
+  color: var(--text-primary);
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.composer-mobile-fusion-toggle-stop {
+  color: var(--danger);
+  border-color: rgba(224, 96, 96, 0.25);
+  background: rgba(224, 96, 96, 0.08);
+}
+
+.composer-mobile-fusion-toggle-stop:hover {
+  color: var(--danger);
+  border-color: rgba(224, 96, 96, 0.35);
+  background: rgba(224, 96, 96, 0.12);
+}
+
 .composer-reasoning-row {
   display: flex;
   align-items: center;
@@ -2542,6 +2614,15 @@ code {
     height: 100%;
     min-height: 36px;
   }
+
+  .composer-mobile-fusion-banner {
+    align-items: flex-start;
+  }
+
+  .composer-mobile-fusion-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
 }
 
 @media (min-width: 900px) {
@@ -2576,6 +2657,11 @@ code {
 
   html[data-keyboard-open] .composer-textarea {
     max-height: 100px;
+  }
+
+  .composer-mobile-fusion-banner {
+    padding-top: 14px;
+    padding-bottom: 2px;
   }
 }
 
