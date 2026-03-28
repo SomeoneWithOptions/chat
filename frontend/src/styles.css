@@ -3192,6 +3192,14 @@ code {
   line-height: 1.55;
 }
 
+.fusion-phase-indicator {
+  display: flex;
+  align-items: center;
+  padding: 12px 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+}
+
 .fusion-analysis-view {
   margin: 24px 0;
   background: var(--surface-secondary);

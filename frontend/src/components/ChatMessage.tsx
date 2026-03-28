@@ -204,6 +204,31 @@ function sourceStatusMeta(status: FusionSourceResult["status"]): {
   }
 }
 
+/**
+ * Determines the current post-source fusion phase so we can show a loading
+ * indicator while the backend runs analysis and synthesis.
+ *
+ * Returns "analyzing" | "synthesizing" | null.
+ */
+function fusionPostSourcePhase(
+  message: MessageData,
+): "analyzing" | "synthesizing" | null {
+  if (message.thinkingTrace?.status !== "running") return null;
+
+  const sources = message.fusionSources;
+  if (!sources || sources.length === 0) return null;
+
+  const allSourcesDone = sources.every(
+    (s) => s.status === "complete" || s.status === "degraded" || s.status === "failed",
+  );
+  if (!allSourcesDone) return null;
+
+  if (!message.fusionAnalysis) return "analyzing";
+  if (!message.fusionResultModelId && !message.content) return "synthesizing";
+
+  return null;
+}
+
 async function copyToClipboard(text: string): Promise<boolean> {
   if (!text) return false;
 
@@ -748,6 +773,25 @@ export default function ChatMessage({
               </div>
             </div>
           )}
+
+          {(() => {
+            const phase = fusionPostSourcePhase(message);
+            if (phase === "analyzing") {
+              return (
+                <div className="fusion-phase-indicator">
+                  <ThinkingStatusChip label="Analyzing responses" tone="running" animate />
+                </div>
+              );
+            }
+            if (phase === "synthesizing") {
+              return (
+                <div className="fusion-phase-indicator">
+                  <ThinkingStatusChip label="Writing final answer" tone="running" animate />
+                </div>
+              );
+            }
+            return null;
+          })()}
 
           {message.fusionAnalysis && (
             <FusionAnalysisView analysis={message.fusionAnalysis} />
